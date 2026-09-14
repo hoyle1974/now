@@ -68,7 +68,7 @@ def create_todo(todo:models.Todo):
     _create_todo(cur, todo)
     get_conn().commit()
 
-def delete_todo(todo_id: models.GenericId):
+def delete_todo(todo_id: models.TodoId):
     cur = get_conn().cursor()
     cur.execute("""
         DELETE FROM TODO_ITEMS where todo_id = ?
@@ -83,7 +83,7 @@ def update_todo(todo:models.Todo):
         """,(todo.title, todo.done, str(todo.todo_id)))
     get_conn().commit()
 
-def update_parent_id(todo:models.Todo, parent_id: models.GenericId | None) -> models.Todo | None:
+def update_parent_id(todo:models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
 
     cur = get_conn().cursor()
 
@@ -109,7 +109,7 @@ def _populate_children(cur: sqlite3.Cursor, todo: models.Todo):
     rows = cur.fetchall()
     for row in rows:
         child_id = uuid.UUID(row["todo_id"])
-        child_ids.append(models.GenericId(child_id))
+        child_ids.append(models.TodoId(child_id))
     todo.child_ids = child_ids
 
 
@@ -123,20 +123,20 @@ def get_root_todos() -> list[models.Todo]:
     todos = []
     for row in rows:
         todo = models.Todo(
-            todo_id=models.GenericId(uuid.UUID(row["todo_id"])),
+            todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
             title = row["title"],
             done = True if row["done"] == 1 else False,
             create_date =  datetime.datetime.fromisoformat(row["create_date"]),
             due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
             order_idx = row["order_idx"],
-            parent_id = models.GenericId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
+            parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
         )
         _populate_children(cur, todo)
         todos.append(todo)
 
     return todos
 
-def get_todo(todo_id: models.GenericId) -> models.Todo | None:
+def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     cur = get_conn().cursor()
     cur.execute("""
         select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ?
@@ -146,13 +146,13 @@ def get_todo(todo_id: models.GenericId) -> models.Todo | None:
         return None
 
     todo = models.Todo(
-        todo_id=models.GenericId(uuid.UUID(row["todo_id"])),
+        todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
         title = row["title"],
         done = True if row["done"] == 1 else False,
         create_date =  datetime.datetime.fromisoformat(row["create_date"]),
         due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
         order_idx = row["order_idx"],
-        parent_id = models.GenericId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
+        parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
     )
     _populate_children(cur, todo)
 

@@ -5,7 +5,7 @@ import uuid
 import datetime
 
 from pydantic import RootModel
-class GenericId(RootModel[uuid.UUID]):
+class TodoId(RootModel[uuid.UUID]):
     def __str__(self) -> str:
         return str(self.root)
 
@@ -17,17 +17,17 @@ class TodoUpdate(BaseModel):
     done: bool | None = Field(None)
 
 class TodoUpdateParent(BaseModel):
-    parent_id: GenericId | None = Field(None)
+    parent_id: TodoId | None = Field(None)
 
 class TodoSplit(BaseModel):
     descriptions: list[str] = Field([])
 
 class Todo(BaseModel):
-    todo_id: GenericId = Field(default_factory=lambda: GenericId(uuid4()) )
+    todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )
     title: str
     done: bool = Field(False)
     create_date: datetime.datetime = Field(default_factory = datetime.datetime.now)
     due_date: datetime.datetime | None = Field(None)
     order_idx: int | None = Field(None)
-    parent_id: GenericId | None = Field(None)
-    child_ids: list[GenericId] = Field([])
+    parent_id: TodoId | None = Field(None)
+    child_ids: list[TodoId] = Field([])

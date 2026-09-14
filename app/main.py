@@ -36,7 +36,7 @@ def list_todos() -> list[models.Todo]:
 
 @app.get("/todos/{todo_id}", response_model=models.Todo)
 def get_todo(todo_id: uuid.UUID) -> models.Todo:
-    todo =  db.get_todo(models.GenericId(todo_id))
+    todo =  db.get_todo(models.TodoId(todo_id))
 
     if todo is None:
         raise HTTPException(404)
@@ -45,7 +45,7 @@ def get_todo(todo_id: uuid.UUID) -> models.Todo:
 
 @app.patch("/todos/{todo_id}", response_model=models.Todo)
 def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate) -> models.Todo:
-    todo = db.get_todo(models.GenericId(todo_id))
+    todo = db.get_todo(models.TodoId(todo_id))
 
     if todo is None:
         raise HTTPException(404)
@@ -61,7 +61,7 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate) -> models.Todo:
 
 @app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=models.Todo)
 def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent) -> models.Todo:
-    todo = db.get_todo(models.GenericId(todo_id))
+    todo = db.get_todo(models.TodoId(todo_id))
     if todo is None:
         raise HTTPException(404)
 
@@ -74,11 +74,11 @@ def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent) -> mod
 
 @app.delete("/todos/{todo_id}", status_code=204)
 def delete_todo(todo_id: uuid.UUID) -> None:
-    db.delete_todo(models.GenericId(todo_id))
+    db.delete_todo(models.TodoId(todo_id))
 
 @app.post("/todos/{todo_id}/split", response_model=models.Todo)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
-    todo = db.get_todo(models.GenericId(todo_id))
+    todo = db.get_todo(models.TodoId(todo_id))
 
     if todo is None:
         raise HTTPException(404)
