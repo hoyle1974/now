@@ -24,7 +24,7 @@ def db_setup():
 
 @pytest.fixture
 def create_test_data():
-    response1 = client.post("/tasks", json={"title": "test1"})
+    response1 = client.post("/todos", json={"title": "test1"})
 
     d = response1.json()
     id = d["todo_id"]
@@ -32,51 +32,51 @@ def create_test_data():
     d["done"] = False
     d["parent_id"] = None
 
-    response2 = client.post("/tasks", json={"title": "test2"})
+    response2 = client.post("/todos", json={"title": "test2"})
     parent_id = response2.json()["todo_id"]
 
     d["parent_id"] = parent_id
-    response3 = client.patch(f"/tasks/{id}/parent/{parent_id}", json=d)
+    response3 = client.patch(f"/todos/{id}/parent/{parent_id}", json=d)
 
-    response4 = client.get(f"/tasks/{id}")
+    response4 = client.get(f"/todos/{id}")
 
-    response5 = client.get(f"/tasks/{parent_id}")
+    response5 = client.get(f"/todos/{parent_id}")
 
-    response6 = client.get(f"/tasks/root")
+    response6 = client.get(f"/todos/root")
 
-    response7 = client.post(f"/tasks/{id}/split", json={"descriptions": ["a","b","c","d"]})
+    response7 = client.post(f"/todos/{id}/split", json={"descriptions": ["a","b","c","d"]})
     yield 0
     
 
-def test_create_task(db_setup):
-    response = client.post("/tasks", json={"title": "test"})
+def test_create_todo(db_setup):
+    response = client.post("/todos", json={"title": "test"})
 
     assert response.status_code == 200
     assert response.json()["title"] == "test"
     assert response.json()["done"] == False
 
 
-def test_get_task(db_setup):
-    response1 = client.post("/tasks", json={"title": "test"})
+def test_get_todo(db_setup):
+    response1 = client.post("/todos", json={"title": "test"})
     assert response1.status_code == 200
     assert response1.json()["title"] == "test"
     assert response1.json()["done"] == False
 
     id = response1.json()["todo_id"]
-    response2 = client.get(f"/tasks/{id}")
+    response2 = client.get(f"/todos/{id}")
     assert response2.status_code == 200
 
     assert response1.json() == response2.json()
 
 
-def test_get_task_not_found(db_setup):
+def test_get_todo_not_found(db_setup):
     id = uuid.uuid4()
-    response = client.get(f"/tasks/{id}")
+    response = client.get(f"/todos/{id}")
     assert response.status_code == 404
 
 
-def test_update_task(db_setup):
-    response1 = client.post("/tasks", json={"title": "test"})
+def test_update_todo(db_setup):
+    response1 = client.post("/todos", json={"title": "test"})
     assert response1.status_code == 200
     assert response1.json()["title"] == "test"
     assert response1.json()["done"] == False
@@ -87,16 +87,16 @@ def test_update_task(db_setup):
     d["done"] = True
     d["parent_id"] = None
 
-    response2 = client.patch(f"/tasks/{id}", json=d)
+    response2 = client.patch(f"/todos/{id}", json=d)
     assert response2.status_code == 200
 
-    response3 = client.get(f"/tasks/{id}")
+    response3 = client.get(f"/todos/{id}")
     assert response3.status_code == 200
 
     assert response3.json() == d
 
 
-def test_update_task_not_found(db_setup):
+def test_update_todo_not_found(db_setup):
     id = uuid.uuid4()
 
     d={}
@@ -105,22 +105,22 @@ def test_update_task_not_found(db_setup):
     d["done"] = True
     d["parent_id"] = None
 
-    response2 = client.patch(f"/tasks/{str(id)}", json=d)
+    response2 = client.patch(f"/todos/{str(id)}", json=d)
     assert response2.status_code == 404
 
-def test_split_task(db_setup):
-    response1 = client.post("/tasks", json={"title": "Big Task"})
+def test_split_todo(db_setup):
+    response1 = client.post("/todos", json={"title": "Big Task"})
     assert response1.status_code == 200
     assert response1.json()["title"] == "Big Task"
     assert response1.json()["done"] == False
 
     id = response1.json()["todo_id"]
-    response2 = client.post(f"/tasks/{id}/split", json={"descriptions": ["a","b","c","d"]})
+    response2 = client.post(f"/todos/{id}/split", json={"descriptions": ["a","b","c","d"]})
     assert response2.status_code == 200
 
 
-def test_update_task_parent(db_setup):
-    response1 = client.post("/tasks", json={"title": "test1"})
+def test_update_todo_parent(db_setup):
+    response1 = client.post("/todos", json={"title": "test1"})
     assert response1.status_code == 200
     assert response1.json()["title"] == "test1"
     assert response1.json()["done"] == False
@@ -131,45 +131,45 @@ def test_update_task_parent(db_setup):
     d["done"] = False
     d["parent_id"] = None
 
-    response2 = client.post("/tasks", json={"title": "test2"})
+    response2 = client.post("/todos", json={"title": "test2"})
     assert response2.status_code == 200
     assert response2.json()["title"] == "test2"
     assert response2.json()["done"] == False
     parent_id = response2.json()["todo_id"]
 
     d["parent_id"] = parent_id
-    response3 = client.patch(f"/tasks/{id}/parent/{parent_id}", json=d)
+    response3 = client.patch(f"/todos/{id}/parent/{parent_id}", json=d)
     assert response3.status_code == 200
 
-    response4 = client.get(f"/tasks/{id}")
+    response4 = client.get(f"/todos/{id}")
     assert response4.status_code == 200
 
     assert response3.json() == d
 
-    response5 = client.get(f"/tasks/{parent_id}")
+    response5 = client.get(f"/todos/{parent_id}")
     assert response5.status_code == 200
     assert response5.json()["child_ids"] == [ id ]
 
-    response6 = client.get(f"/tasks/root")
+    response6 = client.get(f"/todos/root")
     assert response6.status_code == 200
     assert response6.json()[0]["todo_id"] == parent_id
 
 
-def test_delete_task(db_setup):
-    response1 = client.post("/tasks", json={"title": "test"})
+def test_delete_todo(db_setup):
+    response1 = client.post("/todos", json={"title": "test"})
     assert response1.status_code == 200
     assert response1.json()["title"] == "test"
     assert response1.json()["done"] == False
     id = response1.json()["todo_id"]
 
-    response2 = client.delete(f"/tasks/{id}")
+    response2 = client.delete(f"/todos/{id}")
     assert response2.status_code == 204
 
-    response3 = client.get(f"/tasks/{id}")
+    response3 = client.get(f"/todos/{id}")
     assert response3.status_code == 404
 
 def test_print(db_setup, create_test_data):
-    response = client.get("/tasks/print")
+    response = client.get("/todos/print")
     assert response.status_code == 200
 
 

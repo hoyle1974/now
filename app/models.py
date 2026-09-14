@@ -9,20 +9,20 @@ class GenericId(RootModel[uuid.UUID]):
     def __str__(self) -> str:
         return str(self.root)
 
-class TODOCreate(BaseModel):
+class TodoCreate(BaseModel):
     title: str
 
-class TODOUpdate(BaseModel):
+class TodoUpdate(BaseModel):
     title: str | None = Field(None)
     done: bool | None = Field(None)
 
-class TODOUpdateParent(BaseModel):
+class TodoUpdateParent(BaseModel):
     parent_id: GenericId | None = Field(None)
 
-class TODOSplit(BaseModel):
+class TodoSplit(BaseModel):
     descriptions: list[str] = Field([])
 
-class TODO(BaseModel):
+class Todo(BaseModel):
     todo_id: GenericId = Field(default_factory=lambda: GenericId(uuid4()) )
     title: str
     done: bool = Field(False)
