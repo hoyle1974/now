@@ -1,0 +1,23 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "todos",
+      "queryScope": "Collection",
+      "fields": [
+        {
+          "fieldPath": "parent_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "deleted",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "order_idx",
+          "order": "ASCENDING"
+        }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
