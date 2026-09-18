@@ -84,36 +84,34 @@ def delete_todo(todo_id: models.TodoId):
             """,(str(todo_id),))
         get_conn().commit()
 
-def update_todo(todo:models.Todo):
-    with _lock:
-        cur = get_conn().cursor()
-        cur.execute("""
-            UPDATE TODO_ITEMS
-            SET title = ?, done = ?, due_date = ? WHERE todo_id = ?
-            """,(
-            todo.title,
-            todo.done,
-            None if todo.due_date is None else todo.due_date.isoformat(),
-            str(todo.todo_id)))
-        get_conn().commit()
-
-def _cascade_done_recursive(cur: sqlite3.Cursor, todo_id: str, done: bool):
-    cur.execute("""
-        UPDATE TODO_ITEMS SET done = ? WHERE parent_id = ?
-        """, (done, todo_id))
-    cur.execute("""
-        select todo_id from TODO_ITEMS where parent_id = ?
-        """, (todo_id,))
-    rows = cur.fetchall()
-    for row in rows:
-        _cascade_done_recursive(cur, row["todo_id"], done)
-
-def cascade_done(todo_id: models.TodoId, done: bool):
+def update_todo(todo: models.Todo, cascade_done: bool = False):
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
         try:
-            _cascade_done_recursive(cur, str(todo_id), done)
+            cur.execute("""
+                UPDATE TODO_ITEMS
+                SET title = ?, done = ?, due_date = ? WHERE todo_id = ?
+                """,(
+                todo.title,
+                todo.done,
+                None if todo.due_date is None else todo.due_date.isoformat(),
+                str(todo.todo_id)))
+
+            if cascade_done:
+                # Mark the whole subtree done/not-done in one statement
+                # rather than walking it level by level in Python.
+                cur.execute("""
+                    WITH RECURSIVE descendants(todo_id) AS (
+                        SELECT todo_id FROM TODO_ITEMS WHERE parent_id = ?
+                        UNION ALL
+                        SELECT t.todo_id FROM TODO_ITEMS t
+                        JOIN descendants d ON t.parent_id = d.todo_id
+                    )
+                    UPDATE TODO_ITEMS SET done = ?
+                    WHERE todo_id IN (SELECT todo_id FROM descendants)
+                    """, (str(todo.todo_id), todo.done))
+
             get_conn().commit()
         except Exception:
             get_conn().rollback()

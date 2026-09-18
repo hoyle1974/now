@@ -31,11 +31,15 @@
   margin-top: 0.5rem;
 }
 
-.todo-node {
-  /* The browser's own nested-list UA styles (circle/square markers) survive
-     list-style:none on the parent <ul> because they're resolved per-<li>,
-     not inherited from it — override on the <li> itself instead. */
+/* The browser's own nested-list UA styles (circle/square markers) survive
+   list-style:none on the parent <ul> because they're resolved per-<li>, not
+   inherited from it — this is a property of being an <li> in this tree, so
+   it's scoped to the element, not to whichever class happens to style it. */
+#todo-tree li {
   list-style: none;
+}
+
+.todo-node {
   margin-bottom: 0.75rem;
 }
 
@@ -46,6 +50,30 @@
   gap: 0.5rem;
 }
 
+/* Shared 44px minimum comfortable touch target for the row's icon-only
+   controls (chevron, checkbox, kebab) — the row itself stays compact, but
+   none of their hit areas shrink to match their small visual glyph. */
+.todo-check-hit,
+.todo-toggle,
+.todo-kebab {
+  width: 2.75rem;
+  height: 2.75rem;
+  flex: 0 0 auto;
+  cursor: pointer;
+}
+
+/* Shared reset for this file's plain icon/text buttons: no default button
+   chrome, and — since Pico redefines --pico-color inside <button> for its
+   filled-button look — reset it back to the page's own text color so any
+   button here can use `color: var(--pico-color)` without going invisible. */
+.todo-toggle,
+.todo-kebab,
+.todo-menu-dropdown .todo-menu-item {
+  --pico-color: var(--pico-contrast, #11191f);
+  border: none;
+  background: none;
+}
+
 /* Native checkboxes have a tiny hit box. Wrapping in a padded label gives a
    comfortable tap zone on touch devices without inflating the checkbox's
    visual size in the row. */
@@ -53,10 +81,6 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.75rem;
-  height: 2.75rem;
-  flex: 0 0 auto;
-  cursor: pointer;
 }
 
 .todo-row input[type="checkbox"] {
@@ -66,17 +90,11 @@
 }
 
 .todo-toggle {
-  width: 2.75rem;
-  height: 2.75rem;
   padding: 0;
   margin: 0;
-  flex: 0 0 auto;
-  border: none;
-  background: none;
   font-size: 0.7rem;
   line-height: 2.75rem;
   color: var(--pico-muted-color);
-  cursor: pointer;
 }
 
 .todo-toggle--spacer {
@@ -120,19 +138,12 @@
   flex: 0 0 auto;
 }
 
-/* 44px is the standard minimum comfortable touch target — the row itself
-   stays compact, but the kebab's hit area doesn't shrink to match the glyph. */
 .todo-kebab {
-  width: 2.75rem;
-  height: 2.75rem;
   padding: 0;
   margin: 0;
-  border: none;
-  background: none;
   font-size: 1.1rem;
   line-height: 2.75rem;
   color: var(--pico-muted-color);
-  cursor: pointer;
 }
 
 .todo-menu-dropdown {
@@ -151,15 +162,9 @@
 }
 
 .todo-menu-dropdown .todo-menu-item {
-  /* Pico redefines --pico-color inside <button> for its filled-button look,
-     so referencing that variable here still resolves to white-on-nothing.
-     Reset it locally before using it. */
-  --pico-color: var(--pico-contrast, #11191f);
   width: auto;
   margin-bottom: 0;
   padding: 0.6rem 0.75rem;
-  border: none;
-  background: none;
   text-align: left;
   font-size: 0.9rem;
   color: var(--pico-color);

@@ -45,7 +45,7 @@ async function deleteTodo(todoId) {
 }
 
 async function saveEdit(todoId, title, dueDate) {
-  editingTodoId = null;
+  setActivePanel(null);
   try {
     const body = { title };
     if (dueDate) {
@@ -62,7 +62,7 @@ async function saveEdit(todoId, title, dueDate) {
 }
 
 async function saveSplit(todoId, descriptions) {
-  splittingTodoId = null;
+  setActivePanel(null);
   try {
     await apiFetch(`${API_BASE}/${todoId}/split`, {
       method: "POST",
@@ -93,14 +93,6 @@ async function fetchTree() {
   return { roots, todosById };
 }
 
-// Tracks which todo (if any) currently has its inline split editor open.
-// Entering/leaving this state re-renders from the already-fetched tree
-// data below rather than re-fetching, so it's instant and doesn't disturb
-// unrelated in-flight edits.
-let splittingTodoId = null;
-// Same idea, for the single-child quick-add row (a lighter-weight
-// alternative to Split for adding just one child under a specific parent).
-let addingChildToTodoId = null;
 let lastRoots = [];
 let lastTodosById = new Map();
 
@@ -108,13 +100,19 @@ let lastTodosById = new Map();
 // expanded, so newly split/loaded parents default to expanded.
 const collapsedIds = new Set();
 
-// Tracks which todo (if any) has its per-row "more actions" menu open.
-// Always tap-to-open rather than hover-revealed, since this app runs
-// primarily on touch devices where hover doesn't exist.
-let openMenuTodoId = null;
+// At most one per-row panel (the "more actions" menu, or one of its inline
+// editors) is open at a time, so it's a single { todoId, mode } slot rather
+// than a separate boolean/id per mode — opening one always means closing
+// whatever else was open. mode is "menu" | "edit" | "add" | "split".
+let activePanel = null;
 
-// Tracks which todo (if any) has its title/due-date editor open.
-let editingTodoId = null;
+function setActivePanel(mode, todoId) {
+  activePanel = mode ? { mode, todoId } : null;
+}
+
+function isActivePanel(mode, todoId) {
+  return activePanel !== null && activePanel.mode === mode && activePanel.todoId === todoId;
+}
 
 function formatDate(isoString) {
   return new Date(isoString).toLocaleDateString(undefined, {
@@ -124,15 +122,42 @@ function formatDate(isoString) {
   });
 }
 
-function countDescendants(todo, todosById) {
-  let count = 0;
-  for (const childId of todo.child_ids) {
-    count += 1 + countDescendants(todosById.get(childId), todosById);
+// Descendant counts for every node, computed once per render in one
+// memoized bottom-up pass rather than re-walking each parent's subtree
+// independently (which would revisit shared descendants once per ancestor).
+function computeDescendantCounts(todosById) {
+  const counts = new Map();
+  function countFor(todoId) {
+    if (counts.has(todoId)) {
+      return counts.get(todoId);
+    }
+    const todo = todosById.get(todoId);
+    let count = 0;
+    for (const childId of todo.child_ids) {
+      count += 1 + countFor(childId);
+    }
+    counts.set(todoId, count);
+    return count;
   }
-  return count;
+  for (const todoId of todosById.keys()) {
+    countFor(todoId);
+  }
+  return counts;
 }
 
-function renderNode(todo, todosById, depth = 0) {
+function menuItem(label, onClick, extraClass = "") {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `todo-menu-item ${extraClass}`.trim();
+  btn.textContent = label;
+  btn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    onClick();
+  });
+  return btn;
+}
+
+function renderNode(todo, todosById, descendantCounts, depth = 0) {
   const li = document.createElement("li");
   li.className = "todo-node";
   li.style.setProperty("--depth", depth);
@@ -181,7 +206,7 @@ function renderNode(todo, todosById, depth = 0) {
   if (hasChildren) {
     badge = document.createElement("span");
     badge.className = "todo-count-badge";
-    const count = countDescendants(todo, todosById);
+    const count = descendantCounts.get(todo.todo_id);
     badge.textContent = `${count} subtask${count === 1 ? "" : "s"}`;
   }
 
@@ -206,11 +231,11 @@ function renderNode(todo, todosById, depth = 0) {
   kebabBtn.textContent = "⋮";
   kebabBtn.setAttribute("aria-label", "More actions");
   kebabBtn.setAttribute("aria-haspopup", "true");
-  const menuOpen = openMenuTodoId === todo.todo_id;
+  const menuOpen = isActivePanel("menu", todo.todo_id);
   kebabBtn.setAttribute("aria-expanded", String(menuOpen));
   kebabBtn.addEventListener("click", (event) => {
     event.stopPropagation();
-    openMenuTodoId = menuOpen ? null : todo.todo_id;
+    setActivePanel(menuOpen ? null : "menu", todo.todo_id);
     renderTree();
   });
   menuWrap.appendChild(kebabBtn);
@@ -220,56 +245,28 @@ function renderNode(todo, todosById, depth = 0) {
     menu.className = "todo-menu-dropdown";
     menu.setAttribute("role", "menu");
 
-    const addChildItem = document.createElement("button");
-    addChildItem.type = "button";
-    addChildItem.className = "todo-menu-item";
-    addChildItem.textContent = "Add child";
-    addChildItem.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openMenuTodoId = null;
-      splittingTodoId = null;
-      editingTodoId = null;
-      addingChildToTodoId = todo.todo_id;
-      renderTree();
-    });
-
-    const editItem = document.createElement("button");
-    editItem.type = "button";
-    editItem.className = "todo-menu-item";
-    editItem.textContent = "Edit";
-    editItem.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openMenuTodoId = null;
-      addingChildToTodoId = null;
-      splittingTodoId = null;
-      editingTodoId = todo.todo_id;
-      renderTree();
-    });
-
-    const splitItem = document.createElement("button");
-    splitItem.type = "button";
-    splitItem.className = "todo-menu-item";
-    splitItem.textContent = "Split";
-    splitItem.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openMenuTodoId = null;
-      addingChildToTodoId = null;
-      editingTodoId = null;
-      splittingTodoId = todo.todo_id;
-      renderTree();
-    });
-
-    const deleteItem = document.createElement("button");
-    deleteItem.type = "button";
-    deleteItem.className = "todo-menu-item todo-menu-item--danger";
-    deleteItem.textContent = "Delete";
-    deleteItem.addEventListener("click", (event) => {
-      event.stopPropagation();
-      openMenuTodoId = null;
-      reportedFailure(deleteTodo(todo.todo_id));
-    });
-
-    menu.append(addChildItem, editItem, splitItem, deleteItem);
+    menu.append(
+      menuItem("Add child", () => {
+        setActivePanel("add", todo.todo_id);
+        renderTree();
+      }),
+      menuItem("Edit", () => {
+        setActivePanel("edit", todo.todo_id);
+        renderTree();
+      }),
+      menuItem("Split", () => {
+        setActivePanel("split", todo.todo_id);
+        renderTree();
+      }),
+      menuItem(
+        "Delete",
+        () => {
+          setActivePanel(null);
+          reportedFailure(deleteTodo(todo.todo_id));
+        },
+        "todo-menu-item--danger"
+      )
+    );
     menuWrap.appendChild(menu);
   }
 
@@ -280,15 +277,15 @@ function renderNode(todo, todosById, depth = 0) {
   row.append(meta, menuWrap);
   li.appendChild(row);
 
-  if (splittingTodoId === todo.todo_id) {
+  if (isActivePanel("split", todo.todo_id)) {
     li.appendChild(renderSplitEditor(todo));
   }
 
-  if (addingChildToTodoId === todo.todo_id) {
+  if (isActivePanel("add", todo.todo_id)) {
     li.appendChild(renderAddChildEditor(todo));
   }
 
-  if (editingTodoId === todo.todo_id) {
+  if (isActivePanel("edit", todo.todo_id)) {
     li.appendChild(renderEditEditor(todo));
   }
 
@@ -296,12 +293,38 @@ function renderNode(todo, todosById, depth = 0) {
     const childList = document.createElement("ul");
     for (const childId of todo.child_ids) {
       const child = todosById.get(childId);
-      childList.appendChild(renderNode(child, todosById, depth + 1));
+      childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
     li.appendChild(childList);
   }
 
   return li;
+}
+
+// Shared Save/Cancel row for the inline editors below — each editor supplies
+// its own content elements and save behavior, but the button chrome and the
+// "Cancel closes this panel" behavior are identical across all of them.
+function renderEditorActions(onSave) {
+  const buttons = document.createElement("div");
+  buttons.className = "split-editor-buttons";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "todo-btn";
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", onSave);
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "outline secondary todo-btn";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", () => {
+    setActivePanel(null);
+    renderTree();
+  });
+
+  buttons.append(saveBtn, cancelBtn);
+  return buttons;
 }
 
 function renderSplitEditor(todo) {
@@ -312,14 +335,7 @@ function renderSplitEditor(todo) {
   textarea.placeholder = "One item per line";
   textarea.rows = 3;
 
-  const buttons = document.createElement("div");
-  buttons.className = "split-editor-buttons";
-
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "todo-btn";
-  saveBtn.textContent = "Save";
-  saveBtn.addEventListener("click", () => {
+  const buttons = renderEditorActions(() => {
     const descriptions = textarea.value
       .split("\n")
       .map((s) => s.trim())
@@ -328,16 +344,6 @@ function renderSplitEditor(todo) {
     reportedFailure(saveSplit(todo.todo_id, descriptions));
   });
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "outline secondary todo-btn";
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.addEventListener("click", () => {
-    splittingTodoId = null;
-    renderTree();
-  });
-
-  buttons.append(saveBtn, cancelBtn);
   editor.append(textarea, buttons);
   return editor;
 }
@@ -350,20 +356,11 @@ function renderAddChildEditor(todo) {
   input.type = "text";
   input.placeholder = "New subtask title";
 
-  const buttons = document.createElement("div");
-  buttons.className = "split-editor-buttons";
-
-  const addBtn = document.createElement("button");
-  addBtn.type = "button";
-  addBtn.className = "todo-btn";
-  addBtn.textContent = "Add";
   const submit = () => {
     const title = input.value.trim();
     if (!title) return;
-    addingChildToTodoId = null;
     reportedFailure(saveSplit(todo.todo_id, [title]));
   };
-  addBtn.addEventListener("click", submit);
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       event.preventDefault();
@@ -371,16 +368,8 @@ function renderAddChildEditor(todo) {
     }
   });
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "outline secondary todo-btn";
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.addEventListener("click", () => {
-    addingChildToTodoId = null;
-    renderTree();
-  });
+  const buttons = renderEditorActions(submit);
 
-  buttons.append(addBtn, cancelBtn);
   editor.append(input, buttons);
   return editor;
 }
@@ -404,29 +393,12 @@ function renderEditEditor(todo) {
   }
   dueDateLabel.appendChild(dueDateInput);
 
-  const buttons = document.createElement("div");
-  buttons.className = "split-editor-buttons";
-
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "todo-btn";
-  saveBtn.textContent = "Save";
-  saveBtn.addEventListener("click", () => {
+  const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
     if (!title) return;
     reportedFailure(saveEdit(todo.todo_id, title, dueDateInput.value));
   });
 
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "outline secondary todo-btn";
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.addEventListener("click", () => {
-    editingTodoId = null;
-    renderTree();
-  });
-
-  buttons.append(saveBtn, cancelBtn);
   editor.append(titleInput, dueDateLabel, buttons);
   return editor;
 }
@@ -441,8 +413,9 @@ function renderTree() {
     treeEl.appendChild(empty);
     return;
   }
+  const descendantCounts = computeDescendantCounts(lastTodosById);
   for (const root of lastRoots) {
-    treeEl.appendChild(renderNode(root, lastTodosById));
+    treeEl.appendChild(renderNode(root, lastTodosById, descendantCounts));
   }
 }
 
@@ -457,9 +430,11 @@ document.addEventListener("DOMContentLoaded", () => {
   reportedFailure(loadAndRender());
 });
 
+// Clicking anywhere closes an open kebab menu, but not an open editor
+// (split/add/edit) — those only close via their own Cancel/Save.
 document.addEventListener("click", () => {
-  if (openMenuTodoId !== null) {
-    openMenuTodoId = null;
+  if (activePanel?.mode === "menu") {
+    setActivePanel(null);
     renderTree();
   }
 });
