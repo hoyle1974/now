@@ -370,20 +370,36 @@ function attachRowInteractions(row, todo) {
 
   row.addEventListener("drop", async (e) => {
     e.preventDefault();
+    e.stopPropagation();
     row.classList.remove("drag-over-before", "drag-over-after");
 
     const data = e.dataTransfer.getData("application/x-todo-id");
-    if (!data) return;
+    if (!data) {
+      console.error("No drag data");
+      return;
+    }
 
-    const { todoId, parentId } = JSON.parse(data);
-    if (parentId !== String(todo.parent_id) || todoId === String(todo.todo_id)) return;
+    try {
+      const parsed = JSON.parse(data);
+      const { todoId, parentId } = parsed;
 
-    const rect = row.getBoundingClientRect();
-    const midY = rect.top + rect.height / 2;
-    const direction = e.clientY < midY ? "up" : "down";
+      if (parentId !== String(todo.parent_id)) {
+        console.error("Parent mismatch");
+        return;
+      }
+      if (todoId === String(todo.todo_id)) {
+        return;
+      }
 
-    // Move the dragged item before/after this item
-    await reportedFailure(moveTodo(todoId, direction));
+      const rect = row.getBoundingClientRect();
+      const midY = rect.top + rect.height / 2;
+      const direction = e.clientY < midY ? "up" : "down";
+
+      console.log(`Dropping on ${todo.todo_id}, direction: ${direction}`);
+      await moveTodo(todoId, direction);
+    } catch (err) {
+      console.error("Drop error:", err);
+    }
   });
 
   let longPressTimer = null;
