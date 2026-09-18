@@ -120,8 +120,17 @@ def reorder_todo(todo_id: models.TodoId, direction: str):
                 raise Exception("Todo not found")
 
             parent_id, current_idx = row["parent_id"], row["order_idx"]
+
+            # If this todo has no order_idx, assign it one based on siblings
             if current_idx is None:
-                raise Exception("Todo has no order_idx")
+                cur.execute("""
+                    SELECT COALESCE(max(order_idx), -1) as m FROM TODO_ITEMS
+                    WHERE parent_id = ? AND deleted = 0
+                    """, (parent_id,))
+                max_row = cur.fetchone()
+                current_idx = max_row["m"] + 1
+                cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
+                           (current_idx, str(todo_id)))
 
             if direction == "up":
                 # Find the sibling with the highest order_idx less than current
