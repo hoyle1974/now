@@ -1,30 +1,33 @@
 # Firestore implementation of todo database
 from __future__ import annotations
 from app import models
+from app import db_firestore_helpers
 import uuid
 import datetime
 from google.cloud import firestore
 
-db = None
 _client = None
+_todos_collection = None
 
 def init(memory: bool = False):
     """Initialize Firestore connection"""
-    global db, _client
+    global _client, _todos_collection
     _client = firestore.Client()
-    db = _client.collection("todos")
+    _todos_collection = _client.collection("todos")
     print("firestore: initialized")
 
 def get_conn():
-    """Return Firestore client (for compatibility with SQLite interface)"""
+    """Return Firestore client"""
     global _client
     return _client
 
 def teardown():
     """Cleanup Firestore connection"""
-    global db, _client
-    db = None
+    global _client, _todos_collection
+    if _client is not None:
+        _client.close()
     _client = None
+    _todos_collection = None
 
 def create_todo(todo: models.Todo):
     """Create a new todo in Firestore"""
