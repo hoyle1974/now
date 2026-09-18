@@ -348,29 +348,51 @@ function attachRowInteractions(row, todo) {
       const data = e.dataTransfer.getData("application/x-todo-id");
       if (!data) return;
 
-      const { parentId } = JSON.parse(data);
+      const { parentId, todoId } = JSON.parse(data);
       // Only accept drops from siblings (same parent)
-      if (parentId === String(todo.parent_id)) {
+      if (parentId === String(todo.parent_id) && todoId !== String(todo.todo_id)) {
         const rect = row.getBoundingClientRect();
         const midY = rect.top + rect.height / 2;
+        const isDropBefore = e.clientY < midY;
 
         row.classList.remove("drag-over-before", "drag-over-after");
-        if (e.clientY < midY) {
+        if (isDropBefore) {
           row.classList.add("drag-over-before");
-          // Shift this row down to show insertion space above it
-          row.style.transform = "translateY(52px)";
         } else {
           row.classList.add("drag-over-after");
-          // Shift this row up to show insertion space below it
-          row.style.transform = "translateY(-52px)";
         }
+
+        // Shift rows to create insertion gap at the drop target
+        const parentNode = row.parentElement;
+        const allSiblingRows = Array.from(parentNode.querySelectorAll(".todo-row"));
+        const targetIndex = allSiblingRows.indexOf(row);
+
+        allSiblingRows.forEach((sibling, idx) => {
+          if (sibling === row) {
+            sibling.style.transform = "translateY(0)"; // Target row doesn't move
+          } else if (isDropBefore && idx >= targetIndex) {
+            // Dropping before target: shift target and rows after it down
+            sibling.style.transform = "translateY(52px)";
+          } else if (!isDropBefore && idx <= targetIndex) {
+            // Dropping after target: shift target and rows before it up
+            sibling.style.transform = "translateY(-52px)";
+          } else {
+            // Rows not involved in the gap
+            sibling.style.transform = "translateY(0)";
+          }
+        });
       }
     }
   });
 
   row.addEventListener("dragleave", () => {
     row.classList.remove("drag-over-before", "drag-over-after");
-    row.style.transform = "translateY(0)";
+    const parentNode = row.parentElement;
+    if (parentNode) {
+      parentNode.querySelectorAll(".todo-row").forEach(r => {
+        r.style.transform = "translateY(0)";
+      });
+    }
   });
 
   row.addEventListener("drop", async (e) => {
