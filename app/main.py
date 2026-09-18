@@ -129,6 +129,22 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
 
     return db.split_into_children(todo, body.descriptions, body.due_date)
 
+@app.patch("/todos/{todo_id}/move/{direction}", response_model=models.Todo)
+def move_todo(todo_id: uuid.UUID, direction: str) -> models.Todo:
+    """Move a todo up or down within its parent's children (direction: 'up' or 'down')"""
+    if direction not in ("up", "down"):
+        raise HTTPException(400, "direction must be 'up' or 'down'")
+
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None or todo.parent_id is None:
+        raise HTTPException(404, "todo not found or has no parent")
+
+    db.reorder_todo(models.TodoId(todo_id), direction)
+
+    # Return the updated todo
+    updated = db.get_todo(models.TodoId(todo_id))
+    return updated if updated else todo
+
 
 app.mount("/", StaticFiles(directory="web", html=True), name="web")
 

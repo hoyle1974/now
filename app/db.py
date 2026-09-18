@@ -105,6 +105,56 @@ def delete_todo(todo_id: models.TodoId):
             """,(str(todo_id),))
         get_conn().commit()
 
+def reorder_todo(todo_id: models.TodoId, direction: str):
+    """Move a todo up or down within its siblings by swapping order_idx"""
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("BEGIN")
+        try:
+            # Get the current todo's parent and order_idx
+            cur.execute("""
+                SELECT parent_id, order_idx FROM TODO_ITEMS WHERE todo_id = ? AND deleted = 0
+                """, (str(todo_id),))
+            row = cur.fetchone()
+            if row is None:
+                raise Exception("Todo not found")
+
+            parent_id, current_idx = row["parent_id"], row["order_idx"]
+            if current_idx is None:
+                raise Exception("Todo has no order_idx")
+
+            if direction == "up":
+                # Find the sibling with the highest order_idx less than current
+                cur.execute("""
+                    SELECT todo_id, order_idx FROM TODO_ITEMS
+                    WHERE parent_id = ? AND order_idx < ? AND deleted = 0
+                    ORDER BY order_idx DESC LIMIT 1
+                    """, (parent_id, current_idx))
+            else:  # down
+                # Find the sibling with the lowest order_idx greater than current
+                cur.execute("""
+                    SELECT todo_id, order_idx FROM TODO_ITEMS
+                    WHERE parent_id = ? AND order_idx > ? AND deleted = 0
+                    ORDER BY order_idx ASC LIMIT 1
+                    """, (parent_id, current_idx))
+
+            swap_row = cur.fetchone()
+            if swap_row is None:
+                raise Exception("Cannot move in that direction")
+
+            swap_idx = swap_row["order_idx"]
+
+            # Swap the order_idx values
+            cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
+                       (swap_idx, str(todo_id)))
+            cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
+                       (current_idx, swap_row["todo_id"]))
+
+            get_conn().commit()
+        except Exception:
+            get_conn().rollback()
+            raise
+
 def undelete_todo(todo_id: models.TodoId):
     """Restore a soft-deleted todo and its entire subtree"""
     with _lock:

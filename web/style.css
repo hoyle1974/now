@@ -357,6 +357,60 @@ svg {
   background: var(--fill);
 }
 
+.todo-drag-handle {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--label-3);
+  cursor: grab;
+  flex: 0 0 auto;
+  transition: color 0.15s;
+  font-size: 18px;
+  font-weight: 300;
+  letter-spacing: -2px;
+}
+
+.todo-drag-handle:active {
+  cursor: grabbing;
+  color: var(--accent);
+  background: var(--fill);
+}
+
+.todo-row.dragging {
+  opacity: 0.6;
+  background: var(--fill);
+}
+
+.todo-row.drag-over-before::before {
+  content: "";
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 15;
+}
+
+.todo-row.drag-over-after::after {
+  content: "";
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 1px;
+  z-index: 15;
+}
+
 @media (hover: hover) {
   .icon-btn:hover {
     color: var(--label-2);

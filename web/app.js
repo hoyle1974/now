@@ -119,6 +119,14 @@ async function saveSplit(todoId, descriptions, dueDate = null) {
   }
 }
 
+async function moveTodo(todoId, direction) {
+  try {
+    await apiFetch(`${API_BASE}/${todoId}/move/${direction}`, { method: "PATCH" });
+  } finally {
+    await loadAndRender();
+  }
+}
+
 // #4: Load the full tree in one request
 async function fetchTree() {
   const response = await apiFetch(`${API_BASE}/tree`);
@@ -164,6 +172,8 @@ const ICONS = {
   split: '<path d="M6 4v5a3 3 0 0 0 3 3h9M6 9v6a3 3 0 0 0 3 3h9"/><path d="M15 9l3 3-3 3M15 15l3 3-3 3"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  up: '<path d="M7 14l5-5 5 5"/>',
+  down: '<path d="M7 10l5 5 5-5"/>',
 };
 
 function icon(name) {
@@ -416,6 +426,22 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     row.classList.add("is-done");
   }
 
+  // Drag handle for subtasks (non-root todos)
+  let dragHandle = null;
+  if (todo.parent_id) {
+    dragHandle = document.createElement("button");
+    dragHandle.type = "button";
+    dragHandle.className = "todo-drag-handle";
+    dragHandle.textContent = "≡";
+    dragHandle.setAttribute("aria-label", "Drag to reorder");
+    dragHandle.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      // Show menu as an alternative way to reorder
+      setActivePanel("menu", todo.todo_id);
+      renderTree();
+    });
+  }
+
   const checkboxHit = document.createElement("label");
   checkboxHit.className = "todo-check";
   const checkbox = document.createElement("input");
@@ -484,7 +510,18 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     menu.append(
       menuItem("Add subtask", "plus", openPanel("add")),
       menuItem("Edit", "pencil", openPanel("edit")),
-      menuItem("Split into subtasks", "split", openPanel("split")),
+      menuItem("Split into subtasks", "split", openPanel("split"))
+    );
+
+    // Add move up/down for subtasks (has parent)
+    if (todo.parent_id) {
+      menu.append(
+        menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
+        menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
+      );
+    }
+
+    menu.append(
       menuItem(
         "Delete",
         "trash",
@@ -499,7 +536,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   }
 
   trailing.appendChild(menuWrap);
-  row.append(checkboxHit, body, trailing);
+
+  // Assemble row: drag handle (if subtask), checkbox, body, trailing controls
+  if (dragHandle) {
+    row.append(dragHandle, checkboxHit, body, trailing);
+  } else {
+    row.append(checkboxHit, body, trailing);
+  }
   li.appendChild(row);
 
   // Attach swipe/tap interactions
