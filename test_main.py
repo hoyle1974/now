@@ -155,6 +155,21 @@ def test_update_todo_parent(db_setup):
     assert response6.json()[0]["todo_id"] == parent_id
 
 
+def test_split_after_failed_reparent(db_setup):
+    response1 = client.post("/todos", json={"title": "test"})
+    assert response1.status_code == 200
+    id = response1.json()["todo_id"]
+
+    fake_parent_id = str(uuid.uuid4())
+    d = response1.json()
+    d["parent_id"] = fake_parent_id
+    bad_reparent = client.patch(f"/todos/{id}/parent/{fake_parent_id}", json=d)
+    assert bad_reparent.status_code == 404
+
+    response2 = client.post(f"/todos/{id}/split", json={"descriptions": ["a", "b"]})
+    assert response2.status_code == 200
+
+
 def test_delete_todo(db_setup):
     response1 = client.post("/todos", json={"title": "test"})
     assert response1.status_code == 200

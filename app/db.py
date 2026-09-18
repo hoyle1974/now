@@ -1,11 +1,18 @@
 # sqlite3 connection handling and schema setup go here.
 from __future__ import annotations
 import sqlite3
+import threading
 from app import models
 import uuid
 import datetime
 
 conn = None
+# The connection is shared across every request (FastAPI runs sync path
+# operations in a threadpool, and conn is opened with
+# check_same_thread=False), so all access to it is serialized through
+# this lock to prevent concurrent requests from interleaving statements
+# on the same transaction.
+_lock = threading.Lock()
 
 def init(memory:bool = False):
     global conn
@@ -64,42 +71,48 @@ def _create_todo(cur: sqlite3.Cursor, todo: models.Todo):
         None if todo.parent_id is None else str(todo.parent_id)))
 
 def create_todo(todo:models.Todo):
-    cur = get_conn().cursor()
-    _create_todo(cur, todo)
-    get_conn().commit()
+    with _lock:
+        cur = get_conn().cursor()
+        _create_todo(cur, todo)
+        get_conn().commit()
 
 def delete_todo(todo_id: models.TodoId):
-    cur = get_conn().cursor()
-    cur.execute("""
-        DELETE FROM TODO_ITEMS where todo_id = ?
-        """,(str(todo_id),))
-    get_conn().commit()
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("""
+            DELETE FROM TODO_ITEMS where todo_id = ?
+            """,(str(todo_id),))
+        get_conn().commit()
 
 def update_todo(todo:models.Todo):
-    cur = get_conn().cursor()
-    cur.execute("""
-        UPDATE TODO_ITEMS
-        SET title = ?, done = ? WHERE todo_id = ?
-        """,(todo.title, todo.done, str(todo.todo_id)))
-    get_conn().commit()
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("""
+            UPDATE TODO_ITEMS
+            SET title = ?, done = ? WHERE todo_id = ?
+            """,(todo.title, todo.done, str(todo.todo_id)))
+        get_conn().commit()
 
 def update_parent_id(todo:models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
 
-    cur = get_conn().cursor()
+    with _lock:
+        cur = get_conn().cursor()
 
-    try:
-        cur.execute("""
-            UPDATE TODO_ITEMS
-            SET parent_id = ? WHERE todo_id = ?
-            """,(None if parent_id is None else str(parent_id), str(todo.todo_id)))
-        rowcount = cur.rowcount
-        if rowcount == 0:
+        try:
+            cur.execute("""
+                UPDATE TODO_ITEMS
+                SET parent_id = ? WHERE todo_id = ?
+                """,(None if parent_id is None else str(parent_id), str(todo.todo_id)))
+            rowcount = cur.rowcount
+            if rowcount == 0:
+                get_conn().rollback()
+                return None
+            get_conn().commit()
+            todo.parent_id = parent_id
+            return todo
+        except sqlite3.IntegrityError:
+            get_conn().rollback()
             return None
-        get_conn().commit()
-        todo.parent_id = parent_id
-        return todo
-    except sqlite3.IntegrityError:
-        return None
 
 def _populate_children(cur: sqlite3.Cursor, todo: models.Todo):
     child_ids = []
@@ -114,14 +127,39 @@ def _populate_children(cur: sqlite3.Cursor, todo: models.Todo):
 
 
 def get_root_todos() -> list[models.Todo]:
-    cur = get_conn().cursor()
-    cur.execute("""
-        select todo_id, title, done, create_date, due_date, order_idx, parent_id from TODO_ITEMS where parent_id is null
-        """)
-    rows = cur.fetchall()
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("""
+            select todo_id, title, done, create_date, due_date, order_idx, parent_id from TODO_ITEMS where parent_id is null
+            """)
+        rows = cur.fetchall()
 
-    todos = []
-    for row in rows:
+        todos = []
+        for row in rows:
+            todo = models.Todo(
+                todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
+                title = row["title"],
+                done = True if row["done"] == 1 else False,
+                create_date =  datetime.datetime.fromisoformat(row["create_date"]),
+                due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
+                order_idx = row["order_idx"],
+                parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
+            )
+            _populate_children(cur, todo)
+            todos.append(todo)
+
+        return todos
+
+def get_todo(todo_id: models.TodoId) -> models.Todo | None:
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("""
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ?
+            """, (str(todo_id),))
+        row = cur.fetchone()
+        if row is None:
+            return None
+
         todo = models.Todo(
             todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
             title = row["title"],
@@ -132,54 +170,31 @@ def get_root_todos() -> list[models.Todo]:
             parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
         )
         _populate_children(cur, todo)
-        todos.append(todo)
 
-    return todos
-
-def get_todo(todo_id: models.TodoId) -> models.Todo | None:
-    cur = get_conn().cursor()
-    cur.execute("""
-        select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ?
-        """, (str(todo_id),))
-    row = cur.fetchone()
-    if row is None:
-        return None
-
-    todo = models.Todo(
-        todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
-        title = row["title"],
-        done = True if row["done"] == 1 else False,
-        create_date =  datetime.datetime.fromisoformat(row["create_date"]),
-        due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
-        order_idx = row["order_idx"],
-        parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
-    )
-    _populate_children(cur, todo)
-
-
-    return todo
+        return todo
 
 def split_into_children(todo: models.Todo, descriptions: list[str]) -> models.Todo:
-    cur = get_conn().cursor()
-    cur.execute("BEGIN")
-    cur.execute("""select COALESCE(max(order_idx), -1) as m from TODO_ITEMS where parent_id = ?""", (str(todo.todo_id),))
-    row = cur.fetchone()
-    if row is None:
-        raise Exception(f"unexpected result {row}")
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("BEGIN")
+        cur.execute("""select COALESCE(max(order_idx), -1) as m from TODO_ITEMS where parent_id = ?""", (str(todo.todo_id),))
+        row = cur.fetchone()
+        if row is None:
+            raise Exception(f"unexpected result {row}")
 
-    next_order = row["m"] + 1
+        next_order = row["m"] + 1
 
-    try:
-        for description in descriptions:
-            child_todo = models.Todo(title = description, parent_id = todo.todo_id, order_idx = next_order)
-            _create_todo(cur, child_todo)
-            next_order+=1
+        try:
+            for description in descriptions:
+                child_todo = models.Todo(title = description, parent_id = todo.todo_id, order_idx = next_order)
+                _create_todo(cur, child_todo)
+                next_order+=1
 
-        _populate_children(cur, todo)
-        get_conn().commit()
-    except Exception:
-        get_conn().rollback()
-        raise
+            _populate_children(cur, todo)
+            get_conn().commit()
+        except Exception:
+            get_conn().rollback()
+            raise
 
-    return todo
+        return todo
 
