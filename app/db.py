@@ -116,58 +116,58 @@ def delete_todo(todo_id: models.TodoId):
         get_conn().commit()
 
 def reorder_todo(todo_id: models.TodoId, direction: str):
-    """Move a todo up or down within its siblings by swapping order_idx"""
+    """Move a todo up or down within its siblings by compacting and reordering"""
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
         try:
-            # Get the current todo's parent and order_idx
+            # Get the current todo's parent
             cur.execute("""
-                SELECT parent_id, order_idx FROM TODO_ITEMS WHERE todo_id = ? AND deleted = 0
+                SELECT parent_id FROM TODO_ITEMS WHERE todo_id = ? AND deleted = 0
                 """, (str(todo_id),))
             row = cur.fetchone()
             if row is None:
                 raise Exception("Todo not found")
 
-            parent_id, current_idx = row["parent_id"], row["order_idx"]
+            parent_id = row["parent_id"]
 
-            # If this todo has no order_idx, assign it one based on siblings
-            if current_idx is None:
-                cur.execute("""
-                    SELECT COALESCE(max(order_idx), -1) as m FROM TODO_ITEMS
-                    WHERE parent_id = ? AND deleted = 0
-                    """, (parent_id,))
-                max_row = cur.fetchone()
-                current_idx = max_row["m"] + 1
+            # Get all undeleted siblings ordered by current order_idx
+            cur.execute("""
+                SELECT todo_id FROM TODO_ITEMS
+                WHERE parent_id = ? AND deleted = 0
+                ORDER BY COALESCE(order_idx, 999999), todo_id
+                """, (parent_id,))
+            siblings = [r["todo_id"] for r in cur.fetchall()]
+
+            if len(siblings) < 2:
+                raise Exception("Cannot move: no siblings to swap with")
+
+            # Reassign order_idx to compact (0, 1, 2, ...)
+            for idx, sibling_id in enumerate(siblings):
                 cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
-                           (current_idx, str(todo_id)))
+                           (idx, sibling_id))
 
+            # Find current position of the todo we're moving
+            current_pos = siblings.index(str(todo_id))
+
+            # Calculate new position based on direction
             if direction == "up":
-                # Find the sibling with the highest order_idx less than current
-                cur.execute("""
-                    SELECT todo_id, order_idx FROM TODO_ITEMS
-                    WHERE parent_id = ? AND order_idx < ? AND deleted = 0
-                    ORDER BY order_idx DESC LIMIT 1
-                    """, (parent_id, current_idx))
+                if current_pos == 0:
+                    raise Exception("Already at top")
+                new_pos = current_pos - 1
             else:  # down
-                # Find the sibling with the lowest order_idx greater than current
-                cur.execute("""
-                    SELECT todo_id, order_idx FROM TODO_ITEMS
-                    WHERE parent_id = ? AND order_idx > ? AND deleted = 0
-                    ORDER BY order_idx ASC LIMIT 1
-                    """, (parent_id, current_idx))
+                if current_pos == len(siblings) - 1:
+                    raise Exception("Already at bottom")
+                new_pos = current_pos + 1
 
-            swap_row = cur.fetchone()
-            if swap_row is None:
-                raise Exception("Cannot move in that direction")
+            # Reorder the list
+            moving_todo = siblings.pop(current_pos)
+            siblings.insert(new_pos, moving_todo)
 
-            swap_idx = swap_row["order_idx"]
-
-            # Swap the order_idx values
-            cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
-                       (swap_idx, str(todo_id)))
-            cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
-                       (current_idx, swap_row["todo_id"]))
+            # Update all order_idx values with new positions
+            for idx, sibling_id in enumerate(siblings):
+                cur.execute("""UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?""",
+                           (idx, sibling_id))
 
             get_conn().commit()
         except Exception:
