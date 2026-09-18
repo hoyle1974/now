@@ -182,7 +182,6 @@ svg {
   gap: 4px;
   min-height: var(--row-min);
   padding: 4px 4px 4px 6px;
-  transition: transform 0.2s var(--ease);
 }
 
 /* Hairline between rows inside a card, inset to the text column the way
@@ -384,32 +383,9 @@ svg {
 }
 
 .todo-row.dragging {
-  opacity: 0.6;
+  opacity: 0.35;
   background: var(--fill);
-}
-
-.todo-row.drag-over-before::before {
-  content: "";
-  position: absolute;
-  top: -2px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--accent);
-  border-radius: 1px;
-  z-index: 15;
-}
-
-.todo-row.drag-over-after::after {
-  content: "";
-  position: absolute;
-  bottom: -2px;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: var(--accent);
-  border-radius: 1px;
-  z-index: 15;
+  border-radius: 12px;
 }
 
 @media (hover: hover) {

@@ -333,148 +333,88 @@ function renderMeta(todo, hasChildren, counts) {
   return meta;
 }
 
-// #1 & #5: Swipe gestures and title tap-to-rename, plus drag-and-drop reordering
+// dataTransfer.getData() is empty during dragover (browsers only expose it on
+// drop), so the in-progress drag is tracked here instead.
+let dragState = null;
+const animatingItems = new Set();
+
+// FLIP: measure siblings, mutate the DOM, then animate each from its old
+// position to its new one so they visibly slide out of the way.
+function animateReorder(list, mutate) {
+  const items = [...list.children];
+  const before = new Map(items.map((el) => [el, el.getBoundingClientRect().top]));
+  mutate();
+  for (const el of items) {
+    const dy = before.get(el) - el.getBoundingClientRect().top;
+    if (!dy) continue;
+    el.style.transition = "none";
+    el.style.transform = `translateY(${dy}px)`;
+    el.getBoundingClientRect();
+    el.style.transition = "transform 200ms var(--ease)";
+    el.style.transform = "";
+    animatingItems.add(el);
+    setTimeout(() => animatingItems.delete(el), 200);
+  }
+}
+
+function attachReorderTarget(list) {
+  list.addEventListener("dragover", (e) => {
+    if (!dragState || dragState.list !== list) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+
+    let target = e.target.closest("li");
+    while (target && target.parentElement !== list) {
+      target = target.parentElement.closest("li");
+    }
+    // Skip items mid-slide: their rect is moving, which would make the
+    // midpoint test flicker back and forth.
+    if (!target || target === dragState.li || animatingItems.has(target)) return;
+
+    const items = [...list.children];
+    const draggedIdx = items.indexOf(dragState.li);
+    const targetIdx = items.indexOf(target);
+    const rect = target.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+
+    if (targetIdx > draggedIdx && e.clientY > midY) {
+      animateReorder(list, () => target.after(dragState.li));
+    } else if (targetIdx < draggedIdx && e.clientY < midY) {
+      animateReorder(list, () => target.before(dragState.li));
+    }
+  });
+
+  list.addEventListener("drop", (e) => {
+    if (!dragState || dragState.list !== list) return;
+    e.preventDefault();
+    e.stopPropagation();
+    dragState.dropped = true;
+  });
+}
+
+async function commitDrag() {
+  const state = dragState;
+  dragState = null;
+  const delta = [...state.list.children].indexOf(state.li) - state.startIndex;
+  if (!state.dropped || delta === 0) {
+    renderTree();
+    return;
+  }
+  const direction = delta > 0 ? "down" : "up";
+  try {
+    for (let i = 0; i < Math.abs(delta); i++) {
+      await apiFetch(`${API_BASE}/${state.todoId}/move/${direction}`, { method: "PATCH" });
+    }
+  } finally {
+    await loadAndRender();
+  }
+}
+
+// #1 & #5: Swipe gestures and title tap-to-rename
 function attachRowInteractions(row, todo) {
   let touchStartX = 0;
   let touchStartY = 0;
   let swiping = false;
-
-  // Drag-and-drop drop target indicator + insertion point animation
-  row.addEventListener("dragover", (e) => {
-    if (todo.parent_id) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-
-      const data = e.dataTransfer.getData("application/x-todo-id");
-      if (!data) return;
-
-      const { parentId, todoId } = JSON.parse(data);
-      // Only accept drops from siblings (same parent)
-      if (parentId === String(todo.parent_id) && todoId !== String(todo.todo_id)) {
-        const rect = row.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        const isDropBefore = e.clientY < midY;
-
-        row.classList.remove("drag-over-before", "drag-over-after");
-        if (isDropBefore) {
-          row.classList.add("drag-over-before");
-        } else {
-          row.classList.add("drag-over-after");
-        }
-
-        // Find the parent container and shift all sibling rows
-        let parentList = row.closest(".todo-children");
-        if (!parentList) {
-          console.log("DEBUG: no todo-children found");
-          return;
-        }
-
-        const allRows = Array.from(parentList.querySelectorAll(":scope > li > .todo-row"));
-        const targetIdx = allRows.indexOf(row);
-        console.log(`dragover row ${targetIdx}: ${allRows.length} total, isDropBefore=${isDropBefore}`);
-
-        allRows.forEach((r, idx) => {
-          if (r === row) {
-            r.style.transform = "translateY(0)";
-          } else if (isDropBefore && idx >= targetIdx) {
-            r.style.transform = "translateY(52px)";
-            console.log(`  shift ${idx} down`);
-          } else if (!isDropBefore && idx <= targetIdx) {
-            r.style.transform = "translateY(-52px)";
-            console.log(`  shift ${idx} up`);
-          } else {
-            r.style.transform = "translateY(0)";
-          }
-        });
-      }
-    }
-  });
-
-  row.addEventListener("dragleave", () => {
-    row.classList.remove("drag-over-before", "drag-over-after");
-    let parentList = row.closest(".todo-children");
-    if (parentList) {
-      parentList.querySelectorAll(":scope > li > .todo-row").forEach(r => {
-        r.style.transform = "translateY(0)";
-      });
-    }
-  });
-
-  row.addEventListener("drop", async (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    row.classList.remove("drag-over-before", "drag-over-after");
-
-    const data = e.dataTransfer.getData("application/x-todo-id");
-    if (!data) {
-      console.error("No drag data");
-      return;
-    }
-
-    try {
-      const parsed = JSON.parse(data);
-      const { todoId, parentId } = parsed;
-
-      if (parentId !== String(todo.parent_id)) {
-        console.error("Parent mismatch");
-        return;
-      }
-      if (todoId === String(todo.todo_id)) {
-        return;
-      }
-
-      // Find the dragged todo's order to determine actual direction needed
-      const draggedTodo = lastTodosById.get(todoId);
-      const targetTodo = todo;
-
-      if (!draggedTodo || !targetTodo) {
-        console.error("Could not find todos in map");
-        return;
-      }
-
-      const draggedOrder = draggedTodo.order_idx ?? 0;
-      const targetOrder = targetTodo.order_idx ?? 0;
-
-      console.log(`Drag: from order ${draggedOrder} to ${targetOrder}`);
-
-      // Move multiple times if needed to reach target position
-      if (draggedOrder < targetOrder) {
-        // Need to move down
-        console.log(`Moving down ${targetOrder - draggedOrder} positions`);
-        for (let i = draggedOrder; i < targetOrder; i++) {
-          try {
-            console.log(`  Move ${i + 1}/${targetOrder - draggedOrder}: calling /move/down`);
-            const result = await apiFetch(`${API_BASE}/${todoId}/move/down`, { method: "PATCH" });
-            console.log(`  Move ${i + 1} result:`, result);
-          } catch (err) {
-            console.error(`  Move ${i + 1} failed:`, err.message);
-            break;
-          }
-        }
-      } else if (draggedOrder > targetOrder) {
-        // Need to move up
-        console.log(`Moving up ${draggedOrder - targetOrder} positions`);
-        for (let i = draggedOrder; i > targetOrder; i--) {
-          try {
-            console.log(`  Move ${draggedOrder - i + 1}/${draggedOrder - targetOrder}: calling /move/up`);
-            const result = await apiFetch(`${API_BASE}/${todoId}/move/up`, { method: "PATCH" });
-            console.log(`  Move ${draggedOrder - i + 1} result:`, result);
-          } catch (err) {
-            console.error(`  Move ${draggedOrder - i + 1} failed:`, err.message);
-            break;
-          }
-        }
-      }
-
-      // Reload to show changes
-      if (draggedOrder !== targetOrder) {
-        console.log("Reloading after moves");
-        await loadAndRender();
-      }
-    } catch (err) {
-      console.error("Drop error:", err);
-    }
-  });
 
   let longPressTimer = null;
 
@@ -614,10 +554,14 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
     dragHandle.addEventListener("dragstart", (e) => {
       e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("application/x-todo-id", JSON.stringify({
+      e.dataTransfer.setData("text/plain", String(todo.todo_id));
+      dragState = {
         todoId: String(todo.todo_id),
-        parentId: String(todo.parent_id),
-      }));
+        li,
+        list: li.parentElement,
+        startIndex: [...li.parentElement.children].indexOf(li),
+        dropped: false,
+      };
       row.classList.add("dragging");
 
       // Create visual ghost that follows the cursor
@@ -656,14 +600,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
     dragHandle.addEventListener("dragend", () => {
       row.classList.remove("dragging");
-      // Reset all shifted rows
-      let parentList = row.closest(".todo-children");
-      if (parentList) {
-        parentList.querySelectorAll(":scope > li > .todo-row").forEach(r => {
-          r.classList.remove("drag-over-before", "drag-over-after");
-          r.style.transform = "translateY(0)";
-        });
-      }
+      if (dragState) reportedFailure(commitDrag());
     });
   }
 
@@ -807,6 +744,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
+    attachReorderTarget(childList);
     li.appendChild(childList);
   }
 
