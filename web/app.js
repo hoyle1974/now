@@ -75,3 +75,17 @@ async function loadAndRender() {
 document.addEventListener("DOMContentLoaded", () => {
   loadAndRender();
 });
+
+document.getElementById("add-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const input = document.getElementById("add-title");
+  const title = input.value.trim();
+  if (!title) return;
+  await apiFetch(API_BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  input.value = "";
+  await loadAndRender();
+});
