@@ -34,6 +34,22 @@ async function deleteTodo(todoId) {
   await loadAndRender();
 }
 
+async function splitTodo(todoId) {
+  const raw = window.prompt("Enter split items, one per line:");
+  if (raw === null) return;
+  const descriptions = raw
+    .split("\n")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (descriptions.length === 0) return;
+  await apiFetch(`${API_BASE}/${todoId}/split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ descriptions }),
+  });
+  await loadAndRender();
+}
+
 async function fetchTree() {
   const roots = await apiFetch(`${API_BASE}/root`);
   const todosById = new Map();
@@ -69,7 +85,12 @@ function renderNode(todo, todosById) {
   deleteBtn.textContent = "Delete";
   deleteBtn.addEventListener("click", () => deleteTodo(todo.todo_id));
 
-  li.append(checkbox, label, deleteBtn);
+  const splitBtn = document.createElement("button");
+  splitBtn.type = "button";
+  splitBtn.textContent = "Split";
+  splitBtn.addEventListener("click", () => splitTodo(todo.todo_id));
+
+  li.append(checkbox, label, deleteBtn, splitBtn);
 
   if (todo.child_ids.length > 0) {
     const childList = document.createElement("ul");
