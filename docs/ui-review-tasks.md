@@ -199,6 +199,120 @@ completed or as scope changes.
   date, both persisted and the due date now shows in that row's meta line;
   `pytest test_main.py` still passes (11/11).
 
+## Follow-up: design review (Mac + iPhone daily-use pass)
+
+Source: expert-UI-designer pass explicitly targeting Mac + iPhone use as a
+personal daily-life task tracker (single user), prioritizing "looks
+professional and clean" over new features. Tasks below are a subset of that
+review's suggestions the user asked to act on now.
+
+- [x] **11. Give the app a real accent color.** It currently uses Pico's
+  default gray/blue palette everywhere, which reads as generic
+  scaffolding rather than a designed app. Pick one accent color and apply
+  it sparingly but consistently: the checked-state, due-date badges, and
+  the Add button. Keep the rest of the palette neutral so the accent
+  actually stands out.
+  Done: picked a clean indigo (`--accent: #4f46e5`, `--accent-hover:
+  #4338ca`) defined once in `web/style.css`. Rather than hand-recoloring
+  every button, overrode Pico's own `--pico-primary`/`--pico-primary-hover`/
+  `--pico-primary-underline`/`--pico-primary-focus` variables to the accent
+  — the right altitude fix, since it means the Add button (now Pico's
+  default/primary style instead of `class="secondary"`, changed in
+  `web/index.html`) and any future default-styled button pick up the accent
+  for free instead of needing individual overrides. Verified in browser in
+  both light and dark mode (Pico's dark-mode variable set inherits the same
+  override).
+
+- [x] **12. Style checkboxes with the accent color.** Native checkboxes
+  currently render as plain white squares, which look especially stark
+  and unfinished in dark mode. Set `accent-color` (to the color chosen in
+  task 11) on `.todo-row input[type="checkbox"]` — a small change with a
+  disproportionate visual payoff.
+  Done: exactly that one-line addition. Verified in browser: checked boxes
+  now fill with the accent indigo instead of Pico's default blue-gray, in
+  both themes.
+
+- [x] **13. Tighten the mobile row layout.** At iPhone width, the
+  "Created/Due" meta text and the kebab (⋮) each wrap to their own line
+  with a visible gap between them — a side effect of task 3/5's
+  crowding fixes that overcorrected into sparseness. Rework so the
+  wrapped second line reads as one coherent row (meta text and kebab
+  sharing the line, e.g. meta left / kebab right) instead of two
+  disconnected fragments with dead space.
+  Done: `web/app.js` now wraps `.todo-meta` and `.todo-menu` together in a
+  new `.todo-meta-row` span instead of leaving them as separate siblings of
+  the row. On desktop `.todo-meta-row` behaves like the old layout
+  (`margin-left: auto` pushes the whole meta+kebab group right, fitting
+  inline after the title). Below 480px, a media query gives it
+  `flex-basis: 100%` and `justify-content: space-between`, so it always
+  wraps as one full-width line with meta on the left and the kebab on the
+  right — no more two separately-wrapped fragments with dead space between
+  them. Verified by forcing the mobile breakpoint's rules in the browser at
+  several nesting depths.
+
+- [x] **14. Add a visual treatment for overdue due dates.** A due date
+  from last week currently looks identical to one next month — no
+  urgency signal at all. Give an overdue (and not-done) row's due-date
+  text a warm/red treatment so it's noticeable at a glance, since
+  surfacing what's late is the main point of tracking due dates in a
+  personal tracker.
+  Done: the due-date portion of `.todo-meta` is now its own pill
+  (`.todo-due-badge` in `web/app.js`/`web/style.css`), accent-colored by
+  default and switching to a red/warm `.todo-due-badge--overdue` variant
+  (via a new `isOverdue()` check — strictly before today, and only when not
+  done) rather than plain inline text. Colors use `color-mix(in srgb,
+  var(--accent|--danger) N%, transparent)` for the background/border tints
+  so both badge variants adapt automatically to light/dark mode without
+  separate dark-mode rules. Verified in browser: a due date from before
+  today renders red, one in the future renders accent-indigo, both confirmed
+  in light and dark mode.
+
+- [ ] **15. Add a favicon / app icon.** There's currently no favicon, so
+  the browser tab and (per task 16) the iPhone home-screen icon both fall
+  back to a generic default — noticeable every time given this is meant
+  to be opened many times a day. Add a simple favicon and the icon sizes
+  needed for `apple-touch-icon` (used by task 16).
+
+- [ ] **16. Add Add-to-Home-Screen / PWA support.** The single highest-
+  leverage change for the stated Mac + iPhone daily-use case: a web app
+  manifest (name, theme color from task 11, icons from task 15) plus the
+  `apple-touch-icon` link and `apple-mobile-web-app-capable` meta tag, so
+  adding the page to the iPhone home screen launches it full-screen with
+  its own icon instead of as a bookmarked browser tab.
+
+- [x] **17. Add a "today" lens.** Everything currently renders in
+  tree/creation order with no regard for due date. Surface overdue/due-
+  today items above the rest (a sort/lens on the existing view is enough
+  — no new separate view needed) so opening the app each morning actually
+  shows what needs attention first, rather than requiring a scroll
+  through creation order.
+  Done: added `isUrgent()` (overdue or due today, and not done) and
+  `sortByUrgency()` in `web/app.js`, applied to both the root list in
+  `renderTree()` and each parent's children before rendering — a stable
+  sort (urgent items first, sorted by due date among themselves; everything
+  else keeps its original relative order) applied per sibling group, so the
+  tree structure itself is untouched, only the order within each level
+  changes. Deliberately separate from task 14's `isOverdue()` (strictly
+  before today) since "due today" should sort to the top without turning
+  red yet — sorting and the red-badge threshold are different thresholds on
+  purpose.
+
+- [ ] **18. Replace hard delete with a soft-delete flag.** Right now
+  `DELETE /todos/{id}` removes the row permanently (and cascades to
+  children via the DB's `ON DELETE CASCADE`), with no way to recover
+  from a mis-tap. Instead of deleting rows, add a `deleted` boolean
+  column to `TODO_ITEMS`; the delete action sets it rather than removing
+  the row, and every read path (`get_root_todos`, `get_todo`,
+  `_populate_children`) excludes rows where `deleted` is true. Note:
+  cascading needs explicit handling once this is soft — `ON DELETE
+  CASCADE` no longer fires (nothing is actually deleted), so deleting a
+  parent should mark its whole subtree `deleted` explicitly, mirroring
+  `cascade_done`'s recursive-CTE approach rather than a new Python
+  recursion. Out of scope for this task: any UI for viewing/restoring
+  deleted items — this task only makes delete non-destructive at the
+  data layer, matching "nothing actually deletes" as stated, not
+  building a trash/restore feature.
+
 ## Notes / non-issues worth preserving
 
 - The Split flow (inline textarea, one item per line, Save/Cancel) works well

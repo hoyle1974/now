@@ -1,4 +1,17 @@
-/* Add form: input takes the space, button stays small and secondary
+/* A single accent color, applied sparingly (Pico's own primary-color
+   variables, the checkbox fill, and due-date badges) rather than scattered
+   ad-hoc colors, so the app reads as designed instead of default-scaffolded. */
+:root {
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --danger: #dc2626;
+  --pico-primary: var(--accent);
+  --pico-primary-hover: var(--accent-hover);
+  --pico-primary-underline: var(--accent);
+  --pico-primary-focus: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+/* Add form: input takes the space, button stays small
    since pressing Enter in the input already submits the form. */
 .add-form {
   display: flex;
@@ -87,6 +100,7 @@
   width: 1.25rem;
   height: 1.25rem;
   margin: 0;
+  accent-color: var(--accent);
 }
 
 .todo-toggle {
@@ -128,13 +142,53 @@
 }
 
 .todo-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.8rem;
   color: var(--pico-muted-color);
 }
 
+.todo-due-badge {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+}
+
+/* Overdue and not done — the one case in a personal daily tracker that
+   should actually grab your eye, so it gets a warm color instead of accent. */
+.todo-due-badge--overdue {
+  color: var(--danger, #dc2626);
+  background: color-mix(in srgb, var(--danger, #dc2626) 15%, transparent);
+  border-color: color-mix(in srgb, var(--danger, #dc2626) 35%, transparent);
+}
+
+/* Groups the meta text and the kebab together so that when the row wraps
+   on a narrow (mobile) viewport, they land on one shared second line
+   (meta left, kebab right) instead of each wrapping to its own line with
+   dead space between — see the mobile-only override below. */
+.todo-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+@media (max-width: 480px) {
+  .todo-meta-row {
+    flex-basis: 100%;
+    margin-left: 0;
+    justify-content: space-between;
+    margin-top: 0.25rem;
+  }
+}
+
 .todo-menu {
   position: relative;
-  margin-left: auto;
   flex: 0 0 auto;
 }
 

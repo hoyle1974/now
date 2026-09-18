@@ -122,6 +122,39 @@ function formatDate(isoString) {
   });
 }
 
+// Strictly overdue (due date has already passed) — used for the red
+// due-date badge treatment, which should stay off for something due later
+// today.
+function isOverdue(todo) {
+  if (todo.done || !todo.due_date) return false;
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  return new Date(todo.due_date) < startOfToday;
+}
+
+// Overdue OR due today — used for sorting, since "due today" is also worth
+// surfacing to the top even though it isn't red yet.
+function isUrgent(todo) {
+  if (todo.done || !todo.due_date) return false;
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  return new Date(todo.due_date) <= endOfToday;
+}
+
+// Surfaces overdue/due-today items first within each sibling group (stable
+// otherwise via Array.sort), so opening the tree each day shows what needs
+// attention first without flattening or otherwise disturbing the underlying
+// parent/child structure.
+function sortByUrgency(todos) {
+  return [...todos].sort((a, b) => {
+    const aUrgent = isUrgent(a);
+    const bUrgent = isUrgent(b);
+    if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
+    if (aUrgent && bUrgent) return new Date(a.due_date) - new Date(b.due_date);
+    return 0;
+  });
+}
+
 // Descendant counts for every node, computed once per render in one
 // memoized bottom-up pass rather than re-walking each parent's subtree
 // independently (which would revisit shared descendants once per ancestor).
@@ -216,11 +249,24 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   // on every parent in a deep tree is a lot of low-value text for little
   // payoff, so it's reserved for leaf rows where it's the only metadata.
   // Due date is always shown when set — that one's actionable.
-  const metaParts = hasChildren ? [] : [`Created ${formatDate(todo.create_date)}`];
-  if (todo.due_date) {
-    metaParts.push(`Due ${formatDate(todo.due_date)}`);
+  if (!hasChildren) {
+    const created = document.createElement("span");
+    created.textContent = `Created ${formatDate(todo.create_date)}`;
+    meta.appendChild(created);
   }
-  meta.textContent = metaParts.join(" · ");
+  if (todo.due_date) {
+    const dueBadge = document.createElement("span");
+    dueBadge.className = "todo-due-badge";
+    if (isOverdue(todo)) {
+      dueBadge.classList.add("todo-due-badge--overdue");
+    }
+    dueBadge.textContent = `Due ${formatDate(todo.due_date)}`;
+    meta.appendChild(dueBadge);
+  }
+
+  // Groups with the kebab below so the two share one line when wrapped.
+  const metaRow = document.createElement("span");
+  metaRow.className = "todo-meta-row";
 
   const menuWrap = document.createElement("span");
   menuWrap.className = "todo-menu";
@@ -270,11 +316,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     menuWrap.appendChild(menu);
   }
 
+  metaRow.append(meta, menuWrap);
+
   row.append(toggle, checkboxHit, label);
   if (badge) {
     row.appendChild(badge);
   }
-  row.append(meta, menuWrap);
+  row.appendChild(metaRow);
   li.appendChild(row);
 
   if (isActivePanel("split", todo.todo_id)) {
@@ -291,8 +339,8 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   if (hasChildren && !isCollapsed) {
     const childList = document.createElement("ul");
-    for (const childId of todo.child_ids) {
-      const child = todosById.get(childId);
+    const children = sortByUrgency(todo.child_ids.map((id) => todosById.get(id)));
+    for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
     li.appendChild(childList);
@@ -414,7 +462,7 @@ function renderTree() {
     return;
   }
   const descendantCounts = computeDescendantCounts(lastTodosById);
-  for (const root of lastRoots) {
+  for (const root of sortByUrgency(lastRoots)) {
     treeEl.appendChild(renderNode(root, lastTodosById, descendantCounts));
   }
 }
