@@ -105,6 +105,24 @@ def delete_todo(todo_id: models.TodoId):
             """,(str(todo_id),))
         get_conn().commit()
 
+def undelete_todo(todo_id: models.TodoId):
+    """Restore a soft-deleted todo and its entire subtree"""
+    with _lock:
+        cur = get_conn().cursor()
+        # Undelete the target row and its whole subtree in one statement,
+        # mirroring the logic of delete_todo but marking deleted = 0.
+        cur.execute("""
+            WITH RECURSIVE subtree(todo_id) AS (
+                SELECT ?
+                UNION ALL
+                SELECT t.todo_id FROM TODO_ITEMS t
+                JOIN subtree s ON t.parent_id = s.todo_id
+            )
+            UPDATE TODO_ITEMS SET deleted = 0
+            WHERE todo_id IN (SELECT todo_id FROM subtree)
+            """,(str(todo_id),))
+        get_conn().commit()
+
 def update_todo(todo: models.Todo, cascade_done: bool = False):
     with _lock:
         cur = get_conn().cursor()

@@ -109,14 +109,16 @@ def delete_todo(todo_id: uuid.UUID) -> None:
         db.update_todo(todo)
 
 @app.patch("/todos/{todo_id}/undelete", response_model=models.Todo)
-def undelete_todo(todo_id: uuid.UUID) -> models.Todo:
-    """Restore a soft-deleted todo (undo)"""
+def undelete_todo_endpoint(todo_id: uuid.UUID) -> models.Todo:
+    """Restore a soft-deleted todo and its entire subtree (undo)"""
     todo = db.get_deleted_todo(models.TodoId(todo_id))
     if todo is None:
         raise HTTPException(404)
-    todo.deleted = False
-    db.update_todo(todo)
-    return todo
+    # Undelete the entire subtree
+    db.undelete_todo(models.TodoId(todo_id))
+    # Return the restored todo (need to reload to get the latest state)
+    restored = db.get_todo(models.TodoId(todo_id))
+    return restored if restored else todo
 
 @app.post("/todos/{todo_id}/split", response_model=models.Todo)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
