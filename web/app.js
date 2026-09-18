@@ -403,19 +403,30 @@ function attachRowInteractions(row, todo) {
       const draggedOrder = draggedTodo.order_idx ?? 0;
       const targetOrder = targetTodo.order_idx ?? 0;
 
+      console.log(`Drag: from order ${draggedOrder} to ${targetOrder}`);
+
       // Move multiple times if needed to reach target position
-      if (draggedOrder < targetOrder) {
-        // Need to move down
-        console.log(`Dragging from ${draggedOrder} to ${targetOrder}: moving down`);
-        for (let i = draggedOrder; i < targetOrder; i++) {
-          await moveTodo(todoId, "down");
+      try {
+        if (draggedOrder < targetOrder) {
+          // Need to move down
+          console.log(`Moving down ${targetOrder - draggedOrder} positions`);
+          for (let i = draggedOrder; i < targetOrder; i++) {
+            await apiFetch(`${API_BASE}/${todoId}/move/down`, { method: "PATCH" });
+          }
+        } else if (draggedOrder > targetOrder) {
+          // Need to move up
+          console.log(`Moving up ${draggedOrder - targetOrder} positions`);
+          for (let i = draggedOrder; i > targetOrder; i--) {
+            await apiFetch(`${API_BASE}/${todoId}/move/up`, { method: "PATCH" });
+          }
         }
-      } else if (draggedOrder > targetOrder) {
-        // Need to move up
-        console.log(`Dragging from ${draggedOrder} to ${targetOrder}: moving up`);
-        for (let i = draggedOrder; i > targetOrder; i--) {
-          await moveTodo(todoId, "up");
+        // Reload to show changes
+        if (draggedOrder !== targetOrder) {
+          console.log("Reloading after moves");
+          await loadAndRender();
         }
+      } catch (moveErr) {
+        console.error("Move sequence failed:", moveErr);
       }
     } catch (err) {
       console.error("Drop error:", err);
