@@ -29,6 +29,11 @@ async function toggleDone(todoId, done) {
   await loadAndRender();
 }
 
+async function deleteTodo(todoId) {
+  await apiFetch(`${API_BASE}/${todoId}`, { method: "DELETE" });
+  await loadAndRender();
+}
+
 async function fetchTree() {
   const roots = await apiFetch(`${API_BASE}/root`);
   const todosById = new Map();
@@ -59,7 +64,12 @@ function renderNode(todo, todosById) {
   const label = document.createElement("span");
   label.textContent = " " + todo.title + " ";
 
-  li.append(checkbox, label);
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.textContent = "Delete";
+  deleteBtn.addEventListener("click", () => deleteTodo(todo.todo_id));
+
+  li.append(checkbox, label, deleteBtn);
 
   if (todo.child_ids.length > 0) {
     const childList = document.createElement("ul");
