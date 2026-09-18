@@ -13,6 +13,11 @@ templates = Jinja2Templates(directory="templates")
 
 db.init()
 
+@app.get("/health")
+def health_check():
+    """Health check endpoint for Cloud Run"""
+    return {"status": "ok"}
+
 @app.post("/todos", response_model=models.Todo)
 def create_todo(body: models.TodoCreate) -> models.Todo:
     todo = models.Todo(title = body.title)
