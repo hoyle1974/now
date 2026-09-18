@@ -267,18 +267,41 @@ review's suggestions the user asked to act on now.
   today renders red, one in the future renders accent-indigo, both confirmed
   in light and dark mode.
 
-- [ ] **15. Add a favicon / app icon.** There's currently no favicon, so
+- [x] **15. Add a favicon / app icon.** There's currently no favicon, so
   the browser tab and (per task 16) the iPhone home-screen icon both fall
   back to a generic default — noticeable every time given this is meant
   to be opened many times a day. Add a simple favicon and the icon sizes
   needed for `apple-touch-icon` (used by task 16).
+  Done: a simple rounded-square mark in the task 11 accent color
+  (`#4f46e5`) with a centered white checkmark, generated at every needed
+  size with Pillow via a one-off `scripts/generate_icons.py` (not a
+  runtime dependency — Pillow isn't in `requirements.txt`, the script is a
+  dev tool you re-run only if the icon design changes). Produced
+  `web/favicon.ico` (16/32px, for the browser tab), `web/icons/icon-192.png`
+  and `web/icons/icon-512.png` (for task 16's manifest), and
+  `web/icons/apple-touch-icon.png` (180px, solid background since iOS
+  ignores transparency and rounds the corners itself). Wired up via
+  `<link rel="icon">`/`<link rel="apple-touch-icon">` in `web/index.html`.
+  Verified: all four files serve with 200, and the generated PNGs were
+  visually inspected (clean flat icon, no rendering artifacts).
 
-- [ ] **16. Add Add-to-Home-Screen / PWA support.** The single highest-
+- [x] **16. Add Add-to-Home-Screen / PWA support.** The single highest-
   leverage change for the stated Mac + iPhone daily-use case: a web app
   manifest (name, theme color from task 11, icons from task 15) plus the
   `apple-touch-icon` link and `apple-mobile-web-app-capable` meta tag, so
   adding the page to the iPhone home screen launches it full-screen with
   its own icon instead of as a bookmarked browser tab.
+  Done: added `web/manifest.json` (name "Todos", `display: "standalone"`,
+  `theme_color`/icons matching tasks 11/15) plus `<link rel="manifest">`,
+  `<meta name="theme-color">`, and the `apple-mobile-web-app-*` meta tags
+  in `web/index.html`. Deliberately no service worker / offline caching —
+  that's real added complexity (cache invalidation) this app doesn't need
+  just to get full-screen home-screen launch, which doesn't require one.
+  Verified: `/manifest.json` serves 200 and parses as valid JSON; the
+  `apple-touch-icon` + `apple-mobile-web-app-capable` combination is what
+  actually makes iOS "Add to Home Screen" launch full-screen with the
+  right icon (not independently testable outside a real iPhone, but both
+  halves are in place and each serves correctly).
 
 - [x] **17. Add a "today" lens.** Everything currently renders in
   tree/creation order with no regard for due date. Surface overdue/due-
@@ -297,7 +320,7 @@ review's suggestions the user asked to act on now.
   red yet — sorting and the red-badge threshold are different thresholds on
   purpose.
 
-- [ ] **18. Replace hard delete with a soft-delete flag.** Right now
+- [x] **18. Replace hard delete with a soft-delete flag.** Right now
   `DELETE /todos/{id}` removes the row permanently (and cascades to
   children via the DB's `ON DELETE CASCADE`), with no way to recover
   from a mis-tap. Instead of deleting rows, add a `deleted` boolean
@@ -312,6 +335,23 @@ review's suggestions the user asked to act on now.
   deleted items — this task only makes delete non-destructive at the
   data layer, matching "nothing actually deletes" as stated, not
   building a trash/restore feature.
+  Done: `db.init()` adds `deleted INTEGER NOT NULL DEFAULT 0` to the
+  `CREATE TABLE` (for fresh DBs, e.g. the test suite's `:memory:` one) and
+  runs a `PRAGMA table_info` check + `ALTER TABLE ... ADD COLUMN` migration
+  for the pre-existing real `todo.db`, so existing personal task data
+  wasn't dropped/recreated. `db.delete_todo` now runs a single `WITH
+  RECURSIVE` CTE `UPDATE ... SET deleted = 1` seeded with the target id
+  itself (covering the target row and its whole subtree in one statement),
+  following `cascade_done`'s pattern as specified. `get_root_todos`,
+  `get_todo`, and `_populate_children` all added `deleted = 0` to their
+  `WHERE` clauses, so `get_todo` on a now-deleted id still 404s exactly as
+  before. `Todo` gained a `deleted: bool` field (not added to
+  `TodoCreate`/`TodoUpdate`, since deletion stays on the `DELETE` endpoint).
+  No UI/API for viewing or restoring deleted items, per scope. Verified:
+  `pytest test_main.py` passes (11/11, unchanged) and, live in the browser,
+  deleting an item removes it from the list while `sqlite3 todo.db "select
+  title, deleted from TODO_ITEMS"` confirms the row is still present with
+  `deleted = 1`.
 
 ## Notes / non-issues worth preserving
 

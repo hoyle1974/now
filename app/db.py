@@ -38,9 +38,18 @@ def init(memory:bool = False):
             create_date TEXT NOT NULL,
             due_date TEXT,
             order_idx INTEGER,
-            parent_id TEXT REFERENCES TODO_ITEMS(todo_id) ON DELETE CASCADE
+            parent_id TEXT REFERENCES TODO_ITEMS(todo_id) ON DELETE CASCADE,
+            deleted INTEGER NOT NULL DEFAULT 0
         );
         """)
+
+    # Migration: an existing todo.db predating the `deleted` column won't
+    # get it from CREATE TABLE IF NOT EXISTS, so add it explicitly.
+    cur.execute("PRAGMA table_info(TODO_ITEMS)")
+    columns = [row["name"] for row in cur.fetchall()]
+    if "deleted" not in columns:
+        cur.execute("ALTER TABLE TODO_ITEMS ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+
     conn.commit()
 
 def get_conn():
@@ -79,8 +88,20 @@ def create_todo(todo:models.Todo):
 def delete_todo(todo_id: models.TodoId):
     with _lock:
         cur = get_conn().cursor()
+        # Soft delete: mark the target row and its whole subtree as
+        # deleted in one statement, rather than walking it level by
+        # level in Python. The recursive CTE is seeded with the target
+        # id itself (not just its children) since, unlike cascade_done,
+        # there's no separate UPDATE for the root row here.
         cur.execute("""
-            DELETE FROM TODO_ITEMS where todo_id = ?
+            WITH RECURSIVE subtree(todo_id) AS (
+                SELECT ?
+                UNION ALL
+                SELECT t.todo_id FROM TODO_ITEMS t
+                JOIN subtree s ON t.parent_id = s.todo_id
+            )
+            UPDATE TODO_ITEMS SET deleted = 1
+            WHERE todo_id IN (SELECT todo_id FROM subtree)
             """,(str(todo_id),))
         get_conn().commit()
 
@@ -141,7 +162,7 @@ def update_parent_id(todo:models.Todo, parent_id: models.TodoId | None) -> model
 def _populate_children(cur: sqlite3.Cursor, todo: models.Todo):
     child_ids = []
     cur.execute("""
-        select todo_id from TODO_ITEMS where parent_id = ?
+        select todo_id from TODO_ITEMS where parent_id = ? AND deleted = 0
         """, (str(todo.todo_id),))
     rows = cur.fetchall()
     for row in rows:
@@ -154,7 +175,7 @@ def get_root_todos() -> list[models.Todo]:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date, due_date, order_idx, parent_id from TODO_ITEMS where parent_id is null
+            select todo_id, title, done, create_date, due_date, order_idx, parent_id from TODO_ITEMS where parent_id is null AND deleted = 0
             """)
         rows = cur.fetchall()
 
@@ -178,7 +199,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ?
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ? AND deleted = 0
             """, (str(todo_id),))
         row = cur.fetchone()
         if row is None:
@@ -201,7 +222,9 @@ def split_into_children(todo: models.Todo, descriptions: list[str]) -> models.To
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
-        cur.execute("""select COALESCE(max(order_idx), -1) as m from TODO_ITEMS where parent_id = ?""", (str(todo.todo_id),))
+        # Exclude soft-deleted children so their order_idx doesn't push new
+        # siblings' indices higher than necessary among currently-visible ones.
+        cur.execute("""select COALESCE(max(order_idx), -1) as m from TODO_ITEMS where parent_id = ? AND deleted = 0""", (str(todo.todo_id),))
         row = cur.fetchone()
         if row is None:
             raise Exception(f"unexpected result {row}")

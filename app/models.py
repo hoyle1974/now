@@ -32,3 +32,4 @@ class Todo(BaseModel):
     order_idx: int | None = Field(None)
     parent_id: TodoId | None = Field(None)
     child_ids: list[TodoId] = Field([])
+    deleted: bool = Field(False)
