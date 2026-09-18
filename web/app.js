@@ -391,12 +391,32 @@ function attachRowInteractions(row, todo) {
         return;
       }
 
-      const rect = row.getBoundingClientRect();
-      const midY = rect.top + rect.height / 2;
-      const direction = e.clientY < midY ? "up" : "down";
+      // Find the dragged todo's order to determine actual direction needed
+      const draggedTodo = lastTodosById.get(todoId);
+      const targetTodo = todo;
 
-      console.log(`Dropping on ${todo.todo_id}, direction: ${direction}`);
-      await moveTodo(todoId, direction);
+      if (!draggedTodo || !targetTodo) {
+        console.error("Could not find todos in map");
+        return;
+      }
+
+      const draggedOrder = draggedTodo.order_idx ?? 0;
+      const targetOrder = targetTodo.order_idx ?? 0;
+
+      // Move multiple times if needed to reach target position
+      if (draggedOrder < targetOrder) {
+        // Need to move down
+        console.log(`Dragging from ${draggedOrder} to ${targetOrder}: moving down`);
+        for (let i = draggedOrder; i < targetOrder; i++) {
+          await moveTodo(todoId, "down");
+        }
+      } else if (draggedOrder > targetOrder) {
+        // Need to move up
+        console.log(`Dragging from ${draggedOrder} to ${targetOrder}: moving up`);
+        for (let i = draggedOrder; i > targetOrder; i--) {
+          await moveTodo(todoId, "up");
+        }
+      }
     } catch (err) {
       console.error("Drop error:", err);
     }
