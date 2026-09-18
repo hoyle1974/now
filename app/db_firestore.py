@@ -58,7 +58,23 @@ def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> mode
 
 def get_root_todos() -> list[models.Todo]:
     """Get all root-level todos (parent_id is None)"""
-    raise NotImplementedError("Firestore get_root_todos")
+    global _todos_collection
+
+    docs = _todos_collection.where("parent_id", "==", None).where("deleted", "==", False).order_by("order_idx").get()
+
+    todos = []
+    for doc in docs:
+        data = doc.to_dict()
+        todo = db_firestore_helpers.doc_to_todo(data)
+
+        # Populate children
+        children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).where("deleted", "==", False).order_by("order_idx").get()
+        child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+        todo.child_ids = child_ids
+
+        todos.append(todo)
+
+    return todos
 
 def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID (excludes soft-deleted)"""
@@ -83,7 +99,21 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
 
 def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID regardless of deleted status"""
-    raise NotImplementedError("Firestore get_deleted_todo")
+    global _todos_collection
+
+    doc = _todos_collection.document(str(todo_id)).get()
+    if not doc.exists:
+        return None
+
+    data = doc.to_dict()
+    todo = db_firestore_helpers.doc_to_todo(data)
+
+    # Populate children (including deleted)
+    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).order_by("order_idx").get()
+    child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+    todo.child_ids = child_ids
+
+    return todo
 
 def split_into_children(todo: models.Todo, descriptions: list[str], due_date=None) -> models.Todo:
     """Create multiple child todos from descriptions"""
