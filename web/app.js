@@ -66,13 +66,13 @@ function showUndo(todoId) {
   undoBtn.style.cssText = "background:none; border:none; color:inherit; text-decoration:underline; cursor:pointer; font:inherit;";
   undoBtn.onclick = async () => {
     clearTimeout(undoTimer);
-    await apiFetch(`${API_BASE}/${todoId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deleted: false }),
-    });
-    errorDiv.hidden = true;
-    await loadAndRender();
+    try {
+      await apiFetch(`${API_BASE}/${todoId}/undelete`, { method: "PATCH" });
+      errorDiv.hidden = true;
+      await loadAndRender();
+    } catch (err) {
+      console.error("Undo failed:", err);
+    }
   };
   errorDiv.appendChild(undoBtn);
 

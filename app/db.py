@@ -200,7 +200,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date,due_date,order_idx, parent_id from TODO_ITEMS where todo_id = ? AND deleted = 0
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted from TODO_ITEMS where todo_id = ? AND deleted = 0
             """, (str(todo_id),))
         row = cur.fetchone()
         if row is None:
@@ -213,7 +213,33 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
             create_date =  datetime.datetime.fromisoformat(row["create_date"]),
             due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
             order_idx = row["order_idx"],
-            parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
+            parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None,
+            deleted = True if row["deleted"] == 1 else False
+        )
+        _populate_children(cur, todo)
+
+        return todo
+
+def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
+    """Get a todo regardless of deleted status (for undo operations)"""
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("""
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted from TODO_ITEMS where todo_id = ?
+            """, (str(todo_id),))
+        row = cur.fetchone()
+        if row is None:
+            return None
+
+        todo = models.Todo(
+            todo_id=models.TodoId(uuid.UUID(row["todo_id"])),
+            title = row["title"],
+            done = True if row["done"] == 1 else False,
+            create_date =  datetime.datetime.fromisoformat(row["create_date"]),
+            due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
+            order_idx = row["order_idx"],
+            parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None,
+            deleted = True if row["deleted"] == 1 else False
         )
         _populate_children(cur, todo)
 

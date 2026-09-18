@@ -108,6 +108,16 @@ def delete_todo(todo_id: uuid.UUID) -> None:
         todo.deleted = True
         db.update_todo(todo)
 
+@app.patch("/todos/{todo_id}/undelete", response_model=models.Todo)
+def undelete_todo(todo_id: uuid.UUID) -> models.Todo:
+    """Restore a soft-deleted todo (undo)"""
+    todo = db.get_deleted_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404)
+    todo.deleted = False
+    db.update_todo(todo)
+    return todo
+
 @app.post("/todos/{todo_id}/split", response_model=models.Todo)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
     todo = db.get_todo(models.TodoId(todo_id))
