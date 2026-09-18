@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Todos</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="container">
+    <h1>Todos</h1>
+    <div id="error" hidden></div>
+
+    <form id="add-form">
+      <input type="text" id="add-title" name="title" placeholder="New todo" required>
+      <button type="submit">Add</button>
+    </form>
+
+    <ul id="todo-tree"></ul>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

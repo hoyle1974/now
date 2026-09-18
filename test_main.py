@@ -173,3 +173,10 @@ def test_print(db_setup, create_test_data):
     assert response.status_code == 200
 
 
+def test_root_serves_frontend_shell(db_setup):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<title>Todos</title>" in response.text
+
+

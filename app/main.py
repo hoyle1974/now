@@ -1,6 +1,7 @@
 from __future__ import annotations
 from fastapi.templating import Jinja2Templates
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 import uuid
 from app import db
 from app import models
@@ -86,4 +87,5 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
     return db.split_into_children(todo, body.descriptions)
 
 
+app.mount("/", StaticFiles(directory="web", html=True), name="web")
 
