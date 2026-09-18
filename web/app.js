@@ -587,6 +587,39 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
         parentId: String(todo.parent_id),
       }));
       row.classList.add("dragging");
+
+      // Create visual ghost that follows the cursor
+      const dragGhost = row.cloneNode(true);
+      dragGhost.id = "drag-ghost-" + Math.random();
+      dragGhost.style.cssText = `
+        position: fixed;
+        pointer-events: none;
+        opacity: 0.8;
+        z-index: 10000;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+        background: var(--card);
+        border: 2px solid var(--accent);
+        border-radius: 12px;
+        width: 300px;
+        left: 0;
+        top: 0;
+      `;
+      document.body.appendChild(dragGhost);
+
+      // Update ghost position on drag
+      const updateGhost = (moveEvent) => {
+        dragGhost.style.left = (moveEvent.clientX - 150) + 'px';
+        dragGhost.style.top = (moveEvent.clientY - 30) + 'px';
+      };
+
+      document.addEventListener("dragover", updateGhost);
+
+      // Cleanup on dragend
+      const cleanup = () => {
+        dragGhost.remove();
+        document.removeEventListener("dragover", updateGhost);
+      };
+      dragHandle.addEventListener("dragend", cleanup, { once: true });
     });
 
     dragHandle.addEventListener("dragend", () => {
