@@ -1,33 +1,36 @@
-# Day 11 — personal project: a todo app, your design
+# now — A Personal Todo App
 
-Stack: FastAPI + server-rendered Jinja2 HTML (no separate JS frontend)
-+ stdlib `sqlite3` for persistence. No ORM.
+A minimal todo app built with **FastAPI + server-rendered Jinja2 HTML** + **SQLite** (migrating to **Firestore** on GCP CloudRun).
+
+Designed as a learning project, but simple enough to actually use day-to-day.
+
+## Stack
+
+- **Backend:** FastAPI + Jinja2 (server-rendered HTML, no separate JS frontend)
+- **Database:** SQLite (current) → Firestore (planned)
+- **Deployment:** Local dev → GCP CloudRun + Firestore
 
 ## Setup
 
 ```bash
-cd day11
-python3.13 -m venv .venv       # separate venv from the rest of the repo, optional
+python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
+Server runs at `http://localhost:8000`
+
 ## What's here
 
-- `app/main.py` — FastAPI app instance and Jinja2 template setup. No
-  routes yet.
-- `app/db.py` — empty. This is where your `sqlite3` connection
-  handling and schema go.
-- `templates/base.html` — a bare HTML shell (no styling, no logic) so
-  `main.py` has something to render if you want to sanity-check the
-  server boots and Jinja2 wiring works before writing real pages.
-- `static/` — empty, for any CSS/JS you want to add later.
+- `app/main.py` — FastAPI app with routes and Jinja2 templating
+- `app/db.py` — SQLite connection and schema (will migrate to Firestore)
+- `templates/` — Jinja2 templates for UI
+- `static/` — CSS/JS and other assets
+- `web/` — Frontend JavaScript for drag-and-drop and interactions
+- `scripts/` — Utility scripts
+- `docs/` — Project documentation
 
-## What's NOT here, on purpose
+## Next: GCP Migration
 
-No models, no schema, no routes, no feature list. This is your
-project — scope, data model, and feature set are your calls. From here
-on, ask specific Python/API questions as you go; answers will point
-you at the right stdlib/library call or explain a mechanic, not design
-or write the feature for you.
+This app will be deployed to GCP CloudRun with Firestore as the database using `zilch-gcp` for infrastructure automation.
