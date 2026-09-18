@@ -182,6 +182,8 @@ svg {
   gap: 4px;
   min-height: var(--row-min);
   padding: 4px 4px 4px 6px;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* Hairline between rows inside a card, inset to the text column the way
@@ -374,6 +376,9 @@ svg {
   font-size: 18px;
   font-weight: 300;
   letter-spacing: -2px;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .todo-drag-handle:active {
