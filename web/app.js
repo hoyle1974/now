@@ -918,10 +918,14 @@ function renderTree() {
 }
 
 async function loadAndRender() {
+  console.log("loadAndRender: fetching tree...");
   const { roots, todosById } = await fetchTree();
+  console.log(`loadAndRender: got ${roots.length} roots, ${todosById.size} todos`);
   lastRoots = roots;
   lastTodosById = todosById;
+  console.log("loadAndRender: calling renderTree()");
   renderTree();
+  console.log("loadAndRender: done");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
