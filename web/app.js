@@ -406,27 +406,38 @@ function attachRowInteractions(row, todo) {
       console.log(`Drag: from order ${draggedOrder} to ${targetOrder}`);
 
       // Move multiple times if needed to reach target position
-      try {
-        if (draggedOrder < targetOrder) {
-          // Need to move down
-          console.log(`Moving down ${targetOrder - draggedOrder} positions`);
-          for (let i = draggedOrder; i < targetOrder; i++) {
-            await apiFetch(`${API_BASE}/${todoId}/move/down`, { method: "PATCH" });
-          }
-        } else if (draggedOrder > targetOrder) {
-          // Need to move up
-          console.log(`Moving up ${draggedOrder - targetOrder} positions`);
-          for (let i = draggedOrder; i > targetOrder; i--) {
-            await apiFetch(`${API_BASE}/${todoId}/move/up`, { method: "PATCH" });
+      if (draggedOrder < targetOrder) {
+        // Need to move down
+        console.log(`Moving down ${targetOrder - draggedOrder} positions`);
+        for (let i = draggedOrder; i < targetOrder; i++) {
+          try {
+            console.log(`  Move ${i + 1}/${targetOrder - draggedOrder}: calling /move/down`);
+            const result = await apiFetch(`${API_BASE}/${todoId}/move/down`, { method: "PATCH" });
+            console.log(`  Move ${i + 1} result:`, result);
+          } catch (err) {
+            console.error(`  Move ${i + 1} failed:`, err.message);
+            break;
           }
         }
-        // Reload to show changes
-        if (draggedOrder !== targetOrder) {
-          console.log("Reloading after moves");
-          await loadAndRender();
+      } else if (draggedOrder > targetOrder) {
+        // Need to move up
+        console.log(`Moving up ${draggedOrder - targetOrder} positions`);
+        for (let i = draggedOrder; i > targetOrder; i--) {
+          try {
+            console.log(`  Move ${draggedOrder - i + 1}/${draggedOrder - targetOrder}: calling /move/up`);
+            const result = await apiFetch(`${API_BASE}/${todoId}/move/up`, { method: "PATCH" });
+            console.log(`  Move ${draggedOrder - i + 1} result:`, result);
+          } catch (err) {
+            console.error(`  Move ${draggedOrder - i + 1} failed:`, err.message);
+            break;
+          }
         }
-      } catch (moveErr) {
-        console.error("Move sequence failed:", moveErr);
+      }
+
+      // Reload to show changes
+      if (draggedOrder !== targetOrder) {
+        console.log("Reloading after moves");
+        await loadAndRender();
       }
     } catch (err) {
       console.error("Drop error:", err);
