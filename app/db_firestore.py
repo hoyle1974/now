@@ -65,8 +65,9 @@ def reorder_todo(todo_id: models.TodoId, direction: str):
     if not parent_id:
         raise Exception("Cannot reorder root todos")
 
-    sibling_docs = _todos_collection.where("parent_id", "==", parent_id).where("deleted", "==", False).order_by("order_idx").get()
-    siblings = [(doc.to_dict()["todo_id"], doc.to_dict().get("order_idx")) for doc in sibling_docs]
+    sibling_docs = _todos_collection.where("parent_id", "==", parent_id).get()
+    siblings_data = [(doc.to_dict()["todo_id"], doc.to_dict().get("order_idx", 999999)) for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
+    siblings = sorted(siblings_data, key=lambda x: x[1])
 
     if len(siblings) < 2:
         raise Exception("Cannot move: no siblings to swap with")
@@ -149,19 +150,27 @@ def get_root_todos() -> list[models.Todo]:
     """Get all root-level todos (parent_id is None)"""
     global _todos_collection
 
-    docs = _todos_collection.where("parent_id", "==", None).where("deleted", "==", False).order_by("order_idx").get()
+    docs = _todos_collection.where("parent_id", "==", None).get()
 
     todos = []
     for doc in docs:
         data = doc.to_dict()
+        if data.get("deleted", False):
+            continue
+
         todo = db_firestore_helpers.doc_to_todo(data)
 
         # Populate children
-        children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).where("deleted", "==", False).order_by("order_idx").get()
-        child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+        children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).get()
+        children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs if not c.to_dict().get("deleted", False)]
+        children_sorted = sorted(children_data, key=lambda x: x[1])
+        child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
         todo.child_ids = child_ids
 
         todos.append(todo)
+
+    # Sort by order_idx
+    todos.sort(key=lambda t: t.order_idx if t.order_idx is not None else 999999)
 
     return todos
 
@@ -198,8 +207,10 @@ def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     todo = db_firestore_helpers.doc_to_todo(data)
 
     # Populate children (including deleted)
-    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).order_by("order_idx").get()
-    child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).get()
+    children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs]
+    children_sorted = sorted(children_data, key=lambda x: x[1])
+    child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
     todo.child_ids = child_ids
 
     return todo
