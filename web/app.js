@@ -339,7 +339,7 @@ function attachRowInteractions(row, todo) {
   let touchStartY = 0;
   let swiping = false;
 
-  // Drag-and-drop drop target indicator
+  // Drag-and-drop drop target indicator + insertion point animation
   row.addEventListener("dragover", (e) => {
     if (todo.parent_id) {
       e.preventDefault();
@@ -361,12 +361,43 @@ function attachRowInteractions(row, todo) {
         } else {
           row.classList.add("drag-over-after");
         }
+
+        // Find the parent container and shift all sibling rows
+        let parentList = row.closest(".todo-children");
+        if (!parentList) {
+          console.log("DEBUG: no todo-children found");
+          return;
+        }
+
+        const allRows = Array.from(parentList.querySelectorAll(":scope > li > .todo-row"));
+        const targetIdx = allRows.indexOf(row);
+        console.log(`dragover row ${targetIdx}: ${allRows.length} total, isDropBefore=${isDropBefore}`);
+
+        allRows.forEach((r, idx) => {
+          if (r === row) {
+            r.style.transform = "translateY(0)";
+          } else if (isDropBefore && idx >= targetIdx) {
+            r.style.transform = "translateY(52px)";
+            console.log(`  shift ${idx} down`);
+          } else if (!isDropBefore && idx <= targetIdx) {
+            r.style.transform = "translateY(-52px)";
+            console.log(`  shift ${idx} up`);
+          } else {
+            r.style.transform = "translateY(0)";
+          }
+        });
       }
     }
   });
 
   row.addEventListener("dragleave", () => {
     row.classList.remove("drag-over-before", "drag-over-after");
+    let parentList = row.closest(".todo-children");
+    if (parentList) {
+      parentList.querySelectorAll(":scope > li > .todo-row").forEach(r => {
+        r.style.transform = "translateY(0)";
+      });
+    }
   });
 
   row.addEventListener("drop", async (e) => {
@@ -626,10 +657,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     dragHandle.addEventListener("dragend", () => {
       row.classList.remove("dragging");
       // Reset all shifted rows
-      document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => {
-        el.classList.remove("drag-over-before", "drag-over-after");
-        el.style.transform = "translateY(0)";
-      });
+      let parentList = row.closest(".todo-children");
+      if (parentList) {
+        parentList.querySelectorAll(":scope > li > .todo-row").forEach(r => {
+          r.classList.remove("drag-over-before", "drag-over-after");
+          r.style.transform = "translateY(0)";
+        });
+      }
     });
   }
 
@@ -773,58 +807,6 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
-
-    // Attach dragover listener to the container to shift rows for insertion point
-    childList.addEventListener("dragover", (e) => {
-      const data = e.dataTransfer.getData("application/x-todo-id");
-      if (!data) return;
-
-      const { parentId } = JSON.parse(data);
-      if (parentId !== String(todo.todo_id)) return; // Only for children of this parent
-
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-
-      // Find which row we're hovering over
-      const allRows = Array.from(childList.querySelectorAll(":scope > li > .todo-row"));
-      const hoveredRow = allRows.find(row => {
-        const rect = row.getBoundingClientRect();
-        return e.clientY >= rect.top && e.clientY <= rect.bottom;
-      });
-
-      if (hoveredRow) {
-        const targetIndex = allRows.indexOf(hoveredRow);
-        const rect = hoveredRow.getBoundingClientRect();
-        const midY = rect.top + rect.height / 2;
-        const isDropBefore = e.clientY < midY;
-
-        console.log(`dragover container: hovering row ${targetIndex}, isDropBefore=${isDropBefore}`);
-
-        // Shift rows
-        allRows.forEach((row, idx) => {
-          if (row === hoveredRow) {
-            row.style.transform = "translateY(0)";
-          } else if (isDropBefore && idx >= targetIndex) {
-            console.log(`  shift down idx=${idx}`);
-            row.style.transform = "translateY(52px)";
-          } else if (!isDropBefore && idx <= targetIndex) {
-            console.log(`  shift up idx=${idx}`);
-            row.style.transform = "translateY(-52px)";
-          } else {
-            row.style.transform = "translateY(0)";
-          }
-        });
-      }
-    });
-
-    childList.addEventListener("dragleave", (e) => {
-      // Reset all rows when leaving the container
-      const allRows = Array.from(childList.querySelectorAll(":scope > li > .todo-row"));
-      allRows.forEach(row => {
-        row.style.transform = "translateY(0)";
-      });
-    });
-
     li.appendChild(childList);
   }
 
