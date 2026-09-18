@@ -718,7 +718,22 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   if (hasChildren && !isCollapsed) {
     const childList = document.createElement("ul");
     childList.className = "todo-children";
-    const children = sortByUrgency(todo.child_ids.map((id) => todosById.get(id)));
+    // Sort children by order_idx (respecting manual reordering), then by urgency
+    const children = todo.child_ids
+      .map((id) => todosById.get(id))
+      .sort((a, b) => {
+        // Primary sort: by order_idx (respects drag-and-drop reordering)
+        const aOrder = a.order_idx ?? 999999;
+        const bOrder = b.order_idx ?? 999999;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+
+        // Secondary sort: by urgency (within same order)
+        const aUrgent = isUrgent(a);
+        const bUrgent = isUrgent(b);
+        if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
+        if (aUrgent && bUrgent) return new Date(a.due_date) - new Date(b.due_date);
+        return 0;
+      });
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
