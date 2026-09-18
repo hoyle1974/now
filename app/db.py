@@ -89,9 +89,35 @@ def update_todo(todo:models.Todo):
         cur = get_conn().cursor()
         cur.execute("""
             UPDATE TODO_ITEMS
-            SET title = ?, done = ? WHERE todo_id = ?
-            """,(todo.title, todo.done, str(todo.todo_id)))
+            SET title = ?, done = ?, due_date = ? WHERE todo_id = ?
+            """,(
+            todo.title,
+            todo.done,
+            None if todo.due_date is None else todo.due_date.isoformat(),
+            str(todo.todo_id)))
         get_conn().commit()
+
+def _cascade_done_recursive(cur: sqlite3.Cursor, todo_id: str, done: bool):
+    cur.execute("""
+        UPDATE TODO_ITEMS SET done = ? WHERE parent_id = ?
+        """, (done, todo_id))
+    cur.execute("""
+        select todo_id from TODO_ITEMS where parent_id = ?
+        """, (todo_id,))
+    rows = cur.fetchall()
+    for row in rows:
+        _cascade_done_recursive(cur, row["todo_id"], done)
+
+def cascade_done(todo_id: models.TodoId, done: bool):
+    with _lock:
+        cur = get_conn().cursor()
+        cur.execute("BEGIN")
+        try:
+            _cascade_done_recursive(cur, str(todo_id), done)
+            get_conn().commit()
+        except Exception:
+            get_conn().rollback()
+            raise
 
 def update_parent_id(todo:models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
 

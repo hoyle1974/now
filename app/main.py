@@ -55,8 +55,13 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate) -> models.Todo:
         todo.title = body.title
     if body.done is not None:
         todo.done = body.done
+    if body.due_date is not None:
+        todo.due_date = body.due_date
 
     db.update_todo(todo)
+
+    if body.done is not None:
+        db.cascade_done(todo.todo_id, body.done)
 
     return todo
 

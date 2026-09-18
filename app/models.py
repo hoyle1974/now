@@ -15,6 +15,7 @@ class TodoCreate(BaseModel):
 class TodoUpdate(BaseModel):
     title: str | None = Field(None)
     done: bool | None = Field(None)
+    due_date: datetime.datetime | None = Field(None)
 
 class TodoUpdateParent(BaseModel):
     parent_id: TodoId | None = Field(None)
