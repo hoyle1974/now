@@ -357,8 +357,12 @@ function attachRowInteractions(row, todo) {
         row.classList.remove("drag-over-before", "drag-over-after");
         if (e.clientY < midY) {
           row.classList.add("drag-over-before");
+          // Shift this row down to show insertion space above it
+          row.style.transform = "translateY(52px)";
         } else {
           row.classList.add("drag-over-after");
+          // Shift this row up to show insertion space below it
+          row.style.transform = "translateY(-52px)";
         }
       }
     }
@@ -366,6 +370,7 @@ function attachRowInteractions(row, todo) {
 
   row.addEventListener("dragleave", () => {
     row.classList.remove("drag-over-before", "drag-over-after");
+    row.style.transform = "translateY(0)";
   });
 
   row.addEventListener("drop", async (e) => {
@@ -624,8 +629,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
     dragHandle.addEventListener("dragend", () => {
       row.classList.remove("dragging");
+      // Reset all shifted rows
       document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => {
         el.classList.remove("drag-over-before", "drag-over-after");
+        el.style.transform = "translateY(0)";
       });
     });
   }

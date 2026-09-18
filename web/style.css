@@ -182,6 +182,7 @@ svg {
   gap: 4px;
   min-height: var(--row-min);
   padding: 4px 4px 4px 6px;
+  transition: transform 0.2s var(--ease);
 }
 
 /* Hairline between rows inside a card, inset to the text column the way
