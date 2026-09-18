@@ -65,6 +65,16 @@ def teardown():
 
 
 def _create_todo(cur: sqlite3.Cursor, todo: models.Todo):
+    # If this todo has a parent but no order_idx, assign the next one
+    order_idx = todo.order_idx
+    if todo.parent_id and order_idx is None:
+        cur.execute("""
+            SELECT COALESCE(max(order_idx), -1) as m FROM TODO_ITEMS
+            WHERE parent_id = ? AND deleted = 0
+            """, (str(todo.parent_id),))
+        row = cur.fetchone()
+        order_idx = row["m"] + 1
+
     cur.execute("""
         INSERT INTO TODO_ITEMS
             (todo_id, title, done, create_date, due_date, order_idx, parent_id)
@@ -76,7 +86,7 @@ def _create_todo(cur: sqlite3.Cursor, todo: models.Todo):
         todo.done,
         todo.create_date.isoformat(),
         None if todo.due_date is None else todo.due_date.isoformat(),
-        todo.order_idx,
+        order_idx,
         None if todo.parent_id is None else str(todo.parent_id)))
 
 def create_todo(todo:models.Todo):
