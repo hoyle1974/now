@@ -17,7 +17,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw
 
-ACCENT = (79, 70, 229, 255)  # #4f46e5
+ACCENT = (88, 86, 214, 255)  # #5856d6 - new purple from redesign
 WHITE = (255, 255, 255, 255)
 
 ROOT = Path(__file__).resolve().parent.parent

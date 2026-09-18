@@ -11,11 +11,13 @@ class TodoId(RootModel[uuid.UUID]):
 
 class TodoCreate(BaseModel):
     title: str
+    due_date: datetime.datetime | None = Field(None)
 
 class TodoUpdate(BaseModel):
     title: str | None = Field(None)
     done: bool | None = Field(None)
     due_date: datetime.datetime | None = Field(None)
+    deleted: bool | None = Field(None)
 
 class TodoUpdateParent(BaseModel):
     parent_id: TodoId | None = Field(None)

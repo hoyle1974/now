@@ -2,30 +2,43 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
   <link rel="stylesheet" href="/style.css">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
-  <meta name="theme-color" content="#4f46e5">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Todos">
 </head>
 <body>
-  <main class="container">
-    <h1>Todos</h1>
-    <div id="error" hidden></div>
+  <header class="app-header">
+    <p class="app-eyebrow" id="today-label"></p>
+    <h1 class="app-title">Todos</h1>
+    <p class="app-summary" id="summary" aria-live="polite"></p>
+  </header>
 
-    <form id="add-form" class="add-form">
-      <input type="text" id="add-title" name="title" placeholder="New todo" required>
-      <button type="submit">Add</button>
-    </form>
-
-    <ul id="todo-tree"></ul>
+  <main class="app-main">
+    <ul id="todo-tree" class="todo-tree"></ul>
   </main>
+
+  <div id="error" class="toast" role="alert" hidden></div>
+
+  <form id="add-form" class="composer">
+    <div class="composer-inner">
+      <input type="text" id="add-title" name="title" placeholder="New todo"
+             autocomplete="off" enterkeyhint="done" aria-label="New todo" required>
+      <input type="date" id="add-due" name="due" aria-label="Due date (optional)"
+             style="color:var(--label-2); cursor:pointer; width:auto; padding:0 8px; border:none; background:none;">
+      <button type="submit" class="composer-send" aria-label="Add todo">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+  </form>
 
   <script src="/app.js"></script>
 </body>

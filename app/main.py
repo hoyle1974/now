@@ -16,6 +16,8 @@ db.init()
 @app.post("/todos", response_model=models.Todo)
 def create_todo(body: models.TodoCreate) -> models.Todo:
     todo = models.Todo(title = body.title)
+    if body.due_date:
+        todo.due_date = body.due_date
     db.create_todo(todo)
     return todo
 
@@ -33,6 +35,27 @@ def print_all_todos() -> None:
 @app.get("/todos/root", response_model=list[models.Todo])
 def list_todos() -> list[models.Todo]:
     return db.get_root_todos()
+
+@app.get("/todos/tree", response_model=dict)
+def get_tree() -> dict:
+    """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
+    roots = db.get_root_todos()
+    todosById = {}
+
+    def collect_tree(todo):
+        todosById[str(todo.todo_id)] = todo
+        for child_id in todo.child_ids:
+            child = db.get_todo(child_id)
+            if child:
+                collect_tree(child)
+
+    for root in roots:
+        collect_tree(root)
+
+    return {
+        "roots": roots,
+        "todosById": todosById
+    }
 
 
 @app.get("/todos/{todo_id}", response_model=models.Todo)
@@ -57,6 +80,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate) -> models.Todo:
         todo.done = body.done
     if body.due_date is not None:
         todo.due_date = body.due_date
+    if body.deleted is not None:
+        todo.deleted = body.deleted
 
     db.update_todo(todo, cascade_done=body.done is not None)
 

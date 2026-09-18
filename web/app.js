@@ -15,7 +15,11 @@ async function apiFetch(path, options = {}) {
     return await response.json();
   } catch (err) {
     errorDiv.hidden = false;
-    errorDiv.textContent = err.message;
+    errorDiv.textContent = "Something went wrong — " + err.message;
+    clearTimeout(apiFetch.hideTimer);
+    apiFetch.hideTimer = setTimeout(() => {
+      errorDiv.hidden = true;
+    }, 5000);
     throw err;
   }
 }
@@ -39,9 +43,43 @@ async function toggleDone(todoId, done) {
 async function deleteTodo(todoId) {
   try {
     await apiFetch(`${API_BASE}/${todoId}`, { method: "DELETE" });
+    showUndo(todoId);
   } finally {
     await loadAndRender();
   }
+}
+
+// Soft-delete undo: restore a deleted todo within 5 seconds
+let lastDeleted = null;
+let undoTimer = null;
+
+function showUndo(todoId) {
+  lastDeleted = todoId;
+  const errorDiv = document.getElementById("error");
+  errorDiv.hidden = false;
+  errorDiv.textContent = "Deleted · ";
+  const undoBtn = document.createElement("button");
+  undoBtn.textContent = "Undo";
+  undoBtn.style.cssText = "background:none; border:none; color:inherit; text-decoration:underline; cursor:pointer; font:inherit;";
+  undoBtn.onclick = async () => {
+    clearTimeout(undoTimer);
+    await apiFetch(`${API_BASE}/${todoId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ deleted: false }),
+    });
+    errorDiv.hidden = true;
+    await loadAndRender();
+  };
+  errorDiv.appendChild(undoBtn);
+
+  clearTimeout(undoTimer);
+  undoTimer = setTimeout(() => {
+    if (lastDeleted === todoId) {
+      errorDiv.hidden = true;
+      lastDeleted = null;
+    }
+  }, 5000);
 }
 
 async function saveEdit(todoId, title, dueDate) {
@@ -61,36 +99,34 @@ async function saveEdit(todoId, title, dueDate) {
   }
 }
 
-async function saveSplit(todoId, descriptions) {
+async function saveSplit(todoId, descriptions, dueDate = null) {
   setActivePanel(null);
   try {
+    const body = { descriptions };
+    if (dueDate) {
+      body.due_date = dueDate;
+    }
     await apiFetch(`${API_BASE}/${todoId}/split`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ descriptions }),
+      body: JSON.stringify(body),
     });
   } finally {
     await loadAndRender();
   }
 }
 
+// #4: Load the full tree in one request
 async function fetchTree() {
-  const roots = await apiFetch(`${API_BASE}/root`);
+  const response = await apiFetch(`${API_BASE}/tree`);
   const todosById = new Map();
 
-  async function fetchAndStore(todo) {
-    todosById.set(todo.todo_id, todo);
-    for (const childId of todo.child_ids) {
-      const child = await apiFetch(`${API_BASE}/${childId}`);
-      await fetchAndStore(child);
-    }
+  // Convert todosById object to Map
+  for (const [id, todo] of Object.entries(response.todosById)) {
+    todosById.set(id, todo);
   }
 
-  for (const root of roots) {
-    await fetchAndStore(root);
-  }
-
-  return { roots, todosById };
+  return { roots: response.roots, todosById };
 }
 
 let lastRoots = [];
@@ -114,31 +150,76 @@ function isActivePanel(mode, todoId) {
   return activePanel !== null && activePanel.mode === mode && activePanel.todoId === todoId;
 }
 
-function formatDate(isoString) {
+// Inline SVG icons (SF Symbols / Material style strokes) so glyphs render
+// crisply and identically on every platform, unlike ▼/⋮ text characters.
+const ICONS = {
+  chevron: '<path d="M9 5l7 7-7 7"/>',
+  more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
+  calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
+  split: '<path d="M6 4v5a3 3 0 0 0 3 3h9M6 9v6a3 3 0 0 0 3 3h9"/><path d="M15 9l3 3-3 3M15 15l3 3-3 3"/>',
+  trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+};
+
+function icon(name) {
+  const span = document.createElement("span");
+  span.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
+  return span.firstElementChild;
+}
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Whole calendar days from today to the due date (negative = overdue).
+function daysUntil(isoString) {
+  return Math.round((startOfDay(isoString) - startOfDay(new Date())) / 86400000);
+}
+
+// Relative phrasing for the next week, a short date beyond that — the way
+// native reminders apps talk about time ("Today", "Tomorrow", "Fri").
+function formatDue(isoString) {
+  const days = daysUntil(isoString);
+  if (days === 0) return "Today";
+  if (days === 1) return "Tomorrow";
+  if (days === -1) return "Yesterday";
+  if (days < 0) return `${-days} days overdue`;
+  if (days < 7) return new Date(isoString).toLocaleDateString(undefined, { weekday: "long" });
+  const sameYear = new Date(isoString).getFullYear() === new Date().getFullYear();
   return new Date(isoString).toLocaleDateString(undefined, {
-    year: "numeric",
     month: "short",
     day: "numeric",
+    ...(sameYear ? {} : { year: "numeric" }),
   });
 }
 
+function getTodayString() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getTomorrowString() {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 // Strictly overdue (due date has already passed) — used for the red
-// due-date badge treatment, which should stay off for something due later
-// today.
+// due-date treatment, which should stay off for something due later today.
 function isOverdue(todo) {
   if (todo.done || !todo.due_date) return false;
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  return new Date(todo.due_date) < startOfToday;
+  return daysUntil(todo.due_date) < 0;
 }
 
 // Overdue OR due today — used for sorting, since "due today" is also worth
 // surfacing to the top even though it isn't red yet.
 function isUrgent(todo) {
   if (todo.done || !todo.due_date) return false;
-  const endOfToday = new Date();
-  endOfToday.setHours(23, 59, 59, 999);
-  return new Date(todo.due_date) <= endOfToday;
+  return daysUntil(todo.due_date) <= 0;
 }
 
 // Surfaces overdue/due-today items first within each sibling group (stable
@@ -155,8 +236,8 @@ function sortByUrgency(todos) {
   });
 }
 
-// Descendant counts for every node, computed once per render in one
-// memoized bottom-up pass rather than re-walking each parent's subtree
+// Descendant { total, done } counts for every node, computed once per render
+// in one memoized bottom-up pass rather than re-walking each parent's subtree
 // independently (which would revisit shared descendants once per ancestor).
 function computeDescendantCounts(todosById) {
   const counts = new Map();
@@ -165,12 +246,15 @@ function computeDescendantCounts(todosById) {
       return counts.get(todoId);
     }
     const todo = todosById.get(todoId);
-    let count = 0;
+    const result = { total: 0, done: 0 };
     for (const childId of todo.child_ids) {
-      count += 1 + countFor(childId);
+      const child = todosById.get(childId);
+      const sub = countFor(childId);
+      result.total += 1 + sub.total;
+      result.done += (child.done ? 1 : 0) + sub.done;
     }
-    counts.set(todoId, count);
-    return count;
+    counts.set(todoId, result);
+    return result;
   }
   for (const todoId of todosById.keys()) {
     countFor(todoId);
@@ -178,16 +262,142 @@ function computeDescendantCounts(todosById) {
   return counts;
 }
 
-function menuItem(label, onClick, extraClass = "") {
+function menuItem(label, iconName, onClick, extraClass = "") {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = `todo-menu-item ${extraClass}`.trim();
-  btn.textContent = label;
+  btn.setAttribute("role", "menuitem");
+  const text = document.createElement("span");
+  text.textContent = label;
+  btn.append(text, icon(iconName));
   btn.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
   });
   return btn;
+}
+
+function iconButton(className, iconName, ariaLabel) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = `icon-btn ${className}`;
+  btn.setAttribute("aria-label", ariaLabel);
+  btn.appendChild(icon(iconName));
+  return btn;
+}
+
+function renderMeta(todo, hasChildren, counts) {
+  const meta = document.createElement("div");
+  meta.className = "todo-meta";
+
+  if (hasChildren) {
+    const progress = document.createElement("span");
+    progress.className = "todo-chip";
+    const ring = document.createElement("span");
+    ring.className = "todo-progress";
+    ring.style.setProperty("--p", counts.total ? counts.done / counts.total : 0);
+    const text = document.createElement("span");
+    text.textContent = `${counts.done} of ${counts.total}`;
+    progress.append(ring, text);
+    progress.setAttribute("aria-label", `${counts.done} of ${counts.total} subtasks done`);
+    meta.appendChild(progress);
+  }
+
+  if (todo.due_date) {
+    const due = document.createElement("span");
+    due.className = "todo-chip";
+    if (isOverdue(todo)) {
+      due.classList.add("todo-chip--overdue");
+    } else if (isUrgent(todo)) {
+      due.classList.add("todo-chip--today");
+    }
+    const text = document.createElement("span");
+    text.textContent = formatDue(todo.due_date);
+    due.append(icon("calendar"), text);
+    meta.appendChild(due);
+  }
+
+  return meta;
+}
+
+// #1 & #5: Swipe gestures and title tap-to-rename
+function attachRowInteractions(row, todo) {
+  let touchStartX = 0;
+  let touchStartY = 0;
+  let swiping = false;
+
+  row.addEventListener("touchstart", (e) => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    swiping = false;
+  }, { passive: true });
+
+  row.addEventListener("touchmove", (e) => {
+    if (!touchStartX) return;
+    const deltaX = e.touches[0].clientX - touchStartX;
+    const deltaY = e.touches[0].clientY - touchStartY;
+
+    // Only swipe horizontally (not vertical scroll)
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
+      swiping = true;
+    }
+  }, { passive: true });
+
+  row.addEventListener("touchend", (e) => {
+    if (!swiping || !touchStartX) return;
+    const deltaX = e.changedTouches[0].clientX - touchStartX;
+
+    // Swipe right: mark done
+    if (deltaX > 60) {
+      const checkbox = row.querySelector('input[type="checkbox"]');
+      if (checkbox && !checkbox.checked) {
+        checkbox.checked = true;
+        reportedFailure(toggleDone(todo.todo_id, true));
+      }
+    }
+    // Swipe left: delete
+    else if (deltaX < -60) {
+      setActivePanel(null);
+      reportedFailure(deleteTodo(todo.todo_id));
+    }
+
+    touchStartX = 0;
+  });
+
+  // #5: Tap title to rename
+  const titleEl = row.querySelector('.todo-title');
+  if (titleEl && !todo.done) {
+    titleEl.style.cursor = 'text';
+    titleEl.addEventListener('click', (e) => {
+      if (e.detail === 2) { // Double-click
+        e.stopPropagation();
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = todo.title;
+        input.style.cssText = 'font-size:inherit; font-weight:inherit; border:1px solid; padding:4px; border-radius:6px;';
+        const originalEl = titleEl;
+
+        titleEl.replaceWith(input);
+        input.focus();
+        input.select();
+
+        const save = async () => {
+          const newTitle = input.value.trim();
+          if (newTitle && newTitle !== todo.title) {
+            await reportedFailure(saveEdit(todo.todo_id, newTitle, todo.due_date ? todo.due_date.slice(0, 10) : ''));
+          } else {
+            await loadAndRender();
+          }
+        };
+
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') save();
+          if (e.key === 'Escape') loadAndRender();
+        });
+      }
+    });
+  }
 }
 
 function renderNode(todo, todosById, descendantCounts, depth = 0) {
@@ -199,13 +409,41 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   const row = document.createElement("div");
   row.className = "todo-row";
+  if (todo.done) {
+    row.classList.add("is-done");
+  }
 
-  const toggle = document.createElement("button");
-  toggle.type = "button";
-  toggle.className = "todo-toggle";
+  const checkboxHit = document.createElement("label");
+  checkboxHit.className = "todo-check";
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = todo.done;
+  checkbox.setAttribute("aria-label", `Mark "${todo.title}" ${todo.done ? "not done" : "done"}`);
+  checkbox.addEventListener("change", () => {
+    // #3: Instant checkbox response - update UI immediately
+    const wasChecked = checkbox.checked;
+    if (wasChecked) {
+      row.classList.add("is-done");
+    } else {
+      row.classList.remove("is-done");
+    }
+    reportedFailure(toggleDone(todo.todo_id, checkbox.checked));
+  });
+  checkboxHit.appendChild(checkbox);
+
+  const body = document.createElement("div");
+  body.className = "todo-body";
+  const label = document.createElement("span");
+  label.className = "todo-title";
+  label.textContent = todo.title;
+  body.append(label, renderMeta(todo, hasChildren, descendantCounts.get(todo.todo_id)));
+
+  const trailing = document.createElement("div");
+  trailing.className = "todo-trailing";
+
   if (hasChildren) {
-    toggle.textContent = isCollapsed ? "▶" : "▼";
-    toggle.setAttribute("aria-label", isCollapsed ? "Expand subtasks" : "Collapse subtasks");
+    const toggle = iconButton("todo-toggle", "chevron", isCollapsed ? "Expand subtasks" : "Collapse subtasks");
+    toggle.setAttribute("aria-expanded", String(!isCollapsed));
     toggle.addEventListener("click", () => {
       if (collapsedIds.has(todo.todo_id)) {
         collapsedIds.delete(todo.todo_id);
@@ -214,69 +452,14 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       }
       renderTree();
     });
-  } else {
-    toggle.classList.add("todo-toggle--spacer");
-    toggle.disabled = true;
-    toggle.tabIndex = -1;
+    trailing.appendChild(toggle);
   }
 
-  const checkboxHit = document.createElement("label");
-  checkboxHit.className = "todo-check-hit";
-  const checkbox = document.createElement("input");
-  checkbox.type = "checkbox";
-  checkbox.checked = todo.done;
-  checkbox.addEventListener("change", () => reportedFailure(toggleDone(todo.todo_id, checkbox.checked)));
-  checkboxHit.appendChild(checkbox);
-
-  const label = document.createElement("span");
-  label.className = "todo-title";
-  if (todo.done) {
-    label.classList.add("todo-title--done");
-  }
-  label.textContent = todo.title;
-
-  let badge = null;
-  if (hasChildren) {
-    badge = document.createElement("span");
-    badge.className = "todo-count-badge";
-    const count = descendantCounts.get(todo.todo_id);
-    badge.textContent = `${count} subtask${count === 1 ? "" : "s"}`;
-  }
-
-  const meta = document.createElement("span");
-  meta.className = "todo-meta";
-  // Parent rows already carry a subtask-count badge; repeating "Created ..."
-  // on every parent in a deep tree is a lot of low-value text for little
-  // payoff, so it's reserved for leaf rows where it's the only metadata.
-  // Due date is always shown when set — that one's actionable.
-  if (!hasChildren) {
-    const created = document.createElement("span");
-    created.textContent = `Created ${formatDate(todo.create_date)}`;
-    meta.appendChild(created);
-  }
-  if (todo.due_date) {
-    const dueBadge = document.createElement("span");
-    dueBadge.className = "todo-due-badge";
-    if (isOverdue(todo)) {
-      dueBadge.classList.add("todo-due-badge--overdue");
-    }
-    dueBadge.textContent = `Due ${formatDate(todo.due_date)}`;
-    meta.appendChild(dueBadge);
-  }
-
-  // Groups with the kebab below so the two share one line when wrapped.
-  const metaRow = document.createElement("span");
-  metaRow.className = "todo-meta-row";
-
-  const menuWrap = document.createElement("span");
+  const menuWrap = document.createElement("div");
   menuWrap.className = "todo-menu";
 
-  const kebabBtn = document.createElement("button");
-  kebabBtn.type = "button";
-  kebabBtn.className = "todo-kebab";
-  kebabBtn.textContent = "⋮";
-  kebabBtn.setAttribute("aria-label", "More actions");
-  kebabBtn.setAttribute("aria-haspopup", "true");
+  const kebabBtn = iconButton("todo-kebab", "more", "More actions");
+  kebabBtn.setAttribute("aria-haspopup", "menu");
   const menuOpen = isActivePanel("menu", todo.todo_id);
   kebabBtn.setAttribute("aria-expanded", String(menuOpen));
   kebabBtn.addEventListener("click", (event) => {
@@ -291,21 +474,17 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     menu.className = "todo-menu-dropdown";
     menu.setAttribute("role", "menu");
 
+    const openPanel = (mode) => () => {
+      setActivePanel(mode, todo.todo_id);
+      renderTree();
+    };
     menu.append(
-      menuItem("Add child", () => {
-        setActivePanel("add", todo.todo_id);
-        renderTree();
-      }),
-      menuItem("Edit", () => {
-        setActivePanel("edit", todo.todo_id);
-        renderTree();
-      }),
-      menuItem("Split", () => {
-        setActivePanel("split", todo.todo_id);
-        renderTree();
-      }),
+      menuItem("Add subtask", "plus", openPanel("add")),
+      menuItem("Edit", "pencil", openPanel("edit")),
+      menuItem("Split into subtasks", "split", openPanel("split")),
       menuItem(
         "Delete",
+        "trash",
         () => {
           setActivePanel(null);
           reportedFailure(deleteTodo(todo.todo_id));
@@ -316,14 +495,12 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     menuWrap.appendChild(menu);
   }
 
-  metaRow.append(meta, menuWrap);
-
-  row.append(toggle, checkboxHit, label);
-  if (badge) {
-    row.appendChild(badge);
-  }
-  row.appendChild(metaRow);
+  trailing.appendChild(menuWrap);
+  row.append(checkboxHit, body, trailing);
   li.appendChild(row);
+
+  // Attach swipe/tap interactions
+  attachRowInteractions(row, todo);
 
   if (isActivePanel("split", todo.todo_id)) {
     li.appendChild(renderSplitEditor(todo));
@@ -339,6 +516,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   if (hasChildren && !isCollapsed) {
     const childList = document.createElement("ul");
+    childList.className = "todo-children";
     const children = sortByUrgency(todo.child_ids.map((id) => todosById.get(id)));
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
@@ -349,38 +527,54 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   return li;
 }
 
-// Shared Save/Cancel row for the inline editors below — each editor supplies
+// Shared Cancel/Save row for the inline editors below — each editor supplies
 // its own content elements and save behavior, but the button chrome and the
 // "Cancel closes this panel" behavior are identical across all of them.
-function renderEditorActions(onSave) {
+function renderEditorActions(onSave, saveLabel = "Save") {
   const buttons = document.createElement("div");
-  buttons.className = "split-editor-buttons";
-
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "todo-btn";
-  saveBtn.textContent = "Save";
-  saveBtn.addEventListener("click", onSave);
+  buttons.className = "sheet-actions";
 
   const cancelBtn = document.createElement("button");
   cancelBtn.type = "button";
-  cancelBtn.className = "outline secondary todo-btn";
+  cancelBtn.className = "btn btn-plain";
   cancelBtn.textContent = "Cancel";
   cancelBtn.addEventListener("click", () => {
     setActivePanel(null);
     renderTree();
   });
 
-  buttons.append(saveBtn, cancelBtn);
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "btn btn-primary";
+  saveBtn.textContent = saveLabel;
+  saveBtn.addEventListener("click", onSave);
+
+  buttons.append(cancelBtn, saveBtn);
   return buttons;
 }
 
-function renderSplitEditor(todo) {
+function renderSheet(...children) {
   const editor = document.createElement("div");
-  editor.className = "split-editor";
+  editor.className = "sheet";
+  editor.append(...children);
+  // Focus the first field once it's in the DOM, so opening an editor from
+  // the menu goes straight to typing instead of needing a second tap.
+  requestAnimationFrame(() => editor.querySelector("input, textarea")?.focus());
+  return editor;
+}
 
+function sheetLabel(text, forEl) {
+  const label = document.createElement("label");
+  label.className = "sheet-label";
+  label.textContent = text;
+  forEl.id = `field-${Math.random().toString(36).slice(2)}`;
+  label.htmlFor = forEl.id;
+  return label;
+}
+
+function renderSplitEditor(todo) {
   const textarea = document.createElement("textarea");
-  textarea.placeholder = "One item per line";
+  textarea.placeholder = "One subtask per line";
   textarea.rows = 3;
 
   const buttons = renderEditorActions(() => {
@@ -390,24 +584,24 @@ function renderSplitEditor(todo) {
       .filter((s) => s.length > 0);
     if (descriptions.length === 0) return;
     reportedFailure(saveSplit(todo.todo_id, descriptions));
-  });
+  }, "Split");
 
-  editor.append(textarea, buttons);
-  return editor;
+  return renderSheet(sheetLabel("Split into subtasks", textarea), textarea, buttons);
 }
 
 function renderAddChildEditor(todo) {
-  const editor = document.createElement("div");
-  editor.className = "split-editor";
-
   const input = document.createElement("input");
   input.type = "text";
-  input.placeholder = "New subtask title";
+  input.placeholder = "Subtask title";
+  input.enterKeyHint = "done";
+
+  const dueDateInput = document.createElement("input");
+  dueDateInput.type = "date";
 
   const submit = () => {
     const title = input.value.trim();
     if (!title) return;
-    reportedFailure(saveSplit(todo.todo_id, [title]));
+    reportedFailure(saveSplit(todo.todo_id, [title], dueDateInput.value));
   };
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -416,30 +610,48 @@ function renderAddChildEditor(todo) {
     }
   });
 
-  const buttons = renderEditorActions(submit);
-
-  editor.append(input, buttons);
-  return editor;
+  return renderSheet(
+    sheetLabel("New subtask", input),
+    input,
+    sheetLabel("Due date (optional)", dueDateInput),
+    dueDateInput,
+    renderEditorActions(submit, "Add")
+  );
 }
 
+// #6: Due date shortcuts in edit panel
 function renderEditEditor(todo) {
-  const editor = document.createElement("div");
-  editor.className = "split-editor";
-
   const titleInput = document.createElement("input");
   titleInput.type = "text";
   titleInput.placeholder = "Title";
   titleInput.value = todo.title;
 
-  const dueDateLabel = document.createElement("label");
-  dueDateLabel.className = "edit-editor-due-label";
-  dueDateLabel.textContent = "Due date";
   const dueDateInput = document.createElement("input");
   dueDateInput.type = "date";
   if (todo.due_date) {
     dueDateInput.value = todo.due_date.slice(0, 10);
   }
-  dueDateLabel.appendChild(dueDateInput);
+
+  const shortcutsDiv = document.createElement("div");
+  shortcutsDiv.style.cssText = "display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;";
+
+  const shortcuts = [
+    { label: "Today", value: getTodayString() },
+    { label: "Tomorrow", value: getTomorrowString() },
+    { label: "Clear", value: "" }
+  ];
+
+  for (const shortcut of shortcuts) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-plain";
+    btn.textContent = shortcut.label;
+    btn.style.cssText = "padding:6px 12px; font-size:14px;";
+    btn.addEventListener("click", () => {
+      dueDateInput.value = shortcut.value;
+    });
+    shortcutsDiv.appendChild(btn);
+  }
 
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
@@ -447,18 +659,55 @@ function renderEditEditor(todo) {
     reportedFailure(saveEdit(todo.todo_id, title, dueDateInput.value));
   });
 
-  editor.append(titleInput, dueDateLabel, buttons);
-  return editor;
+  return renderSheet(
+    sheetLabel("Title", titleInput),
+    titleInput,
+    sheetLabel("Due date", dueDateInput),
+    dueDateInput,
+    shortcutsDiv,
+    buttons
+  );
+}
+
+function renderEmptyState() {
+  const empty = document.createElement("li");
+  empty.className = "todo-empty";
+  const badge = document.createElement("div");
+  badge.className = "todo-empty-icon";
+  badge.appendChild(icon("check"));
+  const title = document.createElement("p");
+  title.className = "todo-empty-title";
+  title.textContent = "All clear";
+  const text = document.createElement("p");
+  text.className = "todo-empty-text";
+  text.textContent = "Add your first todo below.";
+  empty.append(badge, title, text);
+  return empty;
+}
+
+// "5 open · 2 overdue" under the large title — the at-a-glance status line.
+function renderSummary() {
+  const summary = document.getElementById("summary");
+  summary.innerHTML = "";
+  const all = [...lastTodosById.values()];
+  if (all.length === 0) return;
+  const open = all.filter((t) => !t.done).length;
+  const overdue = all.filter(isOverdue).length;
+  summary.append(open === 0 ? "Everything's done" : `${open} open`);
+  if (overdue > 0) {
+    const span = document.createElement("span");
+    span.className = "is-overdue";
+    span.textContent = `${overdue} overdue`;
+    summary.append(" · ", span);
+  }
 }
 
 function renderTree() {
   const treeEl = document.getElementById("todo-tree");
   treeEl.innerHTML = "";
+  renderSummary();
   if (lastRoots.length === 0) {
-    const empty = document.createElement("p");
-    empty.className = "todo-empty";
-    empty.textContent = "No todos yet — add one above.";
-    treeEl.appendChild(empty);
+    treeEl.appendChild(renderEmptyState());
     return;
   }
   const descendantCounts = computeDescendantCounts(lastTodosById);
@@ -475,6 +724,11 @@ async function loadAndRender() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  document.getElementById("today-label").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
   reportedFailure(loadAndRender());
 });
 
@@ -487,28 +741,25 @@ document.addEventListener("click", () => {
   }
 });
 
-// On mobile, the on-screen keyboard can cover the input right after it's
-// focused, before the viewport has resized — nudge it into view once that
-// settles rather than leaving the user typing blind.
-document.getElementById("add-title").addEventListener("focus", () => {
-  setTimeout(() => {
-    document.getElementById("add-title").scrollIntoView({ block: "center", behavior: "smooth" });
-  }, 300);
-});
-
 document.getElementById("add-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.getElementById("add-title");
+  const dueInput = document.getElementById("add-due");
   const title = input.value.trim();
   if (!title) return;
   reportedFailure(
     (async () => {
+      const body = { title };
+      if (dueInput.value) {
+        body.due_date = dueInput.value;
+      }
       await apiFetch(API_BASE, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify(body),
       });
       input.value = "";
+      dueInput.value = "";
       await loadAndRender();
     })()
   );

@@ -1,281 +1,696 @@
-/* A single accent color, applied sparingly (Pico's own primary-color
-   variables, the checkbox fill, and due-date badges) rather than scattered
-   ad-hoc colors, so the app reads as designed instead of default-scaffolded. */
+/* Design tokens. The palette follows the platform "grouped list" look
+   (iOS Settings/Reminders, Material 3 surfaces): a tinted page ground with
+   white cards on it, one accent color, and semantic label/fill levels
+   instead of ad-hoc greys. Dark mode swaps the tokens, not the rules. */
 :root {
-  --accent: #4f46e5;
-  --accent-hover: #4338ca;
-  --danger: #dc2626;
-  --pico-primary: var(--accent);
-  --pico-primary-hover: var(--accent-hover);
-  --pico-primary-underline: var(--accent);
-  --pico-primary-focus: color-mix(in srgb, var(--accent) 25%, transparent);
+  --accent: #5856d6;
+  --accent-pressed: #4644b8;
+  --on-accent: #ffffff;
+  --red: #ff3b30;
+  --orange: #ff9500;
+
+  --bg: #f2f2f7;
+  --card: #ffffff;
+  --fill: rgba(118, 118, 128, 0.12);
+  --fill-pressed: rgba(118, 118, 128, 0.2);
+  --separator: rgba(60, 60, 67, 0.18);
+  --label: #000000;
+  --label-2: rgba(60, 60, 67, 0.6);
+  --label-3: rgba(60, 60, 67, 0.3);
+  --material: rgba(249, 249, 249, 0.8);
+  --popover: rgba(250, 250, 250, 0.88);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-pop: 0 10px 40px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
+
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --row-min: 52px;
+  --indent: 36px;
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable Display",
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  color-scheme: light dark;
 }
 
-/* Add form: input takes the space, button stays small
-   since pressing Enter in the input already submits the form. */
-.add-form {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-bottom: 1.5rem;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --accent: #7d7aff;
+    --accent-pressed: #6a67f0;
+    --red: #ff453a;
+    --orange: #ff9f0a;
+
+    --bg: #000000;
+    --card: #1c1c1e;
+    --fill: rgba(118, 118, 128, 0.24);
+    --fill-pressed: rgba(118, 118, 128, 0.36);
+    --separator: rgba(84, 84, 88, 0.6);
+    --label: #ffffff;
+    --label-2: rgba(235, 235, 245, 0.6);
+    --label-3: rgba(235, 235, 245, 0.3);
+    --material: rgba(22, 22, 24, 0.78);
+    --popover: rgba(44, 44, 46, 0.9);
+    --shadow-card: none;
+    --shadow-pop: 0 10px 40px rgba(0, 0, 0, 0.6);
+  }
 }
 
-.add-form input {
-  flex: 1;
-  margin-bottom: 0;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
-.add-form button {
-  flex: 0 0 auto;
-  width: auto;
-  padding: 0.5rem 1rem;
-  margin-bottom: 0;
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
 }
 
-#todo-tree {
-  list-style: none;
-  padding-left: 0;
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--label);
+  font-family: var(--font);
+  font-size: 17px;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Room for the fixed composer so the last card is never trapped under it. */
+  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
 }
 
-#todo-tree ul {
-  list-style: none;
-  padding-left: 1.5rem;
-  border-left: 1px solid var(--pico-muted-border-color);
-  margin-top: 0.5rem;
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
 }
 
-/* The browser's own nested-list UA styles (circle/square markers) survive
-   list-style:none on the parent <ul> because they're resolved per-<li>, not
-   inherited from it — this is a property of being an <li> in this tree, so
-   it's scoped to the element, not to whichever class happens to style it. */
-#todo-tree li {
-  list-style: none;
-}
-
-.todo-node {
-  margin-bottom: 0.75rem;
-}
-
-.todo-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-/* Shared 44px minimum comfortable touch target for the row's icon-only
-   controls (chevron, checkbox, kebab) — the row itself stays compact, but
-   none of their hit areas shrink to match their small visual glyph. */
-.todo-check-hit,
-.todo-toggle,
-.todo-kebab {
-  width: 2.75rem;
-  height: 2.75rem;
-  flex: 0 0 auto;
+button {
   cursor: pointer;
 }
 
-/* Shared reset for this file's plain icon/text buttons: no default button
-   chrome, and — since Pico redefines --pico-color inside <button> for its
-   filled-button look — reset it back to the page's own text color so any
-   button here can use `color: var(--pico-color)` without going invisible. */
-.todo-toggle,
-.todo-kebab,
-.todo-menu-dropdown .todo-menu-item {
-  --pico-color: var(--pico-contrast, #11191f);
-  border: none;
-  background: none;
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
-/* Native checkboxes have a tiny hit box. Wrapping in a padded label gives a
-   comfortable tap zone on touch devices without inflating the checkbox's
-   visual size in the row. */
-.todo-check-hit {
+svg {
+  display: block;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* ---------- Header: large title, like a native navigation bar ---------- */
+
+.app-header,
+.app-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+
+.app-header {
+  padding-top: calc(env(safe-area-inset-top, 0px) + 28px);
+  padding-bottom: 20px;
+}
+
+.app-eyebrow {
+  margin: 0 0 2px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.app-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+}
+
+.app-summary {
+  margin: 6px 0 0;
+  min-height: 1.3em;
+  font-size: 15px;
+  color: var(--label-2);
+}
+
+.app-summary .is-overdue {
+  color: var(--red);
+  font-weight: 500;
+}
+
+/* ---------- Tree: each root todo is its own inset-grouped card ---------- */
+
+.todo-tree,
+.todo-children {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.todo-tree > .todo-node {
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  margin-bottom: 12px;
+  padding: 2px 0;
+}
+
+.todo-children {
+  padding-left: var(--indent);
+}
+
+.todo-row {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
+  min-height: var(--row-min);
+  padding: 4px 4px 4px 6px;
 }
 
-.todo-row input[type="checkbox"] {
-  width: 1.25rem;
-  height: 1.25rem;
+/* Hairline between rows inside a card, inset to the text column the way
+   native grouped lists do it — never drawn above a card's first row. */
+.todo-children .todo-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 54px;
+  right: 0;
+  height: 1px;
+  background: var(--separator);
+  transform: scaleY(0.5);
+  transform-origin: top;
+}
+
+/* ---------- Round checkbox ---------- */
+
+.todo-check {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  cursor: pointer;
+}
+
+.todo-check input {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 24px;
+  height: 24px;
   margin: 0;
-  accent-color: var(--accent);
+  border-radius: 50%;
+  border: 1.5px solid var(--label-3);
+  background: transparent center / 14px 14px no-repeat;
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease), border-color 0.2s var(--ease),
+    transform 0.2s var(--ease);
 }
 
-.todo-toggle {
-  padding: 0;
-  margin: 0;
-  font-size: 0.7rem;
-  line-height: 2.75rem;
-  color: var(--pico-muted-color);
+.todo-check input:checked {
+  border-color: var(--accent);
+  background-color: var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E");
+  animation: check-pop 0.32s var(--ease);
 }
 
-.todo-toggle--spacer {
-  visibility: hidden;
-  cursor: default;
+.todo-check input:active {
+  transform: scale(0.88);
 }
 
-/* Depth-based falloff so nesting reads at a glance, not just from
-   indentation — each <li> sets --depth (see web/app.js), and these clamp so
-   very deep nodes stay readable instead of shrinking indefinitely. */
+@keyframes check-pop {
+  0% { transform: scale(0.8); }
+  55% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+
+/* ---------- Title + metadata ---------- */
+
+.todo-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 6px 0;
+}
+
 .todo-title {
-  font-weight: clamp(400, calc(650 - var(--depth, 0) * 50), 650);
-  font-size: clamp(0.82rem, calc(1rem - var(--depth, 0) * 0.03rem), 1rem);
-  opacity: clamp(0.75, calc(1 - var(--depth, 0) * 0.04), 1);
+  display: block;
+  font-size: 17px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  transition: color 0.2s var(--ease);
 }
 
-.todo-count-badge {
-  font-size: 0.7rem;
-  font-weight: 500;
-  color: var(--pico-muted-color);
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
+.todo-tree > .todo-node > .todo-row .todo-title {
+  font-weight: 600;
 }
 
-.todo-title--done {
+.todo-children .todo-title {
+  font-size: 16px;
+}
+
+.todo-row.is-done .todo-title {
+  color: var(--label-2);
   text-decoration: line-through;
-  color: var(--pico-muted-color);
-  font-weight: normal;
+  text-decoration-color: var(--label-3);
+  font-weight: 400;
 }
 
 .todo-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem;
-  font-size: 0.8rem;
-  color: var(--pico-muted-color);
+  gap: 2px 10px;
+  margin-top: 2px;
+  font-size: 13px;
+  color: var(--label-2);
 }
 
-.todo-due-badge {
-  font-size: 0.7rem;
+.todo-meta:empty {
+  display: none;
+}
+
+.todo-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.todo-chip svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
+}
+
+.todo-chip--today {
+  color: var(--orange);
   font-weight: 500;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-  border-radius: 999px;
-  padding: 0.05rem 0.5rem;
 }
 
-/* Overdue and not done — the one case in a personal daily tracker that
-   should actually grab your eye, so it gets a warm color instead of accent. */
-.todo-due-badge--overdue {
-  color: var(--danger, #dc2626);
-  background: color-mix(in srgb, var(--danger, #dc2626) 15%, transparent);
-  border-color: color-mix(in srgb, var(--danger, #dc2626) 35%, transparent);
+.todo-chip--overdue {
+  color: var(--red);
+  font-weight: 500;
 }
 
-/* Groups the meta text and the kebab together so that when the row wraps
-   on a narrow (mobile) viewport, they land on one shared second line
-   (meta left, kebab right) instead of each wrapping to its own line with
-   dead space between — see the mobile-only override below. */
-.todo-meta-row {
+.todo-row.is-done .todo-chip--today,
+.todo-row.is-done .todo-chip--overdue {
+  color: var(--label-2);
+  font-weight: 400;
+}
+
+/* Tiny progress ring for parents: done descendants out of total. */
+.todo-progress {
+  --p: 0;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--p) * 1turn), var(--fill-pressed) 0);
+  -webkit-mask: radial-gradient(circle, transparent 3.2px, #000 3.7px);
+  mask: radial-gradient(circle, transparent 3.2px, #000 3.7px);
+}
+
+/* ---------- Trailing controls: disclosure chevron + more button ---------- */
+
+.todo-trailing {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-left: auto;
-}
-
-@media (max-width: 480px) {
-  .todo-meta-row {
-    flex-basis: 100%;
-    margin-left: 0;
-    justify-content: space-between;
-    margin-top: 0.25rem;
-  }
-}
-
-.todo-menu {
-  position: relative;
   flex: 0 0 auto;
 }
 
-.todo-kebab {
+.icon-btn {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
   padding: 0;
   margin: 0;
-  font-size: 1.1rem;
-  line-height: 2.75rem;
-  color: var(--pico-muted-color);
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--label-3);
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.icon-btn svg {
+  width: 20px;
+  height: 20px;
+}
+
+.icon-btn:active {
+  background: var(--fill);
+}
+
+@media (hover: hover) {
+  .icon-btn:hover {
+    color: var(--label-2);
+    background: var(--fill);
+  }
+}
+
+.todo-toggle svg {
+  width: 16px;
+  height: 16px;
+  stroke-width: 2.5;
+  transition: transform 0.3s var(--ease);
+}
+
+.todo-toggle[aria-expanded="true"] svg {
+  transform: rotate(90deg);
+}
+
+.todo-kebab {
+  color: var(--label-2);
+}
+
+.todo-kebab[aria-expanded="true"] {
+  color: var(--accent);
+  background: var(--fill);
+}
+
+/* ---------- Context menu: frosted popover ---------- */
+
+.todo-menu {
+  position: relative;
 }
 
 .todo-menu-dropdown {
   position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  min-width: 9rem;
-  padding: 0.25rem;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: var(--pico-border-radius);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  top: calc(100% + 4px);
+  right: 4px;
+  z-index: 20;
+  width: 232px;
+  padding: 0;
+  overflow: hidden;
+  background: var(--popover);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+  border-radius: 14px;
+  box-shadow: var(--shadow-pop);
+  transform-origin: top right;
+  animation: menu-in 0.22s var(--ease);
 }
 
-.todo-menu-dropdown .todo-menu-item {
-  width: auto;
-  margin-bottom: 0;
-  padding: 0.6rem 0.75rem;
-  text-align: left;
-  font-size: 0.9rem;
-  color: var(--pico-color);
-  cursor: pointer;
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.85) translateY(-6px);
+  }
 }
 
-.todo-menu-dropdown .todo-menu-item:hover {
-  background: var(--pico-muted-border-color);
-}
-
-.todo-menu-dropdown .todo-menu-item--danger {
-  color: #c0392b;
-}
-
-/* Small, muted action buttons so they don't outweigh the todo content
-   itself — used for the split editor's Save/Cancel. */
-.todo-btn {
-  width: auto;
-  padding: 0.2rem 0.6rem;
-  font-size: 0.8rem;
-  margin-bottom: 0;
-}
-
-.split-editor {
-  margin: 0.5rem 0 0.5rem 1.75rem;
-  padding: 0.5rem;
-  background: var(--pico-card-background-color);
-  border: 1px solid var(--pico-muted-border-color);
-  border-radius: var(--pico-border-radius);
-}
-
-.split-editor textarea,
-.split-editor input[type="text"] {
-  margin-bottom: 0.5rem;
-}
-
-.edit-editor-due-label {
+.todo-menu-item {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-  font-size: 0.85rem;
-  color: var(--pico-muted-color);
+  justify-content: space-between;
+  width: 100%;
+  min-height: 46px;
+  padding: 0 16px;
+  border: 0;
+  background: none;
+  font-size: 17px;
+  text-align: left;
+  color: var(--label);
 }
 
-.edit-editor-due-label input[type="date"] {
-  flex: 0 0 auto;
-  width: auto;
-  margin-bottom: 0;
+.todo-menu-item + .todo-menu-item {
+  box-shadow: inset 0 0.5px 0 var(--separator);
 }
 
-.split-editor-buttons {
+/* Native menus split destructive actions into their own group. */
+.todo-menu-item + .todo-menu-item--danger {
+  box-shadow: none;
+  border-top: 8px solid var(--fill);
+}
+
+.todo-menu-item--danger {
+  color: var(--red);
+}
+
+.todo-menu-item svg {
+  width: 19px;
+  height: 19px;
+  stroke-width: 1.8;
+}
+
+.todo-menu-item:active {
+  background: var(--fill-pressed);
+}
+
+@media (hover: hover) {
+  .todo-menu-item:hover {
+    background: var(--fill);
+  }
+}
+
+/* ---------- Inline editors ---------- */
+
+.sheet {
+  margin: 0 12px 12px 54px;
+  padding: 12px;
+  background: var(--fill);
+  border-radius: var(--radius-control);
+  animation: sheet-in 0.25s var(--ease);
+}
+
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+.sheet-label {
+  display: block;
+  margin: 0 0 6px 4px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--label-2);
+}
+
+.sheet input[type="text"],
+.sheet input[type="date"],
+.sheet textarea {
+  display: block;
+  width: 100%;
+  /* 16px+ keeps iOS Safari from zooming the page on focus. */
+  font-size: 17px;
+  padding: 11px 12px;
+  margin: 0 0 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--card);
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.sheet textarea {
+  resize: vertical;
+  min-height: 96px;
+  line-height: 1.4;
+}
+
+.sheet input:focus,
+.sheet textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.sheet-actions {
   display: flex;
-  gap: 0.4rem;
+  justify-content: flex-end;
+  gap: 8px;
 }
+
+.btn {
+  min-height: 40px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background-color 0.15s, transform 0.1s;
+}
+
+.btn:active {
+  transform: scale(0.97);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-primary:active {
+  background: var(--accent-pressed);
+}
+
+.btn-plain {
+  background: none;
+  color: var(--accent);
+}
+
+.btn-plain:active {
+  background: var(--fill);
+}
+
+/* ---------- Empty state ---------- */
 
 .todo-empty {
-  color: var(--pico-muted-color);
-  font-style: italic;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding: 64px 24px;
+  color: var(--label-2);
+}
+
+.todo-empty-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  margin-bottom: 16px;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+}
+
+.todo-empty-icon svg {
+  width: 34px;
+  height: 34px;
+}
+
+.todo-empty-title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--label);
+}
+
+.todo-empty-text {
+  margin: 0;
+  font-size: 15px;
+}
+
+/* ---------- Composer: thumb-reachable add bar pinned to the bottom ---------- */
+
+.composer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  padding: 10px max(16px, env(safe-area-inset-right, 0px))
+    calc(10px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  background: var(--material);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
+.composer-inner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 608px;
+  margin: 0 auto;
+  padding: 4px 4px 4px 18px;
+  background: var(--card);
+  border-radius: 999px;
+  box-shadow: 0 0 0 0.5px var(--separator);
+}
+
+.composer input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  font-size: 17px;
+}
+
+.composer input::placeholder {
+  color: var(--label-3);
+}
+
+.composer-send {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  transition: opacity 0.2s, transform 0.2s var(--ease);
+}
+
+.composer-send svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 2.6;
+}
+
+.composer input:placeholder-shown + .composer-send {
+  opacity: 0.3;
+  transform: scale(0.9);
+}
+
+.composer-send:active {
+  transform: scale(0.9);
+}
+
+/* ---------- Error toast ---------- */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  max-width: calc(100% - 32px);
+  padding: 12px 18px;
+  transform: translateX(-50%);
+  border-radius: 14px;
+  background: var(--red);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  box-shadow: var(--shadow-pop);
+  animation: toast-in 0.3s var(--ease);
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
