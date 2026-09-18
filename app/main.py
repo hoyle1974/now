@@ -102,7 +102,11 @@ def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent) -> mod
 
 @app.delete("/todos/{todo_id}", status_code=204)
 def delete_todo(todo_id: uuid.UUID) -> None:
-    db.delete_todo(models.TodoId(todo_id))
+    # Soft delete - mark as deleted instead of removing
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo:
+        todo.deleted = True
+        db.update_todo(todo)
 
 @app.post("/todos/{todo_id}/split", response_model=models.Todo)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
@@ -111,7 +115,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
     if todo is None:
         raise HTTPException(404)
 
-    return db.split_into_children(todo, body.descriptions)
+    return db.split_into_children(todo, body.descriptions, body.due_date)
 
 
 app.mount("/", StaticFiles(directory="web", html=True), name="web")

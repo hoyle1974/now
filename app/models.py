@@ -24,6 +24,7 @@ class TodoUpdateParent(BaseModel):
 
 class TodoSplit(BaseModel):
     descriptions: list[str] = Field([])
+    due_date: datetime.datetime | None = Field(None)
 
 class Todo(BaseModel):
     todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )

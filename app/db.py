@@ -112,11 +112,12 @@ def update_todo(todo: models.Todo, cascade_done: bool = False):
         try:
             cur.execute("""
                 UPDATE TODO_ITEMS
-                SET title = ?, done = ?, due_date = ? WHERE todo_id = ?
+                SET title = ?, done = ?, due_date = ?, deleted = ? WHERE todo_id = ?
                 """,(
                 todo.title,
                 todo.done,
                 None if todo.due_date is None else todo.due_date.isoformat(),
+                todo.deleted,
                 str(todo.todo_id)))
 
             if cascade_done:
@@ -218,7 +219,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
 
         return todo
 
-def split_into_children(todo: models.Todo, descriptions: list[str]) -> models.Todo:
+def split_into_children(todo: models.Todo, descriptions: list[str], due_date = None) -> models.Todo:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
@@ -234,6 +235,8 @@ def split_into_children(todo: models.Todo, descriptions: list[str]) -> models.To
         try:
             for description in descriptions:
                 child_todo = models.Todo(title = description, parent_id = todo.todo_id, order_idx = next_order)
+                if due_date:
+                    child_todo.due_date = due_date
                 _create_todo(cur, child_todo)
                 next_order+=1
 

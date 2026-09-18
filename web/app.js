@@ -7,8 +7,11 @@ async function apiFetch(path, options = {}) {
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }
-    errorDiv.hidden = true;
-    errorDiv.textContent = "";
+    // Only clear if there's no active undo message
+    if (!lastDeleted) {
+      errorDiv.hidden = true;
+      errorDiv.textContent = "";
+    }
     if (response.status === 204) {
       return null;
     }
