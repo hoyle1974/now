@@ -20,6 +20,15 @@ async function apiFetch(path, options = {}) {
   }
 }
 
+async function toggleDone(todoId, done) {
+  await apiFetch(`${API_BASE}/${todoId}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ done }),
+  });
+  await loadAndRender();
+}
+
 async function fetchTree() {
   const roots = await apiFetch(`${API_BASE}/root`);
   const todosById = new Map();
@@ -45,6 +54,7 @@ function renderNode(todo, todosById) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = todo.done;
+  checkbox.addEventListener("change", () => toggleDone(todo.todo_id, checkbox.checked));
 
   const label = document.createElement("span");
   label.textContent = " " + todo.title + " ";
