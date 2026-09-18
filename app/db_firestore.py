@@ -109,8 +109,9 @@ def undelete_todo(todo_id: models.TodoId):
     todo_data = todo_doc.to_dict()
     if todo_data.get("parent_id") and todo_data.get("order_idx") is None:
         parent_id = todo_data["parent_id"]
-        sibling_docs = _todos_collection.where("parent_id", "==", parent_id).where("deleted", "==", False).get()
-        max_idx = max([doc.to_dict().get("order_idx", -1) for doc in sibling_docs] or [-1])
+        sibling_docs = _todos_collection.where("parent_id", "==", parent_id).get()
+        sibling_data = [doc.to_dict() for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
+        max_idx = max([data.get("order_idx", -1) for data in sibling_data] or [-1])
         _todos_collection.document(str(todo_id)).update({"order_idx": max_idx + 1})
 
 def update_todo(todo: models.Todo, cascade_done: bool = False):
@@ -133,8 +134,9 @@ def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> mode
 
     order_idx = todo.order_idx
     if parent_id and order_idx is None:
-        sibling_docs = _todos_collection.where("parent_id", "==", str(parent_id)).where("deleted", "==", False).get()
-        max_idx = max([doc.to_dict().get("order_idx", -1) for doc in sibling_docs] or [-1])
+        sibling_docs = _todos_collection.where("parent_id", "==", str(parent_id)).get()
+        sibling_data = [doc.to_dict() for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
+        max_idx = max([data.get("order_idx", -1) for data in sibling_data] or [-1])
         order_idx = max_idx + 1
 
     _todos_collection.document(str(todo.todo_id)).update({
@@ -189,8 +191,10 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     todo = db_firestore_helpers.doc_to_todo(data)
 
     # Populate children
-    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).where("deleted", "==", False).order_by("order_idx").get()
-    child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).get()
+    children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs if not c.to_dict().get("deleted", False)]
+    children_sorted = sorted(children_data, key=lambda x: x[1])
+    child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
     todo.child_ids = child_ids
 
     return todo
@@ -219,8 +223,9 @@ def split_into_children(todo: models.Todo, descriptions: list[str], due_date=Non
     """Create multiple child todos from descriptions"""
     global _todos_collection
 
-    children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).where("deleted", "==", False).get()
-    max_idx = max([doc.to_dict().get("order_idx", -1) for doc in children_docs] or [-1])
+    children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).get()
+    children_data = [doc.to_dict() for doc in children_docs if not doc.to_dict().get("deleted", False)]
+    max_idx = max([data.get("order_idx", -1) for data in children_data] or [-1])
     next_order = max_idx + 1
 
     for description in descriptions:
