@@ -366,19 +366,23 @@ function attachRowInteractions(row, todo) {
         // row is inside <li>, which is inside <ul class="todo-children">
         const liNode = row.parentElement; // <li class="todo-node">
         const ulNode = liNode.parentElement; // <ul class="todo-children">
+        console.log("dragover: liNode=", liNode?.className, "ulNode=", ulNode?.className);
 
         if (ulNode) {
           const allSiblingRows = Array.from(ulNode.querySelectorAll(":scope > li > .todo-row"));
           const targetIndex = allSiblingRows.indexOf(row);
+          console.log(`dragover: found ${allSiblingRows.length} siblings, targetIndex=${targetIndex}, isDropBefore=${isDropBefore}`);
 
           allSiblingRows.forEach((sibling, idx) => {
             if (sibling === row) {
               sibling.style.transform = "translateY(0)"; // Target row doesn't move
             } else if (isDropBefore && idx >= targetIndex) {
               // Dropping before target: shift target and rows after it down
+              console.log(`  shift down idx=${idx}`);
               sibling.style.transform = "translateY(52px)";
             } else if (!isDropBefore && idx <= targetIndex) {
               // Dropping after target: shift target and rows before it up
+              console.log(`  shift up idx=${idx}`);
               sibling.style.transform = "translateY(-52px)";
             } else {
               // Rows not involved in the gap
