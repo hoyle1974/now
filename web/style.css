@@ -1,1 +1,100 @@
-/* custom tweaks go here */
+/* Add form: input takes the space, button stays small and secondary
+   since pressing Enter in the input already submits the form. */
+.add-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+
+.add-form input {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.add-form button {
+  flex: 0 0 auto;
+  width: auto;
+  padding: 0.5rem 1rem;
+  margin-bottom: 0;
+}
+
+#todo-tree {
+  list-style: none;
+  padding-left: 0;
+}
+
+#todo-tree ul {
+  list-style: none;
+  padding-left: 1.5rem;
+  border-left: 1px solid var(--pico-muted-border-color);
+  margin-top: 0.5rem;
+}
+
+.todo-node {
+  margin-bottom: 0.75rem;
+}
+
+.todo-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.todo-row input[type="checkbox"] {
+  margin: 0;
+  align-self: center;
+}
+
+.todo-title {
+  font-weight: 500;
+}
+
+.todo-title--done {
+  text-decoration: line-through;
+  color: var(--pico-muted-color);
+  font-weight: normal;
+}
+
+.todo-meta {
+  font-size: 0.8rem;
+  color: var(--pico-muted-color);
+}
+
+.todo-actions {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+/* Small, muted action buttons so they don't outweigh the todo content
+   itself — Delete especially shouldn't be the loudest thing in a row. */
+.todo-btn {
+  width: auto;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+  margin-bottom: 0;
+}
+
+.split-editor {
+  margin: 0.5rem 0 0.5rem 1.75rem;
+  padding: 0.5rem;
+  background: var(--pico-card-background-color);
+  border: 1px solid var(--pico-muted-border-color);
+  border-radius: var(--pico-border-radius);
+}
+
+.split-editor textarea {
+  margin-bottom: 0.5rem;
+}
+
+.split-editor-buttons {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.todo-empty {
+  color: var(--pico-muted-color);
+  font-style: italic;
+}

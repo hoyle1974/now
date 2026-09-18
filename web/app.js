@@ -44,14 +44,8 @@ async function deleteTodo(todoId) {
   }
 }
 
-async function splitTodo(todoId) {
-  const raw = window.prompt("Enter split items, one per line:");
-  if (raw === null) return;
-  const descriptions = raw
-    .split("\n")
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-  if (descriptions.length === 0) return;
+async function saveSplit(todoId, descriptions) {
+  splittingTodoId = null;
   try {
     await apiFetch(`${API_BASE}/${todoId}/split`, {
       method: "POST",
@@ -82,8 +76,28 @@ async function fetchTree() {
   return { roots, todosById };
 }
 
+// Tracks which todo (if any) currently has its inline split editor open.
+// Entering/leaving this state re-renders from the already-fetched tree
+// data below rather than re-fetching, so it's instant and doesn't disturb
+// unrelated in-flight edits.
+let splittingTodoId = null;
+let lastRoots = [];
+let lastTodosById = new Map();
+
+function formatDate(isoString) {
+  return new Date(isoString).toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function renderNode(todo, todosById) {
   const li = document.createElement("li");
+  li.className = "todo-node";
+
+  const row = document.createElement("div");
+  row.className = "todo-row";
 
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
@@ -91,19 +105,45 @@ function renderNode(todo, todosById) {
   checkbox.addEventListener("change", () => reportedFailure(toggleDone(todo.todo_id, checkbox.checked)));
 
   const label = document.createElement("span");
-  label.textContent = " " + todo.title + " ";
+  label.className = "todo-title";
+  if (todo.done) {
+    label.classList.add("todo-title--done");
+  }
+  label.textContent = todo.title;
+
+  const meta = document.createElement("span");
+  meta.className = "todo-meta";
+  const metaParts = [`Created ${formatDate(todo.create_date)}`];
+  if (todo.due_date) {
+    metaParts.push(`Due ${formatDate(todo.due_date)}`);
+  }
+  meta.textContent = metaParts.join(" · ");
+
+  const actions = document.createElement("span");
+  actions.className = "todo-actions";
 
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
+  deleteBtn.className = "outline secondary todo-btn";
   deleteBtn.textContent = "Delete";
   deleteBtn.addEventListener("click", () => reportedFailure(deleteTodo(todo.todo_id)));
 
   const splitBtn = document.createElement("button");
   splitBtn.type = "button";
+  splitBtn.className = "outline secondary todo-btn";
   splitBtn.textContent = "Split";
-  splitBtn.addEventListener("click", () => reportedFailure(splitTodo(todo.todo_id)));
+  splitBtn.addEventListener("click", () => {
+    splittingTodoId = todo.todo_id;
+    renderTree();
+  });
 
-  li.append(checkbox, label, deleteBtn, splitBtn);
+  actions.append(splitBtn, deleteBtn);
+  row.append(checkbox, label, meta, actions);
+  li.appendChild(row);
+
+  if (splittingTodoId === todo.todo_id) {
+    li.appendChild(renderSplitEditor(todo));
+  }
 
   if (todo.child_ids.length > 0) {
     const childList = document.createElement("ul");
@@ -117,13 +157,64 @@ function renderNode(todo, todosById) {
   return li;
 }
 
-async function loadAndRender() {
-  const { roots, todosById } = await fetchTree();
+function renderSplitEditor(todo) {
+  const editor = document.createElement("div");
+  editor.className = "split-editor";
+
+  const textarea = document.createElement("textarea");
+  textarea.placeholder = "One item per line";
+  textarea.rows = 3;
+
+  const buttons = document.createElement("div");
+  buttons.className = "split-editor-buttons";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.type = "button";
+  saveBtn.className = "todo-btn";
+  saveBtn.textContent = "Save";
+  saveBtn.addEventListener("click", () => {
+    const descriptions = textarea.value
+      .split("\n")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+    if (descriptions.length === 0) return;
+    reportedFailure(saveSplit(todo.todo_id, descriptions));
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.type = "button";
+  cancelBtn.className = "outline secondary todo-btn";
+  cancelBtn.textContent = "Cancel";
+  cancelBtn.addEventListener("click", () => {
+    splittingTodoId = null;
+    renderTree();
+  });
+
+  buttons.append(saveBtn, cancelBtn);
+  editor.append(textarea, buttons);
+  return editor;
+}
+
+function renderTree() {
   const treeEl = document.getElementById("todo-tree");
   treeEl.innerHTML = "";
-  for (const root of roots) {
-    treeEl.appendChild(renderNode(root, todosById));
+  if (lastRoots.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "todo-empty";
+    empty.textContent = "No todos yet — add one above.";
+    treeEl.appendChild(empty);
+    return;
   }
+  for (const root of lastRoots) {
+    treeEl.appendChild(renderNode(root, lastTodosById));
+  }
+}
+
+async function loadAndRender() {
+  const { roots, todosById } = await fetchTree();
+  lastRoots = roots;
+  lastTodosById = todosById;
+  renderTree();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
