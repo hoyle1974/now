@@ -20,18 +20,28 @@ async function apiFetch(path, options = {}) {
   }
 }
 
+function reportedFailure(promise) {
+  return promise.catch(() => {});
+}
+
 async function toggleDone(todoId, done) {
-  await apiFetch(`${API_BASE}/${todoId}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ done }),
-  });
-  await loadAndRender();
+  try {
+    await apiFetch(`${API_BASE}/${todoId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ done }),
+    });
+  } finally {
+    await loadAndRender();
+  }
 }
 
 async function deleteTodo(todoId) {
-  await apiFetch(`${API_BASE}/${todoId}`, { method: "DELETE" });
-  await loadAndRender();
+  try {
+    await apiFetch(`${API_BASE}/${todoId}`, { method: "DELETE" });
+  } finally {
+    await loadAndRender();
+  }
 }
 
 async function splitTodo(todoId) {
@@ -42,12 +52,15 @@ async function splitTodo(todoId) {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   if (descriptions.length === 0) return;
-  await apiFetch(`${API_BASE}/${todoId}/split`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ descriptions }),
-  });
-  await loadAndRender();
+  try {
+    await apiFetch(`${API_BASE}/${todoId}/split`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ descriptions }),
+    });
+  } finally {
+    await loadAndRender();
+  }
 }
 
 async function fetchTree() {
@@ -75,7 +88,7 @@ function renderNode(todo, todosById) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = todo.done;
-  checkbox.addEventListener("change", () => toggleDone(todo.todo_id, checkbox.checked));
+  checkbox.addEventListener("change", () => reportedFailure(toggleDone(todo.todo_id, checkbox.checked)));
 
   const label = document.createElement("span");
   label.textContent = " " + todo.title + " ";
@@ -83,12 +96,12 @@ function renderNode(todo, todosById) {
   const deleteBtn = document.createElement("button");
   deleteBtn.type = "button";
   deleteBtn.textContent = "Delete";
-  deleteBtn.addEventListener("click", () => deleteTodo(todo.todo_id));
+  deleteBtn.addEventListener("click", () => reportedFailure(deleteTodo(todo.todo_id)));
 
   const splitBtn = document.createElement("button");
   splitBtn.type = "button";
   splitBtn.textContent = "Split";
-  splitBtn.addEventListener("click", () => splitTodo(todo.todo_id));
+  splitBtn.addEventListener("click", () => reportedFailure(splitTodo(todo.todo_id)));
 
   li.append(checkbox, label, deleteBtn, splitBtn);
 
@@ -114,19 +127,23 @@ async function loadAndRender() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadAndRender();
+  reportedFailure(loadAndRender());
 });
 
-document.getElementById("add-form").addEventListener("submit", async (event) => {
+document.getElementById("add-form").addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.getElementById("add-title");
   const title = input.value.trim();
   if (!title) return;
-  await apiFetch(API_BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title }),
-  });
-  input.value = "";
-  await loadAndRender();
+  reportedFailure(
+    (async () => {
+      await apiFetch(API_BASE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      input.value = "";
+      await loadAndRender();
+    })()
+  );
 });
