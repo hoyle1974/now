@@ -333,22 +333,85 @@ function renderMeta(todo, hasChildren, counts) {
   return meta;
 }
 
-// #1 & #5: Swipe gestures and title tap-to-rename
+// #1 & #5: Swipe gestures and title tap-to-rename, plus drag-and-drop reordering
 function attachRowInteractions(row, todo) {
   let touchStartX = 0;
   let touchStartY = 0;
   let swiping = false;
 
+  // Drag-and-drop reordering (desktop/tablet)
+  row.addEventListener("dragover", (e) => {
+    if (todo.parent_id) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+
+      const data = e.dataTransfer.getData("application/x-todo-id");
+      if (!data) return;
+
+      const { parentId } = JSON.parse(data);
+      // Only accept drops from siblings (same parent)
+      if (parentId === String(todo.parent_id)) {
+        const rect = row.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+
+        row.classList.remove("drag-over-before", "drag-over-after");
+        if (e.clientY < midY) {
+          row.classList.add("drag-over-before");
+        } else {
+          row.classList.add("drag-over-after");
+        }
+      }
+    }
+  });
+
+  row.addEventListener("dragleave", () => {
+    row.classList.remove("drag-over-before", "drag-over-after");
+  });
+
+  row.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    row.classList.remove("drag-over-before", "drag-over-after");
+
+    const data = e.dataTransfer.getData("application/x-todo-id");
+    if (!data) return;
+
+    const { todoId, parentId } = JSON.parse(data);
+    if (parentId !== String(todo.parent_id) || todoId === String(todo.todo_id)) return;
+
+    const rect = row.getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const direction = e.clientY < midY ? "up" : "down";
+
+    // Move the dragged item before/after this item
+    await reportedFailure(moveTodo(todoId, direction));
+  });
+
+  let longPressTimer = null;
+
   row.addEventListener("touchstart", (e) => {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
     swiping = false;
+
+    // Long-press the drag handle to start touch reordering
+    if (todo.parent_id && e.target.classList.contains("todo-drag-handle")) {
+      longPressTimer = setTimeout(() => {
+        row.classList.add("dragging");
+        row.style.opacity = "0.6";
+      }, 400);
+    }
   }, { passive: true });
 
   row.addEventListener("touchmove", (e) => {
     if (!touchStartX) return;
     const deltaX = e.touches[0].clientX - touchStartX;
     const deltaY = e.touches[0].clientY - touchStartY;
+
+    // If dragging (long-press active), stop swipe detection
+    if (row.classList.contains("dragging")) {
+      swiping = false;
+      return;
+    }
 
     // Only swipe horizontally (not vertical scroll)
     if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 30) {
@@ -357,8 +420,31 @@ function attachRowInteractions(row, todo) {
   }, { passive: true });
 
   row.addEventListener("touchend", (e) => {
-    if (!swiping || !touchStartX) return;
+    clearTimeout(longPressTimer);
+
+    const isDragging = row.classList.contains("dragging");
     const deltaX = e.changedTouches[0].clientX - touchStartX;
+    const deltaY = e.changedTouches[0].clientY - touchStartY;
+
+    // Handle drag reordering (vertical movement while dragging)
+    if (isDragging && todo.parent_id && Math.abs(deltaY) > 30) {
+      row.classList.remove("dragging");
+      row.style.opacity = "1";
+      const direction = deltaY > 0 ? "down" : "up";
+      reportedFailure(moveTodo(todo.todo_id, direction));
+      touchStartX = 0;
+      return;
+    }
+
+    // Clear drag state
+    if (isDragging) {
+      row.classList.remove("dragging");
+      row.style.opacity = "1";
+      touchStartX = 0;
+      return;
+    }
+
+    if (!swiping || !touchStartX) return;
 
     // Swipe right: mark done
     if (deltaX > 60) {
@@ -434,11 +520,22 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     dragHandle.className = "todo-drag-handle";
     dragHandle.textContent = "≡";
     dragHandle.setAttribute("aria-label", "Drag to reorder");
-    dragHandle.addEventListener("touchstart", (e) => {
-      e.preventDefault();
-      // Show menu as an alternative way to reorder
-      setActivePanel("menu", todo.todo_id);
-      renderTree();
+    dragHandle.draggable = true;
+
+    dragHandle.addEventListener("dragstart", (e) => {
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("application/x-todo-id", JSON.stringify({
+        todoId: String(todo.todo_id),
+        parentId: String(todo.parent_id),
+      }));
+      row.classList.add("dragging");
+    });
+
+    dragHandle.addEventListener("dragend", () => {
+      row.classList.remove("dragging");
+      document.querySelectorAll(".drag-over-before, .drag-over-after").forEach(el => {
+        el.classList.remove("drag-over-before", "drag-over-after");
+      });
     });
   }
 
