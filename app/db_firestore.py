@@ -31,7 +31,10 @@ def teardown():
 
 def create_todo(todo: models.Todo):
     """Create a new todo in Firestore"""
-    raise NotImplementedError("Firestore create_todo")
+    global _todos_collection
+
+    doc_data = db_firestore_helpers.todo_to_doc(todo)
+    _todos_collection.document(str(todo.todo_id)).set(doc_data)
 
 def delete_todo(todo_id: models.TodoId):
     """Soft delete a todo and its subtree"""
@@ -59,7 +62,24 @@ def get_root_todos() -> list[models.Todo]:
 
 def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID (excludes soft-deleted)"""
-    raise NotImplementedError("Firestore get_todo")
+    global _todos_collection
+
+    doc = _todos_collection.document(str(todo_id)).get()
+    if not doc.exists:
+        return None
+
+    data = doc.to_dict()
+    if data.get("deleted", False):
+        return None
+
+    todo = db_firestore_helpers.doc_to_todo(data)
+
+    # Populate children
+    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).where("deleted", "==", False).order_by("order_idx").get()
+    child_ids = [models.TodoId(uuid.UUID(c.to_dict()["todo_id"])) for c in children_docs]
+    todo.child_ids = child_ids
+
+    return todo
 
 def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID regardless of deleted status"""
