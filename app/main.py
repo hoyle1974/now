@@ -139,7 +139,10 @@ def move_todo(todo_id: uuid.UUID, direction: str) -> models.Todo:
     if todo is None or todo.parent_id is None:
         raise HTTPException(404, "todo not found or has no parent")
 
-    db.reorder_todo(models.TodoId(todo_id), direction)
+    try:
+        db.reorder_todo(models.TodoId(todo_id), direction)
+    except Exception as e:
+        raise HTTPException(400, f"Cannot move: {str(e)}")
 
     # Return the updated todo
     updated = db.get_todo(models.TodoId(todo_id))

@@ -175,22 +175,41 @@ def reorder_todo(todo_id: models.TodoId, direction: str):
             raise
 
 def undelete_todo(todo_id: models.TodoId):
-    """Restore a soft-deleted todo and its entire subtree"""
+    """Restore a soft-deleted todo and its entire subtree, with order_idx"""
     with _lock:
         cur = get_conn().cursor()
-        # Undelete the target row and its whole subtree in one statement,
-        # mirroring the logic of delete_todo but marking deleted = 0.
-        cur.execute("""
-            WITH RECURSIVE subtree(todo_id) AS (
-                SELECT ?
-                UNION ALL
-                SELECT t.todo_id FROM TODO_ITEMS t
-                JOIN subtree s ON t.parent_id = s.todo_id
-            )
-            UPDATE TODO_ITEMS SET deleted = 0
-            WHERE todo_id IN (SELECT todo_id FROM subtree)
-            """,(str(todo_id),))
-        get_conn().commit()
+        cur.execute("BEGIN")
+        try:
+            # Undelete the target row and its whole subtree
+            cur.execute("""
+                WITH RECURSIVE subtree(todo_id) AS (
+                    SELECT ?
+                    UNION ALL
+                    SELECT t.todo_id FROM TODO_ITEMS t
+                    JOIN subtree s ON t.parent_id = s.todo_id
+                )
+                UPDATE TODO_ITEMS SET deleted = 0
+                WHERE todo_id IN (SELECT todo_id FROM subtree)
+                """,(str(todo_id),))
+
+            # Get the restored root todo and assign it an order_idx if needed
+            cur.execute("SELECT parent_id, order_idx FROM TODO_ITEMS WHERE todo_id = ?", (str(todo_id),))
+            row = cur.fetchone()
+            if row and row["parent_id"] and row["order_idx"] is None:
+                # Assign the next available order_idx
+                cur.execute("""
+                    SELECT COALESCE(max(order_idx), -1) as m FROM TODO_ITEMS
+                    WHERE parent_id = ? AND deleted = 0
+                    """, (row["parent_id"],))
+                max_row = cur.fetchone()
+                new_idx = max_row["m"] + 1
+                cur.execute("UPDATE TODO_ITEMS SET order_idx = ? WHERE todo_id = ?",
+                           (new_idx, str(todo_id)))
+
+            get_conn().commit()
+        except Exception:
+            get_conn().rollback()
+            raise
 
 def update_todo(todo: models.Todo, cascade_done: bool = False):
     with _lock:
