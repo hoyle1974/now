@@ -1,16 +1,7 @@
 const API_BASE = "/todos";
 
-// Bumped whenever a write starts or a tree load starts. loadAndRender paints
-// only if its token is still current, so a slow response that predates a later
-// click (or a later load) can't repaint over newer state.
-let renderToken = 0;
-
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
-  const isWrite = (options.method || "GET").toUpperCase() !== "GET";
-  if (isWrite) {
-    renderToken += 1;
-  }
   try {
     const response = await fetch(path, options);
     if (!response.ok) {
@@ -40,24 +31,82 @@ function reportedFailure(promise) {
   return promise.catch(() => {});
 }
 
-async function toggleDone(todoId, done) {
+// ---- Sync engine ---------------------------------------------------------
+// Actions no longer wait for the server: they apply to the local model and go
+// into a persisted outbox that web/sync.js drains in the background.
+
+async function sendRequest(req) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15000);
   try {
-    await apiFetch(`${API_BASE}/${todoId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ done }),
+    const response = await fetch(req.path, {
+      method: req.method,
+      headers: req.headers,
+      body: req.body === undefined ? undefined : JSON.stringify(req.body),
+      signal: controller.signal,
     });
+    let body = null;
+    if (response.status !== 204 && (response.headers.get("content-type") || "").includes("json")) {
+      body = await response.json();
+    }
+    return { status: response.status, body };
   } finally {
-    await loadAndRender();
+    clearTimeout(timer);
   }
 }
 
+let noticeTimer = null;
+
+function showNotice({ level, message }) {
+  const errorDiv = document.getElementById("error");
+  clearTimeout(undoTimer);
+  clearTimeout(noticeTimer);
+  lastDeleted = null;
+  errorDiv.hidden = false;
+  errorDiv.textContent = message;
+  if (level === "error") {
+    // Permanent failures stay until dismissed.
+    errorDiv.onclick = () => { errorDiv.hidden = true; };
+  } else {
+    errorDiv.onclick = null;
+    noticeTimer = setTimeout(() => { errorDiv.hidden = true; }, 5000);
+  }
+}
+
+function renderSyncStatus({ state, pending }) {
+  const el = document.getElementById("sync-status");
+  el.dataset.state = state;
+  el.textContent =
+    state === "syncing" ? `Syncing ${pending}…` :
+    state === "offline" ? `Offline · ${pending} pending` :
+    state === "error" ? "Sync error" : "Synced";
+}
+
+const model = Sync.createModel();
+const engine = Sync.createEngine({
+  model,
+  store: IdbStore.create(),
+  send: sendRequest,
+  refetch: () => fetchTree(),
+  onChange: () => renderTree(),
+  onStatus: renderSyncStatus,
+  onNotice: showNotice,
+  onRemap: (tmp, real) => {
+    // Ids the UI keeps state under change when the server assigns real ones.
+    if (collapsedIds.delete(tmp)) collapsedIds.add(real);
+    if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
+    if (lastDeleted === tmp) lastDeleted = real;
+  },
+});
+
+// These stay async so existing `reportedFailure(action(...))` call sites work.
+async function toggleDone(todoId, done) {
+  engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
+}
+
 async function deleteTodo(todoId) {
-  try {
-    await apiFetch(`${API_BASE}/${todoId}`, { method: "DELETE" });
+  if (engine.enqueue({ kind: "delete", target_id: todoId })) {
     showUndo(todoId);
-  } finally {
-    await loadAndRender();
   }
 }
 
@@ -68,20 +117,17 @@ let undoTimer = null;
 function showUndo(todoId) {
   lastDeleted = todoId;
   const errorDiv = document.getElementById("error");
+  errorDiv.onclick = null;
   errorDiv.hidden = false;
   errorDiv.textContent = "Deleted · ";
   const undoBtn = document.createElement("button");
   undoBtn.textContent = "Undo";
   undoBtn.style.cssText = "background:none; border:none; color:inherit; text-decoration:underline; cursor:pointer; font:inherit;";
-  undoBtn.onclick = async () => {
+  undoBtn.onclick = () => {
     clearTimeout(undoTimer);
-    try {
-      await apiFetch(`${API_BASE}/${todoId}/undelete`, { method: "PATCH" });
-      errorDiv.hidden = true;
-      await loadAndRender();
-    } catch (err) {
-      console.error("Undo failed:", err);
-    }
+    errorDiv.hidden = true;
+    lastDeleted = null;
+    engine.enqueue({ kind: "undelete", target_id: todoId });
   };
   errorDiv.appendChild(undoBtn);
 
@@ -96,42 +142,21 @@ function showUndo(todoId) {
 
 async function saveEdit(todoId, title, dueDate) {
   setActivePanel(null);
-  try {
-    // null explicitly clears the due date
-    const body = { title, due_date: dueDate || null };
-    await apiFetch(`${API_BASE}/${todoId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } finally {
-    await loadAndRender();
-  }
+  // null explicitly clears the due date
+  engine.enqueue({ kind: "patch", target_id: todoId, payload: { title, due_date: dueDate || null } });
 }
 
 async function saveSplit(todoId, descriptions, dueDate = null) {
   setActivePanel(null);
-  try {
-    const body = { descriptions };
-    if (dueDate) {
-      body.due_date = dueDate;
-    }
-    await apiFetch(`${API_BASE}/${todoId}/split`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } finally {
-    await loadAndRender();
+  const payload = { descriptions };
+  if (dueDate) {
+    payload.due_date = dueDate;
   }
+  engine.enqueue({ kind: "split", target_id: todoId, payload });
 }
 
 async function moveTodo(todoId, direction) {
-  try {
-    await apiFetch(`${API_BASE}/${todoId}/move/${direction}`, { method: "PATCH" });
-  } finally {
-    await loadAndRender();
-  }
+  engine.enqueue({ kind: "move", target_id: todoId, payload: { direction } });
 }
 
 // #4: Load the full tree in one request
@@ -146,9 +171,6 @@ async function fetchTree() {
 
   return { roots: response.roots, todosById };
 }
-
-let lastRoots = [];
-let lastTodosById = new Map();
 
 // Tracks which parent todos are collapsed (children hidden). Absence means
 // expanded, so newly split/loaded parents default to expanded.
@@ -393,12 +415,8 @@ async function commitDrag() {
     return;
   }
   const direction = delta > 0 ? "down" : "up";
-  try {
-    for (let i = 0; i < Math.abs(delta); i++) {
-      await apiFetch(`${API_BASE}/${state.todoId}/move/${direction}`, { method: "PATCH" });
-    }
-  } finally {
-    await loadAndRender();
+  for (let i = 0; i < Math.abs(delta); i++) {
+    engine.enqueue({ kind: "move", target_id: state.todoId, payload: { direction } });
   }
 }
 
@@ -499,14 +517,14 @@ function attachRowInteractions(row, todo) {
           if (newTitle && newTitle !== todo.title) {
             await reportedFailure(saveEdit(todo.todo_id, newTitle, todo.due_date ? todo.due_date.slice(0, 10) : ''));
           } else {
-            await loadAndRender();
+            renderTree();
           }
         };
 
         input.addEventListener('blur', save);
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') save();
-          if (e.key === 'Escape') loadAndRender();
+          if (e.key === 'Escape') renderTree();
         });
       }
     });
@@ -894,7 +912,7 @@ function renderEmptyState() {
 function renderSummary() {
   const summary = document.getElementById("summary");
   summary.innerHTML = "";
-  const all = [...lastTodosById.values()];
+  const all = [...model.todosById.values()];
   if (all.length === 0) return;
   const open = all.filter((t) => !t.done).length;
   const overdue = all.filter(isOverdue).length;
@@ -911,40 +929,56 @@ function renderTree() {
   const treeEl = document.getElementById("todo-tree");
   treeEl.innerHTML = "";
   renderSummary();
-  if (lastRoots.length === 0) {
+  if (model.roots.length === 0) {
     treeEl.appendChild(renderEmptyState());
     return;
   }
-  const descendantCounts = computeDescendantCounts(lastTodosById);
-  for (const root of sortByUrgency(lastRoots)) {
-    treeEl.appendChild(renderNode(root, lastTodosById, descendantCounts));
+  const descendantCounts = computeDescendantCounts(model.todosById);
+  for (const root of sortByUrgency(model.roots)) {
+    treeEl.appendChild(renderNode(root, model.todosById, descendantCounts));
   }
 }
 
+// Replace the local model with the server's tree; unsent edits in the outbox
+// are re-applied on top so they stay visible. If an edit was queued or
+// finished while the fetch was in flight, the snapshot may predate it, so wait
+// for the outbox to settle and read again instead of painting stale state.
 async function loadAndRender() {
-  console.log("loadAndRender: fetching tree...");
-  const token = ++renderToken;
-  const { roots, todosById } = await fetchTree();
-  if (token !== renderToken) {
-    // A write or a newer load began meanwhile; the newest load paints instead.
-    console.log("loadAndRender: superseded, skipping render");
-    return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const epoch = engine.epoch();
+    const tree = await fetchTree();
+    if (engine.epoch() === epoch) {
+      engine.rebuild(tree);
+      return;
+    }
+    await engine.flush();
   }
-  console.log(`loadAndRender: got ${roots.length} roots, ${todosById.size} todos`);
-  lastRoots = roots;
-  lastTodosById = todosById;
-  console.log("loadAndRender: calling renderTree()");
-  renderTree();
-  console.log("loadAndRender: done");
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("today-label").textContent = new Date().toLocaleDateString(undefined, {
     weekday: "long",
     month: "long",
     day: "numeric",
   });
-  reportedFailure(loadAndRender());
+  renderSyncStatus(engine.status());
+  await engine.load();
+  await reportedFailure(loadAndRender());
+  engine.kick();
+});
+
+window.addEventListener("online", () => engine.kick());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") engine.kick();
+});
+
+// Tapping the status pill drains the outbox, then pulls the latest from the
+// server (the way to pick up changes made on another device).
+document.getElementById("sync-status").addEventListener("click", async () => {
+  await engine.flush();
+  if (engine.pending() === 0) {
+    await reportedFailure(loadAndRender());
+  }
 });
 
 // Clicking anywhere closes an open kebab menu, but not an open editor
@@ -962,20 +996,11 @@ document.getElementById("add-form").addEventListener("submit", (event) => {
   const dueInput = document.getElementById("add-due");
   const title = input.value.trim();
   if (!title) return;
-  reportedFailure(
-    (async () => {
-      const body = { title };
-      if (dueInput.value) {
-        body.due_date = dueInput.value;
-      }
-      await apiFetch(API_BASE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      input.value = "";
-      dueInput.value = "";
-      await loadAndRender();
-    })()
-  );
+  const payload = { title };
+  if (dueInput.value) {
+    payload.due_date = dueInput.value;
+  }
+  engine.enqueue({ kind: "create", payload });
+  input.value = "";
+  dueInput.value = "";
 });

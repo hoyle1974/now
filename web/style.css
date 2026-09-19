@@ -154,6 +154,29 @@ svg {
   font-weight: 500;
 }
 
+/* ---------- Sync status pill ---------- */
+
+.sync-status {
+  margin-top: 8px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 999px;
+  background: var(--fill, rgba(118, 118, 128, 0.12));
+  color: var(--label-2);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sync-status[data-state="syncing"] {
+  color: var(--accent);
+}
+
+.sync-status[data-state="offline"],
+.sync-status[data-state="error"] {
+  color: var(--red);
+}
+
 /* ---------- Tree: each root todo is its own inset-grouped card ---------- */
 
 .todo-tree,

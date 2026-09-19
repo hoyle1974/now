@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=7">
+  <link rel="stylesheet" href="/style.css?v=8">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -20,6 +20,8 @@
     <p class="app-eyebrow" id="today-label"></p>
     <h1 class="app-title">Todos</h1>
     <p class="app-summary" id="summary" aria-live="polite"></p>
+    <button type="button" id="sync-status" class="sync-status" data-state="synced"
+            aria-live="polite" title="Tap to sync now"></button>
   </header>
 
   <main class="app-main">
@@ -40,6 +42,8 @@
     </div>
   </form>
 
-  <script src="/app.js?v=7"></script>
+  <script src="/sync.js?v=8"></script>
+  <script src="/idb-store.js?v=8"></script>
+  <script src="/app.js?v=8"></script>
 </body>
 </html>
