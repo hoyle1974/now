@@ -503,6 +503,8 @@ function renderMeta(todo, hasChildren, counts) {
 // The drag in progress, or null: { todoId, li }. Tracked here (not on the
 // DOM) because every edit re-renders the whole list.
 let dragState = null;
+const LONG_PRESS_MS = 350;
+const LONG_PRESS_SLOP = 8;
 
 // Where a drop at (x, y) would land: the row under the pointer, or the nearest
 // one when the pointer is between rows or beyond the ends, plus which part of
@@ -717,11 +719,54 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     dragHandle.appendChild(icon("grip"));
     dragHandle.setAttribute("aria-label", "Drag to move");
 
-    dragHandle.addEventListener("pointerdown", (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
+    // Hard press: the drag only starts after a long-press anywhere on the row
+    // (so scrolling and taps are untouched). Moving before the threshold is a
+    // scroll and cancels; when armed the row lifts (with a small buzz where
+    // supported) and the finger can then drag it.
+    row.addEventListener("contextmenu", (e) => { if (pressing) e.preventDefault(); });
+    let pressing = false;
+    // Registered up front (non-passive) so iOS lets us stop the scroll once armed.
+    row.addEventListener("touchmove", (t) => { if (dragState && t.cancelable) t.preventDefault(); }, { passive: false });
+    row.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || dragState) return;
+      if (e.target.closest("input, textarea, label, a, button:not(.todo-drag-handle)")) return;
+      const pid = e.pointerId;
+      let lastY = e.clientY;
+      pressing = true;
+      const stop = () => {
+        pressing = false;
+        press.end();
+        row.classList.remove("armed");
+        window.removeEventListener("pointermove", onPreMove);
+        window.removeEventListener("pointerup", onPreEnd);
+        window.removeEventListener("pointercancel", onPreEnd);
+      };
+      const press = Reorder.longPress(() => {
+        if (!row.isConnected) { stop(); return; }
+        row.classList.add("armed");
+        try { navigator.vibrate && navigator.vibrate(12); } catch (_) { /* optional */ }
+        window.removeEventListener("pointermove", onPreMove);
+        window.removeEventListener("pointerup", onPreEnd);
+        window.removeEventListener("pointercancel", onPreEnd);
+        beginDrag(pid, lastY);
+      }, { delay: LONG_PRESS_MS, slop: LONG_PRESS_SLOP });
+      const onPreMove = (m) => {
+        if (m.pointerId !== pid) return;
+        lastY = m.clientY;
+        press.move(m.clientX, m.clientY);
+      };
+      const onPreEnd = (u) => { if (u.pointerId === pid) stop(); };
+      window.addEventListener("pointermove", onPreMove);
+      window.addEventListener("pointerup", onPreEnd);
+      window.addEventListener("pointercancel", onPreEnd);
+      press.start(e.clientX, e.clientY);
+    });
+
+    const beginDrag = (pid, startY) => {
+      pressing = false;
+      row.classList.remove("armed");
       const rowRect = row.getBoundingClientRect();
-      const grabY = e.clientY - rowRect.top;
+      const grabY = startY - rowRect.top;
       dragState = { todoId: String(todo.todo_id), li };
       row.classList.add("dragging");
 
@@ -730,16 +775,15 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
       ghost.style.cssText = `position:fixed;left:${rowRect.left}px;top:0;width:${rowRect.width}px;
         pointer-events:none;z-index:10000;background:var(--card);border-radius:12px;
         box-shadow:0 8px 24px rgba(0,0,0,0.2);will-change:transform;
-        transform:translate3d(0,${rowRect.top}px,0);`;
+        transform:translate3d(0,${rowRect.top}px,0) scale(1.03);`;
       document.body.appendChild(ghost);
 
       // Track the gesture on window: the row can re-render under the finger.
-      const pid = e.pointerId;
-      let pointerY = e.clientY;
+      let pointerY = startY;
       let target = null;
       let scrollTimer = null;
       const update = () => {
-        ghost.style.transform = `translate3d(0,${pointerY - grabY}px,0)`;
+        ghost.style.transform = `translate3d(0,${pointerY - grabY}px,0) scale(1.03)`;
         target = dropTargetAt(pointerY);
         showDropHint(target);
       };
@@ -776,7 +820,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
       window.addEventListener("pointercancel", onEnd);
       window.addEventListener("touchmove", blockScroll, { passive: false });
       update();
-    });
+    };
   }
 
   const checkboxHit = document.createElement("label");

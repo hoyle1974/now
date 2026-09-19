@@ -62,3 +62,44 @@ test("zoneFor splits a row into before / inside / after", () => {
   assert.equal(Reorder.zoneFor(rect, 125), "inside");
   assert.equal(Reorder.zoneFor(rect, 145), "after");
 });
+
+// --- long-press arming ---
+function fakeClock() {
+  let now = 0, next = 1; const timers = new Map();
+  return {
+    setTimeout: (fn, ms) => { timers.set(next, { fn, at: now + ms }); return next++; },
+    clearTimeout: (id) => timers.delete(id),
+    advance(ms) {
+      now += ms;
+      for (const [id, t] of [...timers]) if (t.at <= now) { timers.delete(id); t.fn(); }
+    },
+  };
+}
+
+test("longPress arms after the delay if the finger stays put", () => {
+  const clock = fakeClock(); let armed = 0;
+  const p = Reorder.longPress(() => armed++, { delay: 350, slop: 8, ...clock });
+  p.start(10, 10);
+  clock.advance(349); assert.equal(armed, 0);
+  p.move(12, 13);
+  clock.advance(1); assert.equal(armed, 1);
+  assert.equal(p.armed, true);
+});
+
+test("longPress cancels when the finger moves past the slop (a scroll)", () => {
+  const clock = fakeClock(); let armed = 0;
+  const p = Reorder.longPress(() => armed++, { delay: 350, slop: 8, ...clock });
+  p.start(10, 10);
+  clock.advance(100);
+  p.move(10, 30);
+  clock.advance(1000);
+  assert.equal(armed, 0);
+  assert.equal(p.armed, false);
+});
+
+test("longPress cancels on release before the delay", () => {
+  const clock = fakeClock(); let armed = 0;
+  const p = Reorder.longPress(() => armed++, { delay: 350, slop: 8, ...clock });
+  p.start(0, 0); p.end(); clock.advance(1000);
+  assert.equal(armed, 0);
+});
