@@ -15,8 +15,9 @@ def d(day: int) -> datetime.datetime:
 _ALL: dict[str, models.Todo] = {}
 
 
-def mk(title, due=None, done=False, order=None, kids=()):
-    t = models.Todo(title=title, due_date=due, done=done, order_idx=order)
+def mk(title, due=None, done=False, order=None, kids=(), blocked_by=(), deleted=False):
+    t = models.Todo(title=title, due_date=due, done=done, order_idx=order,
+                    blocked_by=[b.todo_id for b in blocked_by], deleted=deleted)
     t.child_ids = [k.todo_id for k in kids]
     for k in kids:
         k.parent_id = t.todo_id
@@ -100,3 +101,74 @@ def test_same_day_earlier_time_ranks_first_and_all_day_counts_as_end_of_day():
 def test_a_timed_due_still_sorts_by_date_before_time():
     tomorrow_morning, today_evening = mk("tomorrow am", at(11, 8)), mk("today pm", at(10, 22))
     assert titles(rank(tomorrow_morning, today_evening)) == ["today pm", "tomorrow am"]
+
+
+# ---- blocked_by: a blocker is pulled up to just above what it blocks ----------
+
+def test_blocker_is_pulled_up_above_the_todo_it_blocks():
+    blocker = mk("blocker")                      # undated, would rank last
+    blocked = mk("blocked", d(10), blocked_by=[blocker])
+    other = mk("other", d(12))
+    assert titles(rank(blocked, other, blocker)) == ["blocker", "blocked", "other"]
+
+
+def test_unrelated_todos_keep_their_order():
+    blocker = mk("blocker")
+    blocked = mk("blocked", d(10), blocked_by=[blocker])
+    a, b = mk("a", d(5)), mk("b", d(20))
+    assert titles(rank(a, blocked, b, blocker)) == ["a", "blocker", "blocked", "b"]
+
+
+def test_blocker_already_above_stays_put():
+    blocker = mk("blocker", d(5))
+    blocked = mk("blocked", d(10), blocked_by=[blocker])
+    assert titles(rank(blocked, blocker)) == ["blocker", "blocked"]
+
+
+def test_chain_of_blockers_is_ordered_end_to_end():
+    c = mk("c")
+    b = mk("b", blocked_by=[c])
+    a = mk("a", d(10), blocked_by=[b])
+    assert titles(rank(a, b, c)) == ["c", "b", "a"]
+
+
+def test_all_open_leaves_of_a_blocker_go_above():
+    parent = mk("blocker parent", kids=[mk("step 1", order=0), mk("step 2", order=1)])
+    blocked = mk("blocked", d(10), blocked_by=[parent])
+    assert titles(rank(blocked, parent)) == ["step 1", "step 2", "blocked"]
+
+
+def test_done_or_deleted_blocker_is_ignored():
+    done_b = mk("done blocker", done=True)
+    gone_b = mk("gone blocker", deleted=True)
+    blocked = mk("blocked", d(10), blocked_by=[done_b, gone_b])
+    other = mk("other", d(12))
+    assert titles(rank(blocked, other)) == ["blocked", "other"]
+
+
+def test_a_blocked_parent_blocks_its_subtasks():
+    blocker = mk("blocker")
+    parent = mk("trip", d(10), kids=[mk("flights", order=0)], blocked_by=[blocker])
+    assert titles(rank(parent, blocker)) == ["blocker", "flights"]
+
+
+def test_blocker_is_never_cut_off_below_the_limit():
+    blocker = mk("blocker")
+    blocked = mk("blocked", d(1), blocked_by=[blocker])
+    fillers = [mk(f"f{i}", d(2 + i)) for i in range(12)]
+    out = rank(blocked, *fillers, blocker, limit=3)
+    assert titles(out)[:2] == ["blocker", "blocked"] and [i["rank"] for i in out] == [1, 2, 3]
+
+
+def test_cycles_do_not_hang():
+    a, b = mk("a", d(10)), mk("b", d(11))
+    a.blocked_by = [b.todo_id]
+    b.blocked_by = [a.todo_id]
+    assert sorted(titles(rank(a, b))) == ["a", "b"]
+
+
+def test_items_name_their_open_blockers():
+    blocker, done_b = mk("Get quote"), mk("old", done=True)
+    blocked = mk("Book job", blocked_by=[blocker, done_b])
+    out = rank(blocked, blocker)
+    assert out[0]["blocked_by"] == [] and out[1]["blocked_by"] == ["Get quote"]

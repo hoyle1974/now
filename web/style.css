@@ -1062,6 +1062,14 @@ body[data-tab="next"] .composer {
   color: var(--label-2);
 }
 
+.next-blocked {
+  font-size: 13px;
+  color: var(--label-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .next-path {
   min-width: 0;
   overflow: hidden;

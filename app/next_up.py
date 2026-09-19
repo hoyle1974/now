@@ -13,6 +13,11 @@ parent is finished by finishing its children). Candidates are ranked by:
 3. list position: root order, then each level's order_idx, top to bottom
 
 Todos with no date anywhere go last, in list order.
+
+Blocking: a todo waits on the open todos in its blocked_by (and its ancestors').
+After ranking, each blocker is pulled up to sit just above what it blocks, so
+the blocked todo is never demoted for it. A blocker with open subtasks brings
+all its open leaves along. Done or deleted blockers don't count.
 """
 from __future__ import annotations
 
@@ -75,6 +80,49 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
 
     candidates.sort(key=lambda c: (c[0], c[1], c[2]))
 
+    def open_blockers(todo: models.Todo) -> list[models.Todo]:
+        """Open todos this one waits on: its own blocked_by plus its ancestors'."""
+        found: dict[str, models.Todo] = {}
+        node, seen = todo, set()
+        while node is not None and str(node.todo_id) not in seen:
+            seen.add(str(node.todo_id))
+            for bid in node.blocked_by:
+                b = by_id.get(str(bid))
+                if b is not None and not b.done and not b.deleted:
+                    found.setdefault(str(b.todo_id), b)
+            node = by_id.get(str(node.parent_id)) if node.parent_id else None
+        return list(found.values())
+
+    def under(todo: models.Todo, ancestor: models.Todo) -> bool:
+        node, seen = todo, set()
+        while node is not None and str(node.todo_id) not in seen:
+            if node.todo_id == ancestor.todo_id:
+                return True
+            seen.add(str(node.todo_id))
+            node = by_id.get(str(node.parent_id)) if node.parent_id else None
+        return False
+
+    placed: set[str] = set()
+    visiting: set[str] = set()
+    ordered: list[tuple] = []
+
+    def place(cand: tuple) -> None:
+        key = str(cand[3].todo_id)
+        if key in placed or key in visiting:
+            return
+        visiting.add(key)
+        blockers = open_blockers(cand[3])
+        for other in candidates:  # rank order
+            if other is not cand and any(under(other[3], b) for b in blockers):
+                place(other)
+        visiting.discard(key)
+        placed.add(key)
+        ordered.append(cand)
+
+    for cand in candidates:
+        place(cand)
+    candidates = ordered
+
     items = []
     for rank, (_, _, _, todo, titles, effective, source) in enumerate(candidates[:limit], start=1):
         items.append({
@@ -86,5 +134,6 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
             "due_source": source,
             "parent_id": str(todo.parent_id) if todo.parent_id else None,
             "path": titles,
+            "blocked_by": [b.title for b in open_blockers(todo)],
         })
     return items

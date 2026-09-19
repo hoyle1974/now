@@ -187,6 +187,9 @@ const FieldsUI = (() => {
         chosen.appendChild(chip);
       }
       list.replaceChildren();
+      // Nothing to show until something is typed; chosen todos are the chips above.
+      list.hidden = !search.value.trim();
+      if (list.hidden) return;
       const cands = Fields.pickerCandidates(todosById, todo.todo_id, search.value, ids);
       cands.slice(0, 40).forEach(({ todo: c, selected }) => {
         const btn = el("button", "picker-option" + (selected ? " is-selected" : ""), c.title);

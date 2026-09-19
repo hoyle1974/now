@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "22";
+const APP_VERSION = "24";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -1603,6 +1603,13 @@ function renderNextRow(item) {
     meta.appendChild(due);
   }
   if (meta.childNodes.length) body.appendChild(meta);
+  if (item.blocked_by && item.blocked_by.length) {
+    const blocked = document.createElement("span");
+    blocked.className = "next-blocked";
+    const more = item.blocked_by.length - 1;
+    blocked.textContent = `Blocked by ${item.blocked_by[0]}` + (more ? ` +${more}` : "");
+    body.appendChild(blocked);
+  }
 
   const chevron = icon("chevron");
   chevron.classList.add("next-chevron");

@@ -138,13 +138,13 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin: 0 0 8px;
+  margin: 0 0 6px;
 }
 
 .picker-chosen:empty { display: none; }
 
 .picker-chip {
-  min-height: 44px;
+  min-height: 36px;
   max-width: 100%;
   padding: 0 14px;
   border: 0;
@@ -158,10 +158,12 @@
   white-space: nowrap;
 }
 
+.picker-list[hidden] { display: none; }
+
 .picker-list {
-  max-height: 176px;
+  max-height: 132px;
   overflow-y: auto;
-  margin: 0 0 12px;
+  margin: 6px 0 8px;
   border-radius: 10px;
   background: var(--card);
 }
