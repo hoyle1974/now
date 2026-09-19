@@ -531,7 +531,6 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     dragHandle.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
-      dragHandle.setPointerCapture(e.pointerId);
       const rowRect = row.getBoundingClientRect();
       const grabY = e.clientY - rowRect.top;
       dragState = {
@@ -550,21 +549,30 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
         transform:translate3d(0,${rowRect.top}px,0);`;
       document.body.appendChild(ghost);
 
+      // Reordering moves this row's DOM node, which drops pointer capture on
+      // the handle, so track the gesture on window instead.
+      const pid = e.pointerId;
       const onMove = (m) => {
+        if (m.pointerId !== pid) return;
+        m.preventDefault();
         ghost.style.transform = `translate3d(0,${m.clientY - grabY}px,0)`;
         reorderAt(m.clientY);
       };
-      const onEnd = () => {
-        dragHandle.removeEventListener("pointermove", onMove);
-        dragHandle.removeEventListener("pointerup", onEnd);
-        dragHandle.removeEventListener("pointercancel", onEnd);
+      const blockScroll = (t) => t.preventDefault();
+      const onEnd = (u) => {
+        if (u.pointerId !== pid) return;
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onEnd);
+        window.removeEventListener("pointercancel", onEnd);
+        window.removeEventListener("touchmove", blockScroll);
         ghost.remove();
         row.classList.remove("dragging");
         if (dragState) reportedFailure(commitDrag());
       };
-      dragHandle.addEventListener("pointermove", onMove);
-      dragHandle.addEventListener("pointerup", onEnd);
-      dragHandle.addEventListener("pointercancel", onEnd);
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onEnd);
+      window.addEventListener("pointercancel", onEnd);
+      window.addEventListener("touchmove", blockScroll, { passive: false });
     });
   }
 
