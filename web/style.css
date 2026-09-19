@@ -1403,3 +1403,31 @@ body[data-tab="trash"] .composer {
 .trash-view .next-note {
   color: var(--label-2);
 }
+
+/* ---------- Search ---------- */
+
+.app-header { position: relative; }
+
+.search-open { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 20px); right: max(8px, env(safe-area-inset-right, 0px)); width: 44px; height: 44px; display: grid; place-items: center; border: none; border-radius: 50%; background: none; color: var(--accent); cursor: pointer; }
+.search-open svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+
+.search-bar { max-width: 640px; margin: 0 auto; padding: 0 max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px)); display: flex; align-items: center; gap: 4px; }
+.search-bar[hidden] { display: none; }
+.search-input { flex: 1 1 auto; min-width: 0; min-height: 44px; padding: 0 14px; border: none; border-radius: var(--radius-control); background: var(--fill); color: var(--label); font: inherit; font-size: 17px; -webkit-appearance: none; appearance: none; }
+.search-input::-webkit-search-cancel-button { display: none; }
+.search-btn { flex: none; min-width: 44px; min-height: 44px; border: none; background: none; color: var(--label-2); font: inherit; cursor: pointer; }
+.search-btn--text { color: var(--accent); padding: 0 6px; }
+
+/* Searching replaces whatever view is showing. */
+body.searching .app-main > :not(#search-results) { display: none; }
+
+.search-list { list-style: none; margin: 0; padding: 0; background: var(--card); border-radius: var(--radius-card); overflow: hidden; }
+.search-list li + li { box-shadow: inset 0 0.5px 0 var(--separator); }
+.search-hit { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 52px; padding: 8px 14px; border: none; background: none; color: var(--label); font: inherit; text-align: left; cursor: pointer; }
+li.search-hit { cursor: default; }
+.search-hit:active { background: var(--fill-pressed); }
+.search-title { overflow-wrap: anywhere; }
+.search-path { font-size: 13px; color: var(--label-2); overflow-wrap: anywhere; }
+.search-hit.is-done { opacity: 0.55; }
+.search-hit.is-done .search-title { text-decoration: line-through; }
+.search-section { margin-top: 20px; }
