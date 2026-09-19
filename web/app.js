@@ -181,7 +181,6 @@ const engine = Sync.createEngine({
   onLog: logEvent,
   onRemap: (tmp, real) => {
     // Ids the UI keeps state under change when the server assigns real ones.
-    if (collapsedIds.delete(tmp)) collapsedIds.add(real);
     if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
     if (lastDeleted === tmp) lastDeleted = real;
   },
@@ -217,6 +216,14 @@ const freshness = Freshness.create({
 // These stay async so existing `reportedFailure(action(...))` call sites work.
 async function toggleDone(todoId, done) {
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
+}
+
+// Collapse state lives on the todo so it survives refresh and syncs across
+// devices. A no-op when already in the requested state, to avoid empty writes.
+function setCollapsed(todoId, collapsed) {
+  const todo = model.todosById.get(todoId);
+  if (!todo || Boolean(todo.collapsed) === collapsed) return;
+  engine.enqueue({ kind: "patch", target_id: todoId, payload: { collapsed } });
 }
 
 async function deleteTodo(todoId) {
@@ -286,10 +293,6 @@ async function fetchTree() {
 
   return { roots: response.roots, todosById, rev: response.rev };
 }
-
-// Tracks which parent todos are collapsed (children hidden). Absence means
-// expanded, so newly split/loaded parents default to expanded.
-const collapsedIds = new Set();
 
 // The parent whose children currently show drag handles (reorder mode), or null.
 let reorderParentId = null;
@@ -682,7 +685,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   li.dataset.todoId = todo.todo_id;
   li.style.setProperty("--depth", depth);
   const hasChildren = todo.child_ids.length > 0;
-  const isCollapsed = hasChildren && collapsedIds.has(todo.todo_id);
+  const isCollapsed = hasChildren && todo.collapsed;
 
   // A done ancestor makes this row look done without touching its stored state.
   const shownDone = todo.done || ancestorDone;
@@ -789,11 +792,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     const toggle = iconButton("todo-toggle", "chevron", isCollapsed ? "Expand subtasks" : "Collapse subtasks");
     toggle.setAttribute("aria-expanded", String(!isCollapsed));
     toggle.addEventListener("click", () => {
-      if (collapsedIds.has(todo.todo_id)) {
-        collapsedIds.delete(todo.todo_id);
-      } else {
-        collapsedIds.add(todo.todo_id);
-      }
+      setCollapsed(todo.todo_id, !todo.collapsed);
       renderTree();
     });
     trailing.appendChild(toggle);
@@ -830,7 +829,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
 
     if (todo.child_ids.length > 1) {
       menu.append(menuItem("Reorder subtasks", "grip", () => {
-        collapsedIds.delete(todo.todo_id);
+        setCollapsed(todo.todo_id, false);
         reorderParentId = todo.todo_id;
         setActivePanel(null);
         renderTree();
@@ -1443,7 +1442,7 @@ function focusTodo(todoId, tapY) {
   // Open every collapsed ancestor so the row exists.
   for (let p = todo.parent_id && model.todosById.get(String(todo.parent_id)); p;
        p = p.parent_id && model.todosById.get(String(p.parent_id))) {
-    collapsedIds.delete(p.todo_id);
+    setCollapsed(p.todo_id, false);
   }
   setActivePanel(null);
   spotlight(todoId);

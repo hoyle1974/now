@@ -506,3 +506,24 @@ test("logs dropped ops (404 / permanent failure)", async () => {
   await h.engine.flush();
   assert.ok(kinds(h).includes("drop"));
 });
+
+test("collapsed patch applies optimistically and is sent without If-Match", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 4 })), script: [
+    ok(todo("a", { version: 4, collapsed: true })),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { collapsed: true } });
+  assert.equal(h.model.todosById.get("a").collapsed, true);
+  await h.engine.flush();
+  assert.deepEqual(h.calls[0].body, { collapsed: true });
+  assert.equal(h.calls[0].headers["If-Match"], undefined);
+});
+
+test("collapsed mixed with a content edit stays conditional", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 4 })), script: [
+    ok(todo("a", { version: 5, done: true, collapsed: true })),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { collapsed: true, done: true } });
+  await h.engine.flush();
+  assert.deepEqual(h.calls[0].body, { collapsed: true, done: true });
+  assert.equal(h.calls[0].headers["If-Match"], "4");
+});

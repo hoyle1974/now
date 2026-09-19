@@ -262,12 +262,14 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
     restored.child_ids = [models.TodoId(uuid.UUID(d["todo_id"])) for d in children]
     return restored, affected
 
-def update_todo(todo: models.Todo):
+def update_todo(todo: models.Todo, bump_version: bool = True):
     """Update a todo and bump its version in place. Done state is per-todo; it
-    never cascades to children."""
+    never cascades to children. View state (collapsed) passes bump_version=False
+    so it never invalidates another window's cached version."""
     global _todos_collection
 
-    todo.version += 1
+    if bump_version:
+        todo.version += 1
     doc_data = db_firestore_helpers.todo_to_doc(todo)
     _update(_todos_collection.document(str(todo.todo_id)), doc_data)
 

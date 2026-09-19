@@ -402,3 +402,30 @@ def test_replay_keeps_the_original_prev_and_rev(db_setup):
     client.post("/todos", json={"title": "other"})
     b = client.post("/todos", json={"title": "a"}, headers=h)
     assert (b.headers["x-rev-prev"], b.headers["x-rev"]) == (a.headers["x-rev-prev"], a.headers["x-rev"])
+
+
+def test_collapsed_defaults_false_and_persists(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    assert t["collapsed"] is False
+    r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True})
+    assert r.status_code == 200 and r.json()["collapsed"] is True
+    assert client.get(f"/todos/{t['todo_id']}").json()["collapsed"] is True
+    roots = client.get("/todos/tree").json()["roots"]
+    assert roots[0]["collapsed"] is True
+
+
+def test_collapsed_only_patch_skips_version_bump_and_check(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    client.patch(f"/todos/{t['todo_id']}", json={"done": True})  # version -> 2
+    # Stale If-Match does not conflict, and the version is untouched.
+    r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True}, headers={"If-Match": "1"})
+    assert r.status_code == 200
+    assert r.json()["version"] == 2 and r.json()["collapsed"] is True
+
+
+def test_collapsed_with_other_fields_still_versioned(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True, "done": True}, headers={"If-Match": "9"})
+    assert r.status_code == 409
+    r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True, "done": True}, headers={"If-Match": "1"})
+    assert r.json()["version"] == 2

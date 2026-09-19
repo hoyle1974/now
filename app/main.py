@@ -157,9 +157,16 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
             todo.due_date = body.due_date
         if body.deleted is not None:
             todo.deleted = body.deleted
-        db.update_todo(todo)
+        if body.collapsed is not None:
+            todo.collapsed = body.collapsed
+        db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
+    # Collapsing is view state: last write wins, so it skips the If-Match
+    # check and doesn't bump the version (no conflicts with content edits).
+    view_only = body.model_fields_set == {"collapsed"}
+    if view_only:
+        if_match = None
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 @app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=None)

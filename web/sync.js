@@ -13,7 +13,7 @@
   const MAX_CONFLICTS = 3;
   const BACKOFF_BASE_MS = 1000;
   const BACKOFF_CAP_MS = 30000;
-  const PATCH_FIELDS = ["title", "done", "due_date"];
+  const PATCH_FIELDS = ["title", "done", "due_date", "collapsed"];
 
   const isTmp = (id) => typeof id === "string" && id.startsWith("tmp:");
 
@@ -47,7 +47,7 @@
     return {
       todo_id: id, title, done: false, create_date: new Date().toISOString(),
       due_date: normalizeDue(dueDate), order_idx: orderIdx, parent_id: parentId,
-      child_ids: [], deleted: false, version: 0,
+      child_ids: [], deleted: false, collapsed: false, version: 0,
     };
   }
 
@@ -174,9 +174,10 @@
         return { method: "POST", path: "/todos", headers, body };
       }
       case "patch": {
-        conditional();
         const body = {};
         for (const f of PATCH_FIELDS) if (f in p) body[f] = p[f];
+        // Collapsing is view state: last write wins, so it carries no version.
+        if (Object.keys(body).some((f) => f !== "collapsed")) conditional();
         return { method: "PATCH", path: `/todos/${id}`, headers, body };
       }
       case "delete":

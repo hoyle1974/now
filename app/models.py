@@ -18,6 +18,7 @@ class TodoUpdate(BaseModel):
     done: bool | None = Field(None)
     due_date: datetime.datetime | None = Field(None)
     deleted: bool | None = Field(None)
+    collapsed: bool | None = Field(None)
 
 class TodoUpdateParent(BaseModel):
     parent_id: TodoId | None = Field(None)
@@ -36,4 +37,5 @@ class Todo(BaseModel):
     parent_id: TodoId | None = Field(None)
     child_ids: list[TodoId] = Field([])
     deleted: bool = Field(False)
+    collapsed: bool = Field(False)
     version: int = Field(1)

@@ -13,6 +13,7 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         order_idx=doc_dict.get("order_idx"),
         parent_id=None if doc_dict.get("parent_id") is None else models.TodoId(uuid.UUID(doc_dict["parent_id"])),
         deleted=doc_dict.get("deleted", False),
+        collapsed=doc_dict.get("collapsed", False),
         # Docs written before versioning existed have no field: treat as version 1.
         version=doc_dict.get("version", 1),
         child_ids=[]
@@ -29,6 +30,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "order_idx": todo.order_idx,
         "parent_id": None if todo.parent_id is None else str(todo.parent_id),
         "deleted": todo.deleted,
+        "collapsed": todo.collapsed,
         "version": todo.version
     }
 

@@ -39,7 +39,8 @@ def init(memory:bool = False):
             due_date TEXT,
             order_idx INTEGER,
             parent_id TEXT REFERENCES TODO_ITEMS(todo_id) ON DELETE CASCADE,
-            deleted INTEGER NOT NULL DEFAULT 0
+            deleted INTEGER NOT NULL DEFAULT 0,
+            collapsed INTEGER NOT NULL DEFAULT 0
         );
         """)
 
@@ -49,6 +50,8 @@ def init(memory:bool = False):
     columns = [row["name"] for row in cur.fetchall()]
     if "deleted" not in columns:
         cur.execute("ALTER TABLE TODO_ITEMS ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0")
+    if "collapsed" not in columns:
+        cur.execute("ALTER TABLE TODO_ITEMS ADD COLUMN collapsed INTEGER NOT NULL DEFAULT 0")
 
     conn.commit()
 
@@ -210,19 +213,20 @@ def undelete_todo(todo_id: models.TodoId):
             get_conn().rollback()
             raise
 
-def update_todo(todo: models.Todo):
+def update_todo(todo: models.Todo, bump_version: bool = True):
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
         try:
             cur.execute("""
                 UPDATE TODO_ITEMS
-                SET title = ?, done = ?, due_date = ?, deleted = ? WHERE todo_id = ?
+                SET title = ?, done = ?, due_date = ?, deleted = ?, collapsed = ? WHERE todo_id = ?
                 """,(
                 todo.title,
                 todo.done,
                 None if todo.due_date is None else todo.due_date.isoformat(),
                 todo.deleted,
+                todo.collapsed,
                 str(todo.todo_id)))
 
             get_conn().commit()
@@ -267,7 +271,7 @@ def get_root_todos() -> list[models.Todo]:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date, due_date, order_idx, parent_id from TODO_ITEMS where parent_id is null AND deleted = 0
+            select todo_id, title, done, create_date, due_date, order_idx, parent_id, collapsed from TODO_ITEMS where parent_id is null AND deleted = 0
             """)
         rows = cur.fetchall()
 
@@ -280,7 +284,8 @@ def get_root_todos() -> list[models.Todo]:
                 create_date =  datetime.datetime.fromisoformat(row["create_date"]),
                 due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
                 order_idx = row["order_idx"],
-                parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None
+                parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None,
+                collapsed = row["collapsed"] == 1
             )
             _populate_children(cur, todo)
             todos.append(todo)
@@ -291,7 +296,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted from TODO_ITEMS where todo_id = ? AND deleted = 0
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted, collapsed from TODO_ITEMS where todo_id = ? AND deleted = 0
             """, (str(todo_id),))
         row = cur.fetchone()
         if row is None:
@@ -305,7 +310,8 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
             due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
             order_idx = row["order_idx"],
             parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None,
-            deleted = True if row["deleted"] == 1 else False
+            deleted = True if row["deleted"] == 1 else False,
+            collapsed = row["collapsed"] == 1
         )
         _populate_children(cur, todo)
 
@@ -316,7 +322,7 @@ def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     with _lock:
         cur = get_conn().cursor()
         cur.execute("""
-            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted from TODO_ITEMS where todo_id = ?
+            select todo_id, title, done, create_date,due_date,order_idx, parent_id, deleted, collapsed from TODO_ITEMS where todo_id = ?
             """, (str(todo_id),))
         row = cur.fetchone()
         if row is None:
@@ -330,7 +336,8 @@ def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
             due_date =  None if row["due_date"] is None else datetime.datetime.fromisoformat(row["due_date"]),
             order_idx = row["order_idx"],
             parent_id = models.TodoId(uuid.UUID(row["parent_id"])) if row["parent_id"] is not None else None,
-            deleted = True if row["deleted"] == 1 else False
+            deleted = True if row["deleted"] == 1 else False,
+            collapsed = row["collapsed"] == 1
         )
         _populate_children(cur, todo)
 
