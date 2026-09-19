@@ -753,3 +753,57 @@ test("a repeat queued after the done patch keeps its order and doesn't merge", a
   await h.engine.flush();
   assert.deepEqual(h.calls.map((c) => c.path), ["/todos/a", "/todos/a/repeat"]);
 });
+
+// ---- new fields: color, links, blocked_by, references ----------------------
+
+test("patch applies and sends color/links/blocked_by/references; null clears color", () => {
+  const model = Sync.createModel();
+  const a = todo("a", { color: "red" });
+  Object.assign(model, treeOf(a));
+  const payload = { color: null, links: [{ url: "https://x.com", label: null }], blocked_by: ["b"], references: ["c"] };
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload });
+  assert.equal(a.color, null);
+  assert.deepEqual(a.links, payload.links);
+  assert.deepEqual(a.blocked_by, ["b"]);
+  const req = Sync.buildRequest({ kind: "patch", target_id: "a", txn_id: "t", payload }, 3);
+  assert.deepEqual(req.body, payload);
+  assert.equal(req.headers["If-Match"], "3");
+});
+
+test("color patches coalesce with other field edits", async () => {
+  const h = harness({ tree: treeOf(todo("a"), todo("b")), script: [] });
+  h.engine.enqueue({ kind: "patch", target_id: "b", payload: { title: "y" } });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { color: "red" } });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { links: [] } });
+  assert.equal(h.engine.pending(), 2);
+});
+
+test("409 on a field patch keeps local new fields and adopts the server's others", async () => {
+  const a = todo("a", { color: "blue", links: [{ url: "https://s.com", label: null }] });
+  const h = harness({ tree: treeOf(a), script: [
+    ok({ version: 5, title: "srv", color: "green", links: [{ url: "https://s.com", label: null }] }, 409),
+    ok({ version: 6 }),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { color: "red" } });
+  await h.engine.flush();
+  assert.equal(a.color, "red");
+  assert.equal(a.title, "srv");
+  assert.equal(a.version, 6);
+  assert.equal(h.calls[1].headers["If-Match"], "5");
+});
+
+test("409 whose body lacks a field does not blank it locally", async () => {
+  const a = todo("a", { references: ["z"] });
+  const h = harness({ tree: treeOf(a), script: [ok({ version: 2 }, 409), ok({ version: 3 })] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { color: "red" } });
+  await h.engine.flush();
+  assert.deepEqual(a.references, ["z"]);
+});
+
+test("a 400 rejection surfaces the server's detail in the notice", async () => {
+  const a = todo("a");
+  const h = harness({ tree: treeOf(a), script: [ok({ detail: "blocked_by would create a cycle" }, 400)] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { blocked_by: ["b"] } });
+  await h.engine.flush();
+  assert.ok(h.notices.some((n) => n.level === "error" && n.message.includes("cycle")));
+});

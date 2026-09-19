@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "20";
+const APP_VERSION = "21";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -166,6 +166,7 @@ function setPhase(next) {
 }
 
 const model = Sync.createModel();
+FieldsUI.init({ model, focusTodo: (id, y) => focusTodo(id, y) });
 const engine = Sync.createEngine({
   model,
   store: IdbStore.create(),
@@ -287,11 +288,12 @@ function showUndo(todoId) {
   }, 5000);
 }
 
-async function saveEdit(todoId, title, dueDate, repeat = null) {
+async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
   setActivePanel(null);
-  // null explicitly clears the due date (and a repeat rule needs a date)
+  // null explicitly clears the due date (and a repeat rule needs a date).
+  // fields: only the changed color/links/blocked_by/references (see fields.js).
   engine.enqueue({ kind: "patch", target_id: todoId,
-    payload: { title, due_date: dueDate || null, repeat: dueDate ? repeat : null } });
+    payload: { title, due_date: dueDate || null, repeat: dueDate ? repeat : null, ...fields } });
 }
 
 async function saveSplit(todoId, descriptions, dueDate = null) {
@@ -547,6 +549,9 @@ function renderMeta(todo, hasChildren, counts) {
     due.append(icon("calendar"), text);
     meta.appendChild(due);
   }
+
+  const blockedChip = FieldsUI.blockedChip(todo);
+  if (blockedChip) meta.appendChild(blockedChip);
 
   return meta;
 }
@@ -988,6 +993,17 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   }
   li.appendChild(row);
 
+  // Color accent, and a folded detail panel that a tap on the row body opens.
+  FieldsUI.decorateRow(row, todo);
+  const detailOpen = FieldsUI.isExpanded(todo.todo_id);
+  row.classList.toggle("has-detail-open", detailOpen);
+  row.addEventListener("click", (e) => {
+    if (!FieldsUI.isRowTap(e.target) || row.classList.contains("dragging")) return;
+    FieldsUI.toggleExpanded(todo.todo_id);
+    renderTree();
+  });
+  if (detailOpen) li.appendChild(FieldsUI.renderDetail(todo));
+
   // Attach swipe/tap interactions
   attachRowInteractions(row, todo);
 
@@ -1229,10 +1245,17 @@ function renderEditEditor(todo) {
   dueDateInput.addEventListener("input", markChips);
   markChips();
 
+  const extra = FieldsUI.renderEditFields(todo);
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
     if (!title) return;
-    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value), repeatControls.value()));
+    const result = extra.changes();
+    if (result.error) {
+      showNotice({ level: "error", message: result.error });
+      return;
+    }
+    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value),
+      repeatControls.value(), result.fields));
   });
 
   return renderSheet(
@@ -1245,6 +1268,7 @@ function renderEditEditor(todo) {
     dueTimeInput,
     sheetLabel("Repeat every", repeatControls.unit),
     repeatControls.row,
+    ...extra.nodes,
     buttons
   );
 }
