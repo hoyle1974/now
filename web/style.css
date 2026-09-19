@@ -18,7 +18,7 @@
   --label-2: rgba(60, 60, 67, 0.6);
   --label-3: rgba(60, 60, 67, 0.3);
   --material: rgba(249, 249, 249, 0.8);
-  --popover: rgba(250, 250, 250, 0.88);
+  --popover: rgba(250, 250, 250, 0.97);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-pop: 0 10px 40px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.08);
 
@@ -52,7 +52,7 @@
     --label-2: rgba(235, 235, 245, 0.6);
     --label-3: rgba(235, 235, 245, 0.3);
     --material: rgba(22, 22, 24, 0.78);
-    --popover: rgba(44, 44, 46, 0.9);
+    --popover: rgba(44, 44, 46, 0.97);
     --shadow-card: none;
     --shadow-pop: 0 10px 40px rgba(0, 0, 0, 0.6);
   }
@@ -65,6 +65,7 @@
 }
 
 html {
+  overscroll-behavior-y: contain;
   -webkit-text-size-adjust: 100%;
   -webkit-tap-highlight-color: transparent;
 }
@@ -80,7 +81,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Room for the fixed composer so the last card is never trapped under it. */
-  padding-bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(var(--composer-h, 84px) + 16px);
 }
 
 button,
@@ -541,6 +542,12 @@ svg {
   animation: menu-in 0.22s var(--ease);
 }
 
+.todo-menu-dropdown--up {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom right;
+}
+
 @keyframes menu-in {
   from {
     opacity: 0;
@@ -750,7 +757,7 @@ svg {
   box-shadow: 0 0 0 0.5px var(--separator);
 }
 
-.composer input {
+.composer-inner input {
   flex: 1;
   min-width: 0;
   height: 40px;
@@ -761,8 +768,41 @@ svg {
   font-size: 17px;
 }
 
-.composer input::placeholder {
+.composer-inner input::placeholder {
   color: var(--label-3);
+}
+
+.composer-date {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--label-2);
+  transition: color 0.15s, background-color 0.15s;
+}
+
+.composer-date svg {
+  width: 20px;
+  height: 20px;
+}
+
+.composer-date[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+.composer-date.has-value {
+  color: var(--accent);
+}
+
+.composer-chips {
+  max-width: 608px;
+  margin: 0 auto 8px;
+  padding: 0 4px;
 }
 
 .composer-send {
@@ -785,7 +825,7 @@ svg {
   stroke-width: 2.6;
 }
 
-.composer input:placeholder-shown + .composer-send {
+#add-title:placeholder-shown ~ .composer-send {
   opacity: 0.3;
   transform: scale(0.9);
 }
@@ -799,7 +839,7 @@ svg {
 .toast {
   position: fixed;
   left: 50%;
-  bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(var(--composer-h, 84px) + 12px);
   z-index: 40;
   max-width: calc(100% - 32px);
   padding: 12px 18px;
@@ -827,4 +867,422 @@ svg {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ---------- Chips: due-date shortcuts (composer and edit sheet) ---------- */
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.chip-row[hidden] {
+  display: none;
+}
+
+.composer-chips {
+  flex-wrap: nowrap;
+  margin-bottom: 8px;
+}
+
+.chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background-color 0.15s, color 0.15s, transform 0.1s;
+}
+
+.composer .chip {
+  background: var(--fill);
+}
+
+.chip:active {
+  transform: scale(0.96);
+}
+
+.chip.is-active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Inside a sheet (often nested a few levels deep) the row must stay on one line. */
+.sheet .chip-row {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.sheet .chip {
+  min-height: 32px;
+  padding: 0 11px;
+  font-size: 14px;
+}
+
+.chip-plain {
+  margin-left: auto;
+  padding: 0 4px !important;
+  background: none !important;
+  color: var(--label-2);
+}
+
+.chip-pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* ---------- Tabs: iOS-style segmented control ---------- */
+
+.tabs-wrap {
+  position: sticky;
+  top: 0;
+  z-index: 15;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+
+.tabs {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+}
+
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--fill);
+}
+
+.segmented-btn {
+  min-height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--label);
+  transition: background-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+
+.segmented-btn[aria-selected="true"] {
+  background: var(--card);
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.14), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+}
+
+@media (prefers-color-scheme: dark) {
+  .segmented-btn[aria-selected="true"] {
+    background: #636366;
+  }
+}
+
+/* The composer only adds to the list. */
+body[data-tab="next"] .composer {
+  display: none;
+}
+
+/* ---------- Next up ---------- */
+
+.next-caption {
+  margin: 4px 4px 8px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--label-2);
+}
+
+.next-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.next-list > li + li {
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
+.next-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 64px;
+  padding: 10px 8px 10px 14px;
+  border: 0;
+  background: none;
+  text-align: left;
+  color: var(--label);
+  transition: background-color 0.15s;
+}
+
+.next-row:active {
+  background: var(--fill);
+}
+
+.next-rank {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The one to do first stands out. */
+.next-list > li:first-child .next-rank {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.next-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.next-title {
+  font-size: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.next-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 10px;
+  font-size: 13px;
+  color: var(--label-2);
+}
+
+.next-path {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.next-chevron {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  color: var(--label-3);
+}
+
+.next-empty {
+  padding: 32px;
+  text-align: center;
+  color: var(--label-2);
+}
+
+.next-note {
+  margin: 12px 4px 0;
+  font-size: 13px;
+  color: var(--red);
+}
+
+/* ---------- Focus after jumping from Next up ---------- */
+
+.todo-row.is-focused {
+  border-radius: 12px;
+  animation: focus-pop 0.45s var(--ease), focus-tint 2.4s ease-out forwards;
+}
+
+@keyframes focus-pop {
+  0% { transform: scale(0.97); }
+  50% { transform: scale(1.025); box-shadow: var(--shadow-pop); }
+  100% { transform: scale(1); }
+}
+
+@keyframes focus-tint {
+  0%, 60% { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  100% { background: transparent; }
+}
+
+/* ---------- Completion animation ---------- */
+
+.todo-check {
+  position: relative;
+}
+
+/* Ring that bursts off the checkbox... */
+.todo-row.just-done .todo-check::after {
+  content: "";
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  pointer-events: none;
+  animation: check-ring 0.6s var(--ease) forwards;
+}
+
+/* ...with a scatter of dots. */
+.todo-row.just-done .todo-check::before {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  pointer-events: none;
+  box-shadow:
+    0 -19px var(--accent), 0 19px var(--accent),
+    19px 0 var(--orange), -19px 0 var(--orange),
+    13px -13px var(--accent), -13px -13px var(--accent),
+    13px 13px var(--accent), -13px 13px var(--accent);
+  animation: check-dots 0.6s var(--ease) forwards;
+}
+
+@keyframes check-ring {
+  from { transform: scale(1); opacity: 0.7; }
+  to { transform: scale(2.3); opacity: 0; }
+}
+
+@keyframes check-dots {
+  0% { transform: scale(0.3); opacity: 1; }
+  70% { opacity: 1; }
+  100% { transform: scale(1.1); opacity: 0; }
+}
+
+.todo-row.just-done {
+  border-radius: 12px;
+  animation: done-tint 0.9s ease-out;
+}
+
+.todo-row.just-done .todo-title {
+  animation: strike-in 0.4s var(--ease);
+}
+
+@keyframes done-tint {
+  0% { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  100% { background: transparent; }
+}
+
+@keyframes strike-in {
+  from {
+    color: var(--label);
+    text-decoration-color: transparent;
+  }
+}
+
+/* ---------- Reorder mode ---------- */
+
+.reorder-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 12px 4px 54px;
+  padding: 6px 6px 6px 14px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 14px;
+  color: var(--label-2);
+}
+
+.btn-small {
+  min-height: 32px;
+  padding: 0 16px;
+  font-size: 14px;
+}
+
+.todo-children.is-reordering .todo-row::before {
+  left: 98px;
+}
+
+/* ---------- Pull to refresh ---------- */
+
+.ptr {
+  --ptr-y: 0px;
+  --ptr-progress: 0;
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 4px);
+  left: 50%;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-left: -18px;
+  border-radius: 50%;
+  background: var(--card);
+  color: var(--accent);
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(calc(var(--ptr-y) - 48px));
+  transition: transform 0.3s var(--ease), opacity 0.2s;
+}
+
+.ptr.is-pulling {
+  opacity: var(--ptr-progress);
+  transition: none;
+}
+
+.ptr.is-refreshing {
+  opacity: 1;
+}
+
+.ptr-arrow {
+  width: 20px;
+  height: 20px;
+  transition: transform 0.2s var(--ease);
+}
+
+.ptr.is-ready .ptr-arrow {
+  transform: rotate(180deg);
+}
+
+.ptr-spinner {
+  display: none;
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid var(--fill-pressed);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: ptr-spin 0.7s linear infinite;
+}
+
+.ptr.is-refreshing .ptr-arrow {
+  display: none;
+}
+
+.ptr.is-refreshing .ptr-spinner {
+  display: block;
+}
+
+@keyframes ptr-spin {
+  to { transform: rotate(360deg); }
 }

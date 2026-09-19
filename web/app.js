@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "11";
+const APP_VERSION = "12";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -290,6 +290,33 @@ async function fetchTree() {
 // Tracks which parent todos are collapsed (children hidden). Absence means
 // expanded, so newly split/loaded parents default to expanded.
 const collapsedIds = new Set();
+
+// The parent whose children currently show drag handles (reorder mode), or null.
+let reorderParentId = null;
+
+// One-shot visual states keyed by todo id. Every edit re-renders the whole
+// list, which would wipe a CSS animation started on the live element, so the
+// renderer re-applies these classes for the length of the animation instead.
+let justCompletedId = null;
+let focusedId = null;
+let justCompletedTimer = null;
+let focusedTimer = null;
+
+function celebrate(todoId) {
+  justCompletedId = todoId;
+  clearTimeout(justCompletedTimer);
+  justCompletedTimer = setTimeout(() => { justCompletedId = null; }, 1000);
+  if (navigator.vibrate) navigator.vibrate(12); // Android only; iOS ignores it
+}
+
+function spotlight(todoId) {
+  focusedId = todoId;
+  clearTimeout(focusedTimer);
+  focusedTimer = setTimeout(() => {
+    focusedId = null;
+    document.querySelectorAll(".todo-row.is-focused").forEach((el) => el.classList.remove("is-focused"));
+  }, 2400);
+}
 
 // At most one per-row panel (the "more actions" menu, or one of its inline
 // editors) is open at a time, so it's a single { todoId, mode } slot rather
@@ -600,6 +627,7 @@ function attachRowInteractions(row, todo) {
       const checkbox = row.querySelector('input[type="checkbox"]');
       if (checkbox && !checkbox.checked) {
         checkbox.checked = true;
+        celebrate(todo.todo_id);
         reportedFailure(toggleDone(todo.todo_id, true));
       }
     }
@@ -651,6 +679,7 @@ function attachRowInteractions(row, todo) {
 function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone = false) {
   const li = document.createElement("li");
   li.className = "todo-node";
+  li.dataset.todoId = todo.todo_id;
   li.style.setProperty("--depth", depth);
   const hasChildren = todo.child_ids.length > 0;
   const isCollapsed = hasChildren && collapsedIds.has(todo.todo_id);
@@ -662,10 +691,16 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   if (shownDone) {
     row.classList.add("is-done");
   }
+  if (justCompletedId === todo.todo_id && todo.done) {
+    row.classList.add("just-done");
+  }
+  if (focusedId === todo.todo_id) {
+    row.classList.add("is-focused");
+  }
 
-  // Drag handle for subtasks (non-root todos)
+  // Drag handle, only while this todo's siblings are being reordered
   let dragHandle = null;
-  if (todo.parent_id) {
+  if (todo.parent_id && String(todo.parent_id) === reorderParentId) {
     dragHandle = document.createElement("button");
     dragHandle.type = "button";
     dragHandle.className = "todo-drag-handle";
@@ -732,6 +767,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     const wasChecked = checkbox.checked;
     if (wasChecked) {
       row.classList.add("is-done");
+      celebrate(todo.todo_id);
     } else {
       row.classList.remove("is-done");
     }
@@ -792,6 +828,15 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
       menuItem("Split into subtasks", "split", openPanel("split"))
     );
 
+    if (todo.child_ids.length > 1) {
+      menu.append(menuItem("Reorder subtasks", "grip", () => {
+        collapsedIds.delete(todo.todo_id);
+        reorderParentId = todo.todo_id;
+        setActivePanel(null);
+        renderTree();
+      }));
+    }
+
     // Add move up/down for subtasks (has parent)
     if (todo.parent_id) {
       menu.append(
@@ -840,8 +885,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   }
 
   if (hasChildren && !isCollapsed) {
+    const reordering = reorderParentId === todo.todo_id;
+    if (reordering) li.appendChild(renderReorderBar());
     const childList = document.createElement("ul");
-    childList.className = "todo-children";
+    childList.className = "todo-children" + (reordering ? " is-reordering" : "");
     // Sort children by order_idx (respecting manual reordering), then by urgency
     const children = todo.child_ids
       .map((id) => todosById.get(id))
@@ -865,6 +912,24 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   }
 
   return li;
+}
+
+// Shown above a parent's children while their drag handles are visible.
+function renderReorderBar() {
+  const bar = document.createElement("div");
+  bar.className = "reorder-bar";
+  const hint = document.createElement("span");
+  hint.textContent = "Drag the handles to reorder";
+  const done = document.createElement("button");
+  done.type = "button";
+  done.className = "btn btn-primary btn-small";
+  done.textContent = "Done";
+  done.addEventListener("click", () => {
+    reorderParentId = null;
+    renderTree();
+  });
+  bar.append(hint, done);
+  return bar;
 }
 
 // Shared Cancel/Save row for the inline editors below — each editor supplies
@@ -972,26 +1037,33 @@ function renderEditEditor(todo) {
     dueDateInput.value = todo.due_date.slice(0, 10);
   }
 
+  // One compact row; the chip matching the current date shows as selected.
   const shortcutsDiv = document.createElement("div");
-  shortcutsDiv.style.cssText = "display:flex; gap:8px; margin-top:8px; flex-wrap:wrap;";
-
+  shortcutsDiv.className = "chip-row";
   const shortcuts = [
     { label: "Today", value: getTodayString() },
     { label: "Tomorrow", value: getTomorrowString() },
-    { label: "Clear", value: "" }
+    { label: "Clear", value: "", plain: true },
   ];
-
-  for (const shortcut of shortcuts) {
+  const chipButtons = shortcuts.map((shortcut) => {
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "btn btn-plain";
+    btn.className = "chip" + (shortcut.plain ? " chip-plain" : "");
     btn.textContent = shortcut.label;
-    btn.style.cssText = "padding:6px 12px; font-size:14px;";
     btn.addEventListener("click", () => {
       dueDateInput.value = shortcut.value;
+      markChips();
     });
     shortcutsDiv.appendChild(btn);
+    return btn;
+  });
+  function markChips() {
+    shortcuts.forEach((shortcut, i) => {
+      chipButtons[i].classList.toggle("is-active", !shortcut.plain && dueDateInput.value === shortcut.value);
+    });
   }
+  dueDateInput.addEventListener("input", markChips);
+  markChips();
 
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
@@ -1009,7 +1081,7 @@ function renderEditEditor(todo) {
   );
 }
 
-function renderEmptyState() {
+function renderEmptyState(heading = "All clear", message = "Add your first todo below.") {
   const empty = document.createElement("li");
   empty.className = "todo-empty";
   const badge = document.createElement("div");
@@ -1017,10 +1089,10 @@ function renderEmptyState() {
   badge.appendChild(icon("check"));
   const title = document.createElement("p");
   title.className = "todo-empty-title";
-  title.textContent = "All clear";
+  title.textContent = heading;
   const text = document.createElement("p");
   text.className = "todo-empty-text";
-  text.textContent = "Add your first todo below.";
+  text.textContent = message;
   empty.append(badge, title, text);
   return empty;
 }
@@ -1054,6 +1126,30 @@ function renderTree() {
   for (const root of sortByUrgency(model.roots)) {
     treeEl.appendChild(renderNode(root, model.todosById, descendantCounts));
   }
+  placeOpenMenu();
+}
+
+// The menu opens below its kebab. Near the bottom of the screen that puts it
+// under the composer, so open it upward if there's room above, otherwise
+// scroll it into view.
+function placeOpenMenu() {
+  const menu = document.querySelector(".todo-menu-dropdown");
+  if (!menu) return;
+  const composer = document.getElementById("add-form");
+  const composerTop = composer.getClientRects().length
+    ? composer.getBoundingClientRect().top
+    : window.innerHeight;
+  const bottomLimit = composerTop - 8;
+  const topLimit = document.querySelector(".tabs-wrap").getBoundingClientRect().bottom + 8;
+  const kebab = menu.parentElement.querySelector(".todo-kebab").getBoundingClientRect();
+  // offsetHeight, because the open animation scales the menu's own rect.
+  const height = menu.offsetHeight;
+  if (kebab.bottom + 4 + height <= bottomLimit) return;
+  if (kebab.top - 4 - height >= topLimit) {
+    menu.classList.add("todo-menu-dropdown--up");
+  } else {
+    window.scrollBy({ top: kebab.bottom + 4 + height - bottomLimit, behavior: "auto" });
+  }
 }
 
 // Replace the local model with the server's tree; unsent edits in the outbox
@@ -1074,6 +1170,8 @@ async function loadAndRender() {
     logEvent("tree", `fetched rev ${tree.rev}, ${tree.todosById.size} todos (${Math.round(performance.now() - startedAt)}ms)`);
     if (engine.epoch() === epoch) {
       engine.rebuild(tree);
+      // The ranking is computed from the same data, so keep it in step.
+      if (activeTab === "next") reportedFailure(refreshNext());
       return;
     }
     logEvent("tree", "an edit landed during the fetch; discarding and fetching again");
@@ -1147,20 +1245,289 @@ document.addEventListener("click", () => {
   }
 });
 
-document.getElementById("add-form").addEventListener("submit", (event) => {
+// ---- Composer: due date chips -----------------------------------------------
+// A calendar button opens a row of Today / Tomorrow / Pick date. #add-due (the
+// native date input inside the "Pick date" chip) holds the chosen value.
+
+const addForm = document.getElementById("add-form");
+const addChips = document.getElementById("add-chips");
+const addDueToggle = document.getElementById("add-due-toggle");
+const addDue = document.getElementById("add-due");
+const addPickText = document.getElementById("add-pick-text");
+
+function renderComposerDue() {
+  const value = addDue.value;
+  const isToday = value === getTodayString();
+  const isTomorrow = value === getTomorrowString();
+  addChips.querySelector('[data-due="today"]').classList.toggle("is-active", isToday);
+  addChips.querySelector('[data-due="tomorrow"]').classList.toggle("is-active", isTomorrow);
+  const custom = !!value && !isToday && !isTomorrow;
+  document.getElementById("add-pick").classList.toggle("is-active", custom);
+  addPickText.textContent = custom ? formatDue(`${value}T00:00:00`) : "Pick date";
+  addDueToggle.classList.toggle("has-value", !!value);
+  addDueToggle.setAttribute("aria-label", value ? `Due ${value}. Change due date` : "Set due date");
+}
+
+function setComposerChips(open) {
+  addChips.hidden = !open;
+  addDueToggle.setAttribute("aria-expanded", String(open));
+}
+
+addDueToggle.addEventListener("click", () => setComposerChips(addChips.hidden));
+
+addChips.addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-due]");
+  if (!chip) return;
+  const value = chip.dataset.due === "today" ? getTodayString() : getTomorrowString();
+  addDue.value = addDue.value === value ? "" : value; // tapping the chosen chip clears it
+  renderComposerDue();
+});
+
+// The date input sits invisibly over its chip; some desktop browsers only open
+// the picker from a small icon, so ask for it explicitly.
+document.getElementById("add-pick").addEventListener("click", () => {
+  try { addDue.showPicker(); } catch (e) { /* unsupported: the input still works */ }
+});
+addDue.addEventListener("input", renderComposerDue);
+
+// Tell the CSS how tall the composer is, so padding and popups clear it.
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty("--composer-h", `${addForm.offsetHeight}px`);
+}).observe(addForm);
+
+addForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.getElementById("add-title");
-  const dueInput = document.getElementById("add-due");
   const title = input.value.trim();
   if (!title) return;
   const payload = { title };
-  if (dueInput.value) {
-    payload.due_date = dueInput.value;
+  if (addDue.value) {
+    payload.due_date = addDue.value;
   }
   engine.enqueue({ kind: "create", payload });
   input.value = "";
-  dueInput.value = "";
+  addDue.value = "";
+  renderComposerDue();
+  setComposerChips(false);
 });
+
+// ---- Tabs: the list, and "Next up" --------------------------------------------
+
+let activeTab = "list";
+const scrollByTab = { list: 0, next: 0 };
+const treeEl = document.getElementById("todo-tree");
+const nextView = document.getElementById("next-view");
+
+function setTab(tab) {
+  if (tab === activeTab) return;
+  scrollByTab[activeTab] = window.scrollY;
+  activeTab = tab;
+  document.body.dataset.tab = tab;
+  for (const btn of document.querySelectorAll(".segmented-btn")) {
+    btn.setAttribute("aria-selected", String(btn.dataset.tab === tab));
+  }
+  treeEl.hidden = tab !== "list";
+  nextView.hidden = tab !== "next";
+  if (tab === "next") {
+    renderNext();
+    reportedFailure(refreshNext());
+  }
+  window.scrollTo(0, scrollByTab[tab]);
+}
+
+for (const btn of document.querySelectorAll(".segmented-btn")) {
+  btn.addEventListener("click", () => setTab(btn.dataset.tab));
+}
+
+// The server ranks the todos (app/next_up.py); this only draws its answer.
+let nextItems = null;
+let nextStale = false;
+let nextRequest = 0;
+
+async function refreshNext() {
+  const mine = ++nextRequest;
+  // Unsent edits aren't on the server yet, so let them land before asking.
+  await Promise.race([engine.flush(), new Promise((resolve) => setTimeout(resolve, 4000))]);
+  try {
+    const response = await fetch(`${API_BASE}/next`);
+    if (!response.ok) throw new Error(`${response.status}`);
+    const data = await response.json();
+    if (mine !== nextRequest) return; // a newer request is in flight
+    nextItems = data.items;
+    nextStale = false;
+  } catch (err) {
+    logEvent("next-fail", err.message);
+    if (mine !== nextRequest) return;
+    nextStale = true;
+  }
+  renderNext();
+}
+
+function renderNextRow(item) {
+  const li = document.createElement("li");
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "next-row";
+
+  const rank = document.createElement("span");
+  rank.className = "next-rank";
+  rank.textContent = item.rank;
+
+  const body = document.createElement("span");
+  body.className = "next-body";
+  const title = document.createElement("span");
+  title.className = "next-title";
+  title.textContent = item.title;
+  body.appendChild(title);
+
+  const meta = document.createElement("span");
+  meta.className = "next-meta";
+  if (item.path.length) {
+    const path = document.createElement("span");
+    path.className = "next-path";
+    path.textContent = item.path.join(" › ");
+    meta.appendChild(path);
+  }
+  if (item.effective_due) {
+    const days = daysUntil(item.effective_due);
+    const due = document.createElement("span");
+    due.className = "todo-chip" + (days < 0 ? " todo-chip--overdue" : days === 0 ? " todo-chip--today" : "");
+    const text = document.createElement("span");
+    text.textContent = formatDue(item.effective_due) + (item.due_source === "parent" ? " · from parent" : "");
+    due.append(icon("calendar"), text);
+    meta.appendChild(due);
+  }
+  if (meta.childNodes.length) body.appendChild(meta);
+
+  const chevron = icon("chevron");
+  chevron.classList.add("next-chevron");
+  row.append(rank, body, chevron);
+  row.addEventListener("click", (event) => {
+    // A keyboard "click" has no position; use the row's own.
+    const box = row.getBoundingClientRect();
+    focusTodo(item.todo_id, event.detail === 0 ? box.top : event.clientY);
+  });
+  li.appendChild(row);
+  return li;
+}
+
+function renderNext() {
+  const list = document.getElementById("next-list");
+  const note = document.getElementById("next-note");
+  list.innerHTML = "";
+  note.hidden = !nextStale;
+  note.textContent = "Couldn't reach the server, so this may be out of date.";
+  if (nextItems === null) {
+    const loading = document.createElement("li");
+    loading.className = "next-empty";
+    loading.textContent = "Loading…";
+    list.appendChild(loading);
+    return;
+  }
+  if (nextItems.length === 0) {
+    list.appendChild(renderEmptyState("Nothing to do", "You're all caught up."));
+    return;
+  }
+  for (const item of nextItems) list.appendChild(renderNextRow(item));
+}
+
+// Jump from "Next up" to the list with this todo pulled into view: the row is
+// scrolled to where the finger just was, so it stays under it, ready to check
+// off or open the menu.
+function focusTodo(todoId, tapY) {
+  const todo = model.todosById.get(todoId);
+  if (!todo) {
+    reportedFailure(refreshNext());
+    return;
+  }
+  // Open every collapsed ancestor so the row exists.
+  for (let p = todo.parent_id && model.todosById.get(String(todo.parent_id)); p;
+       p = p.parent_id && model.todosById.get(String(p.parent_id))) {
+    collapsedIds.delete(p.todo_id);
+  }
+  setActivePanel(null);
+  spotlight(todoId);
+  setTab("list");
+  renderTree();
+
+  const row = treeEl.querySelector(`[data-todo-id="${CSS.escape(todoId)}"] > .todo-row`);
+  if (!row) return;
+  const top = document.querySelector(".tabs-wrap").getBoundingClientRect().bottom + 8;
+  const composerTop = addForm.getClientRects().length
+    ? addForm.getBoundingClientRect().top
+    : window.innerHeight;
+  // Keep the row where the finger was, but never under the sticky tabs or composer.
+  const y = Math.min(Math.max(tapY, top), composerTop - row.offsetHeight - 12);
+  window.scrollTo(0, row.getBoundingClientRect().top + window.scrollY - y);
+}
+
+// ---- Pull to refresh -----------------------------------------------------------
+// Drag down from the very top to sync, like tapping the status pill.
+
+const ptr = document.getElementById("ptr");
+const PTR_TRIGGER = 64;
+const PTR_MAX = 100;
+let ptrStart = null;
+let ptrDist = 0;
+let ptrBusy = false;
+
+function paintPtr(dist, refreshing) {
+  ptr.style.setProperty("--ptr-y", `${dist}px`);
+  ptr.style.setProperty("--ptr-progress", String(Math.min(dist / PTR_TRIGGER, 1)));
+  ptr.classList.toggle("is-ready", dist >= PTR_TRIGGER);
+  ptr.classList.toggle("is-refreshing", !!refreshing);
+  ptr.classList.toggle("is-pulling", dist > 0 && !refreshing);
+}
+
+async function pullRefresh() {
+  ptrBusy = true;
+  paintPtr(PTR_TRIGGER * 0.75, true);
+  const started = performance.now();
+  try {
+    await engine.flush();
+    if (engine.pending() === 0) await reportedFailure(loadAndRender());
+    if (activeTab === "next") await reportedFailure(refreshNext());
+  } finally {
+    // Long enough to register that something happened.
+    await new Promise((r) => setTimeout(r, Math.max(0, 600 - (performance.now() - started))));
+    ptrBusy = false;
+    paintPtr(0, false);
+  }
+}
+
+document.addEventListener("touchstart", (event) => {
+  const blocked = ptrBusy || window.scrollY > 0 || event.touches.length !== 1 ||
+    event.target.closest("#event-log, .todo-drag-handle, input, textarea");
+  ptrStart = blocked ? null : { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  ptrDist = 0;
+}, { passive: true });
+
+document.addEventListener("touchmove", (event) => {
+  if (!ptrStart) return;
+  const dy = event.touches[0].clientY - ptrStart.y;
+  const dx = event.touches[0].clientX - ptrStart.x;
+  if (window.scrollY > 0 || dy < 0 || Math.abs(dx) > Math.abs(dy)) {
+    if (ptrDist === 0) ptrStart = null; // an ordinary scroll or swipe: stay out of it
+    return;
+  }
+  if (event.cancelable) event.preventDefault(); // no native bounce while we own the gesture
+  ptrDist = Math.min(dy * 0.5, PTR_MAX);
+  paintPtr(ptrDist, false);
+}, { passive: false });
+
+function endPull() {
+  if (!ptrStart) return;
+  const fire = ptrDist >= PTR_TRIGGER;
+  ptrStart = null;
+  if (fire) {
+    reportedFailure(pullRefresh());
+  } else {
+    paintPtr(0, false);
+  }
+  ptrDist = 0;
+}
+document.addEventListener("touchend", endPull);
+document.addEventListener("touchcancel", endPull);
 
 // ---- Event log panel ---------------------------------------------------------
 

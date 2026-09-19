@@ -353,6 +353,75 @@ review's suggestions the user asked to act on now.
   title, deleted from TODO_ITEMS"` confirms the row is still present with
   `deleted = 1`.
 
+## Follow-up: browser review at iPhone width (Sep 18, 2026)
+
+Source: a live pass in Chrome at 390px against seeded data. Problem 5 from that
+review (the always-visible "Synced" pill) is deliberately left alone for now.
+
+- [x] **19. Row menu is clipped at the bottom of the list.** Opening the kebab on
+  one of the last rows drops the menu under the composer, hiding Move/Delete.
+  Flip it upward when there isn't room below (or scroll it into view when
+  there's no room above either), and make the frosted background more opaque so
+  row text no longer shows through.
+  Done: `placeOpenMenu()` in `web/app.js` runs after each render; if the menu
+  wouldn't clear the composer it opens upward (`.todo-menu-dropdown--up`), or
+  scrolls into view when there's no room above. Uses `offsetHeight` because the
+  open animation scales the rect. `--popover` is now 97% opaque. Verified in
+  the browser at 390px on the last subtask: all six items visible.
+
+- [x] **20. Composer date field crowds the bar.** A bare `<input type="date">`
+  takes half the composer at phone width and squeezes "New todo". Replace it with
+  a calendar icon button that opens a chip row (Today / Tomorrow / Pick date).
+  Done: a calendar button in the composer toggles a chip row (Today /
+  Tomorrow / Pick date). The native date input lives invisibly inside the Pick
+  chip; tapping a chosen chip clears it; the button turns accent when a date is
+  set. A `ResizeObserver` publishes `--composer-h` so body padding and the toast
+  follow the composer's real height.
+
+- [x] **21. Edit-sheet date chips wrap badly.** Today/Tomorrow sit on one line and
+  Clear drops to another. Make the shortcuts one compact, evenly spaced row.
+  Done: shared `.chip` styles; the Edit sheet's Today / Tomorrow / Clear are
+  one non-wrapping row (Clear pushed right), and the chip matching the current
+  date shows as selected. Verified all on one line at depth 1.
+
+- [x] **22. Drag handles only in a reorder mode.** The 30px grip on every subtask
+  is heavy and steals indentation. Hide it by default; a "Reorder subtasks" menu
+  entry on a parent shows handles for that parent's children with a Done button.
+  Done: handles render only for the children of `reorderParentId`. A
+  "Reorder subtasks" entry (parents with 2+ children) turns it on and shows a
+  bar with a Done button above the list. The existing drag code is unchanged.
+  Move up/down stays in each subtask's menu.
+
+- [x] **23. Completion animation.** Checking a todo should feel rewarding: a ring
+  burst off the checkbox, a title strike-through that draws across, and a brief
+  row tint. Must survive the re-render the optimistic model triggers.
+  Done: `celebrate()` marks the todo for a second; `renderNode` re-applies
+  `.just-done` so the animation survives the re-render each edit causes. A ring
+  and eight dots burst off the checkbox, the strike-through fades in, and the row
+  is tinted briefly. Also fires on swipe-right. Reduced-motion is honoured by the
+  existing global rule.
+
+- [x] **24. Pull to refresh.** Dragging down from the top of the page runs the same
+  sync as tapping the pill (drain the outbox, then pull the latest), with a
+  spinner indicator. Works on both tabs.
+  Done: touch handlers on `document`, active only at scrollY 0 and not on
+  inputs/handles/the log; a 0.5x rubber band, trigger at 64px, spinner while
+  `engine.flush()` then `loadAndRender()` (and Next up) run. `overscroll-behavior-y:
+  contain` stops the browser's own bounce. Verified with synthetic touch events;
+  not yet on a real phone.
+
+- [x] **25. "Next up" tab.** A second view listing the top 10 things to work on,
+  ranked by the server from parent due date, task due date and list order.
+  Tapping one switches to the list with that row in focus, under the finger, so
+  it can be edited or checked off.
+  Done: `GET /todos/next` (`app/next_up.py`, tested in `tests/test_next_up.py`)
+  ranks open leaf todos by effective due date (own or nearest due ancestor),
+  then own due date, then list position, top 10. A segmented control switches
+  List / Next up; the composer hides on Next up. Tapping a row calls
+  `focusTodo()`: expands ancestors, switches to the list, and scrolls the row to
+  where the finger was (clamped clear of the tabs and composer) with a pop and
+  tint. Outbox is flushed before asking the server so the order isn't stale.
+
 ## Notes / non-issues worth preserving
 
 - The Split flow (inline textarea, one item per line, Save/Cancel) works well

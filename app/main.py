@@ -1,6 +1,6 @@
 from __future__ import annotations
 from fastapi.templating import Jinja2Templates
-from fastapi import FastAPI, HTTPException, Header, Response
+from fastapi import FastAPI, HTTPException, Header, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -8,6 +8,7 @@ from typing import Callable
 import uuid
 from app import db
 from app import models
+from app import next_up
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -97,14 +98,9 @@ def get_rev() -> dict:
     """Cheap change check: one document read. Compare with the last seen value."""
     return {"rev": db.get_rev()}
 
-@app.get("/todos/tree", response_model=dict)
-def get_tree() -> dict:
-    """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
-    # Read the revision first, so it can only be older than the tree we return:
-    # the worst case is one redundant refresh, never a missed change.
-    rev = db.get_rev()
+def _load_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
     roots = db.get_root_todos()
-    todosById = {}
+    todosById: dict[str, models.Todo] = {}
 
     def collect_tree(todo):
         todosById[str(todo.todo_id)] = todo
@@ -115,6 +111,22 @@ def get_tree() -> dict:
 
     for root in roots:
         collect_tree(root)
+    return roots, todosById
+
+@app.get("/todos/next", response_model=None)
+def get_next_up(limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
+    """The todos to work on next, best first (see app/next_up.py for the rules)."""
+    rev = db.get_rev()
+    roots, todosById = _load_tree()
+    return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit))}
+
+@app.get("/todos/tree", response_model=dict)
+def get_tree() -> dict:
+    """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
+    # Read the revision first, so it can only be older than the tree we return:
+    # the worst case is one redundant refresh, never a missed change.
+    rev = db.get_rev()
+    roots, todosById = _load_tree()
 
     return {
         "rev": rev,

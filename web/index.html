@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=11">
+  <link rel="stylesheet" href="/style.css?v=12">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -25,18 +25,48 @@
     <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
   </header>
 
+  <div class="tabs-wrap">
+    <div class="tabs" role="tablist" aria-label="Views">
+      <div class="segmented">
+        <button type="button" role="tab" id="tab-list" class="segmented-btn" data-tab="list"
+                aria-selected="true" aria-controls="todo-tree">List</button>
+        <button type="button" role="tab" id="tab-next" class="segmented-btn" data-tab="next"
+                aria-selected="false" aria-controls="next-view">Next up</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="ptr" class="ptr" aria-hidden="true">
+    <svg class="ptr-arrow" viewBox="0 0 24 24"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+    <span class="ptr-spinner"></span>
+  </div>
+
   <main class="app-main">
-    <ul id="todo-tree" class="todo-tree"></ul>
+    <ul id="todo-tree" class="todo-tree" role="tabpanel" aria-labelledby="tab-list"></ul>
+    <section id="next-view" class="next-view" role="tabpanel" aria-labelledby="tab-next" hidden>
+      <p class="next-caption">What to work on next</p>
+      <ol id="next-list" class="next-list"></ol>
+      <p id="next-note" class="next-note" hidden></p>
+    </section>
   </main>
 
   <div id="error" class="toast" role="alert" hidden></div>
 
   <form id="add-form" class="composer">
+    <div id="add-chips" class="chip-row composer-chips" hidden>
+      <button type="button" class="chip" data-due="today">Today</button>
+      <button type="button" class="chip" data-due="tomorrow">Tomorrow</button>
+      <label class="chip chip-pick" id="add-pick"><span id="add-pick-text">Pick date</span>
+        <input type="date" id="add-due" name="due" aria-label="Pick a due date">
+      </label>
+    </div>
     <div class="composer-inner">
       <input type="text" id="add-title" name="title" placeholder="New todo"
              autocomplete="off" enterkeyhint="done" aria-label="New todo" required>
-      <input type="date" id="add-due" name="due" aria-label="Due date (optional)"
-             style="color:var(--label-2); cursor:pointer; width:auto; padding:0 8px; border:none; background:none;">
+      <button type="button" id="add-due-toggle" class="composer-date" aria-label="Set due date"
+              aria-expanded="false" aria-controls="add-chips">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      </button>
       <button type="submit" class="composer-send" aria-label="Add todo">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
       </button>
@@ -55,10 +85,10 @@
     <pre id="event-log-text"></pre>
   </section>
 
-  <script src="/eventlog.js?v=11"></script>
-  <script src="/sync.js?v=11"></script>
-  <script src="/idb-store.js?v=11"></script>
-  <script src="/freshness.js?v=11"></script>
-  <script src="/app.js?v=11"></script>
+  <script src="/eventlog.js?v=12"></script>
+  <script src="/sync.js?v=12"></script>
+  <script src="/idb-store.js?v=12"></script>
+  <script src="/freshness.js?v=12"></script>
+  <script src="/app.js?v=12"></script>
 </body>
 </html>
