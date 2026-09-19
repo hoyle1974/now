@@ -5,3 +5,4 @@ __pycache__/
 todo.db
 *.swp
 .zilch.config
+.firebase/
