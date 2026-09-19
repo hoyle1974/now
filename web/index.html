@@ -23,6 +23,8 @@
     <button type="button" id="sync-status" class="sync-status" data-state="synced"
             aria-live="polite" title="Tap to sync now"></button>
     <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
+    <button type="button" id="badge-enable" class="log-toggle" hidden
+            title="Show the number of todos due today on the app icon">icon badge</button>
   </header>
 
   <div class="tabs-wrap">
@@ -89,6 +91,7 @@
   <script src="/sync.js?v=15"></script>
   <script src="/idb-store.js?v=15"></script>
   <script src="/freshness.js?v=15"></script>
+  <script src="/badge.js?v=15"></script>
   <script src="/app.js?v=15"></script>
 </body>
 </html>

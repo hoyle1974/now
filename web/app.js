@@ -1091,10 +1091,27 @@ function renderEmptyState(heading = "All clear", message = "Add your first todo 
 }
 
 // "5 open · 2 overdue" under the large title — the at-a-glance status line.
+// The app-icon badge shows how many open todos are due today or overdue.
+let lastBadge = null;
+function updateBadge(all) {
+  const count = Badge.dueCount(all, (t) => daysUntil(t.due_date));
+  if (count === lastBadge) return;
+  lastBadge = count;
+  Badge.apply(navigator, count);
+}
+
+// iOS only allows the badge once notification permission is granted, and that
+// prompt needs a tap, so offer it as a small link until it's answered.
+function syncBadgeButton() {
+  document.getElementById("badge-enable").hidden =
+    !Badge.canPrompt(navigator, typeof Notification === "undefined" ? undefined : Notification);
+}
+
 function renderSummary() {
   const summary = document.getElementById("summary");
   summary.innerHTML = "";
   const all = [...model.todosById.values()];
+  updateBadge(all);
   if (all.length === 0) return;
   const open = all.filter((t) => !t.done).length;
   const overdue = all.filter(isOverdue).length;
@@ -1560,6 +1577,18 @@ async function copyText(text) {
   area.remove();
   return ok;
 }
+
+document.getElementById("badge-enable").addEventListener("click", async () => {
+  try { await Notification.requestPermission(); } catch (e) { /* older signature or blocked */ }
+  syncBadgeButton();
+  lastBadge = null; // permission just changed: set the badge now
+  renderSummary();
+});
+syncBadgeButton();
+// A todo becomes "due today" at midnight without any edit, so recount on return.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") renderSummary();
+});
 
 document.getElementById("log-toggle").addEventListener("click", () => {
   logPanel.hidden = !logPanel.hidden;
