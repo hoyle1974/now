@@ -1,0 +1,10 @@
+{
+  "hosting": {
+    "site": "now-app",
+    "public": "hosting-public",
+    "ignore": ["firebase.json", "**/.*", "**/.gitkeep"],
+    "rewrites": [
+      { "source": "**", "run": { "serviceId": "now", "region": "us-central1" } }
+    ]
+  }
+}
