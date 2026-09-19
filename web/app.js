@@ -88,10 +88,8 @@ function showUndo(todoId) {
 async function saveEdit(todoId, title, dueDate) {
   setActivePanel(null);
   try {
-    const body = { title };
-    if (dueDate) {
-      body.due_date = dueDate;
-    }
+    // null explicitly clears the due date
+    const body = { title, due_date: dueDate || null };
     await apiFetch(`${API_BASE}/${todoId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -506,16 +504,18 @@ function attachRowInteractions(row, todo) {
   }
 }
 
-function renderNode(todo, todosById, descendantCounts, depth = 0) {
+function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone = false) {
   const li = document.createElement("li");
   li.className = "todo-node";
   li.style.setProperty("--depth", depth);
   const hasChildren = todo.child_ids.length > 0;
   const isCollapsed = hasChildren && collapsedIds.has(todo.todo_id);
 
+  // A done ancestor makes this row look done without touching its stored state.
+  const shownDone = todo.done || ancestorDone;
   const row = document.createElement("div");
   row.className = "todo-row";
-  if (todo.done) {
+  if (shownDone) {
     row.classList.add("is-done");
   }
 
@@ -580,8 +580,9 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   checkboxHit.className = "todo-check";
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
-  checkbox.checked = todo.done;
-  checkbox.setAttribute("aria-label", `Mark "${todo.title}" ${todo.done ? "not done" : "done"}`);
+  checkbox.checked = shownDone;
+  checkbox.disabled = ancestorDone && !todo.done;
+  checkbox.setAttribute("aria-label", `Mark "${todo.title}" ${shownDone ? "not done" : "done"}`);
   checkbox.addEventListener("change", () => {
     // #3: Instant checkbox response - update UI immediately
     const wasChecked = checkbox.checked;
@@ -714,7 +715,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
         return 0;
       });
     for (const child of children) {
-      childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
+      childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1, shownDone));
     }
       li.appendChild(childList);
   }

@@ -211,7 +211,7 @@ def undelete_todo(todo_id: models.TodoId):
             get_conn().rollback()
             raise
 
-def update_todo(todo: models.Todo, cascade_done: bool = False):
+def update_todo(todo: models.Todo):
     with _lock:
         cur = get_conn().cursor()
         cur.execute("BEGIN")
@@ -225,20 +225,6 @@ def update_todo(todo: models.Todo, cascade_done: bool = False):
                 None if todo.due_date is None else todo.due_date.isoformat(),
                 todo.deleted,
                 str(todo.todo_id)))
-
-            if cascade_done:
-                # Mark the whole subtree done/not-done in one statement
-                # rather than walking it level by level in Python.
-                cur.execute("""
-                    WITH RECURSIVE descendants(todo_id) AS (
-                        SELECT todo_id FROM TODO_ITEMS WHERE parent_id = ?
-                        UNION ALL
-                        SELECT t.todo_id FROM TODO_ITEMS t
-                        JOIN descendants d ON t.parent_id = d.todo_id
-                    )
-                    UPDATE TODO_ITEMS SET done = ?
-                    WHERE todo_id IN (SELECT todo_id FROM descendants)
-                    """, (str(todo.todo_id), todo.done))
 
             get_conn().commit()
         except Exception:

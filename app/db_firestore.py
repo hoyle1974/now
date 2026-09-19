@@ -114,19 +114,12 @@ def undelete_todo(todo_id: models.TodoId):
         max_idx = max([data.get("order_idx", -1) for data in sibling_data] or [-1])
         _todos_collection.document(str(todo_id)).update({"order_idx": max_idx + 1})
 
-def update_todo(todo: models.Todo, cascade_done: bool = False):
-    """Update a todo, optionally cascading done status to children"""
+def update_todo(todo: models.Todo):
+    """Update a todo. Done state is per-todo; it never cascades to children."""
     global _todos_collection
 
     doc_data = db_firestore_helpers.todo_to_doc(todo)
     _todos_collection.document(str(todo.todo_id)).update(doc_data)
-
-    if cascade_done:
-        descendant_ids = db_firestore_helpers.get_subtree_ids(
-            _todos_collection, str(todo.todo_id)
-        )
-        for desc_id in descendant_ids:
-            _todos_collection.document(desc_id).update({"done": todo.done})
 
 def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
     """Move a todo to a different parent"""

@@ -195,3 +195,20 @@ def test_root_serves_frontend_shell(db_setup):
     assert "<title>Todos</title>" in response.text
 
 
+
+
+def test_done_does_not_cascade_to_children(db_setup):
+    parent = client.post("/todos", json={"title": "parent"}).json()["todo_id"]
+    kids = []
+    for name in ("a", "b", "c"):
+        kid = client.post("/todos", json={"title": name}).json()["todo_id"]
+        client.patch(f"/todos/{kid}/parent/{parent}", json={})
+        kids.append(kid)
+
+    client.patch(f"/todos/{kids[0]}", json={"done": True})
+    client.patch(f"/todos/{kids[1]}", json={"done": True})
+    client.patch(f"/todos/{parent}", json={"done": True})
+    client.patch(f"/todos/{parent}", json={"done": False})
+
+    done = [client.get(f"/todos/{k}").json()["done"] for k in kids]
+    assert done == [True, True, False]
