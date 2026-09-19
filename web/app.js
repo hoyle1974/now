@@ -1,7 +1,18 @@
 const API_BASE = "/todos";
 
+// Writes in flight, and a counter bumped on every write. loadAndRender uses
+// them to drop tree fetches that may predate a write, so a slow response from
+// an earlier click can't repaint over a later click's optimistic state.
+let pendingWrites = 0;
+let writeEpoch = 0;
+
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
+  const isWrite = (options.method || "GET").toUpperCase() !== "GET";
+  if (isWrite) {
+    pendingWrites += 1;
+    writeEpoch += 1;
+  }
   try {
     const response = await fetch(path, options);
     if (!response.ok) {
@@ -24,6 +35,10 @@ async function apiFetch(path, options = {}) {
       errorDiv.hidden = true;
     }, 5000);
     throw err;
+  } finally {
+    if (isWrite) {
+      pendingWrites -= 1;
+    }
   }
 }
 
@@ -914,7 +929,14 @@ function renderTree() {
 
 async function loadAndRender() {
   console.log("loadAndRender: fetching tree...");
+  const epochAtStart = writeEpoch;
   const { roots, todosById } = await fetchTree();
+  if (pendingWrites > 0 || writeEpoch !== epochAtStart) {
+    // A write started or is still in flight, so this snapshot may be stale.
+    // That write's own loadAndRender will paint the up-to-date tree.
+    console.log("loadAndRender: stale snapshot, skipping render");
+    return;
+  }
   console.log(`loadAndRender: got ${roots.length} roots, ${todosById.size} todos`);
   lastRoots = roots;
   lastTodosById = todosById;
