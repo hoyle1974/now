@@ -1140,6 +1140,11 @@ body[data-tab="next"] .composer {
 .todo-row.just-done .todo-check::after {
   content: "";
   position: absolute;
+  /* Explicit centering: iOS Safari doesn't reliably centre abspos children
+     of a grid via place-items. */
+  top: calc(50% - 12px);
+  left: calc(50% - 12px);
+  box-sizing: border-box;
   width: 24px;
   height: 24px;
   border-radius: 50%;
@@ -1152,6 +1157,8 @@ body[data-tab="next"] .composer {
 .todo-row.just-done .todo-check::before {
   content: "";
   position: absolute;
+  top: calc(50% - 2.5px);
+  left: calc(50% - 2.5px);
   width: 5px;
   height: 5px;
   border-radius: 50%;
