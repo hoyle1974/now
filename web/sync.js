@@ -13,7 +13,8 @@
   const MAX_CONFLICTS = 3;
   const BACKOFF_BASE_MS = 1000;
   const BACKOFF_CAP_MS = 30000;
-  const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat"];
+  const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat",
+    "color", "links", "blocked_by", "references"];
 
   const isTmp = (id) => typeof id === "string" && id.startsWith("tmp:");
 
@@ -48,6 +49,7 @@
       todo_id: id, title, done: false, create_date: new Date().toISOString(),
       due_date: normalizeDue(dueDate), order_idx: orderIdx, parent_id: parentId,
       child_ids: [], deleted: false, collapsed: false, repeat: null, spawned_id: null, version: 0,
+      color: null, links: [], blocked_by: [], references: [],
     };
   }
 
@@ -577,7 +579,7 @@
           // Local wins: adopt the server's version and any fields we did not edit.
           if (op.kind === "patch") {
             for (const f of PATCH_FIELDS) {
-              if (!(f in op.payload)) node[f] = f === "due_date" ? normalizeDue(body[f]) : body[f];
+              if (!(f in op.payload) && f in body) node[f] = f === "due_date" ? normalizeDue(body[f]) : body[f];
             }
           }
           node.version = body.version;
@@ -621,7 +623,8 @@
         scheduleRetry(op);
         return false;
       }
-      return failPermanently(op, `the server rejected it (${code})`);
+      const detail = body && typeof body.detail === "string" ? `: ${body.detail}` : "";
+      return failPermanently(op, `the server rejected it (${code})${detail}`);
     }
 
     async function failPermanently(op, why) {
