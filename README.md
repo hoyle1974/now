@@ -90,6 +90,20 @@ never waits on the network.
 - **Done rows sink:** within each group, done rows display below the open ones
   (each part keeps its stored `order_idx` order); a just-completed row waits for
   its animation before dropping. Display only.
+- **Repeating todos:** a todo can repeat every N days, weekdays (Mon-Fri), weeks,
+  months or years (`repeat: {unit, every}`, set in the edit sheet; needs a due
+  date). Completing it queues a `POST /todos/{id}/repeat`, and the server
+  clones the todo and its live subtasks in one transaction as the next
+  occurrence: open, placed right after the original, with the next due date
+  (`app/recurrence.py`: stepped from the due date, first one after today;
+  month/year clamp to the month end; a due time is kept) and dated subtasks
+  shifted by the same amount. The completed original stays as a done record.
+  A todo spawns at most once (`spawned_id`), so unticking and re-ticking or two
+  devices completing it never double-copy. The copy is not optimistic: the
+  client reloads the tree when the server confirms it.
+- **Parents and subtasks:** a row shows only its own `done`. Completing the last
+  open subtask marks the parent done once (stored, upward); nothing ever
+  reopens a parent, and checking a parent does not change its subtasks.
 - **App icon badge:** the number of open todos due today or overdue
   (`web/badge.js`, Badging API). iOS needs notification permission first, so an
   "icon badge" link appears under the title until it is answered.

@@ -35,3 +35,14 @@ test("isOverdue: all-day is overdue after its day, timed once the time passes", 
   assert.equal(Due.isOverdue("2026-09-20T09:00:00", now), false);
   assert.equal(Due.isOverdue(null, now), false);
 });
+
+test("formatRepeat reads naturally", () => {
+  assert.equal(Due.formatRepeat({ unit: "day", every: 1 }), "Daily");
+  assert.equal(Due.formatRepeat({ unit: "week", every: 1 }), "Weekly");
+  assert.equal(Due.formatRepeat({ unit: "month", every: 1 }), "Monthly");
+  assert.equal(Due.formatRepeat({ unit: "year", every: 1 }), "Yearly");
+  assert.equal(Due.formatRepeat({ unit: "weekday", every: 1 }), "Weekdays");
+  assert.equal(Due.formatRepeat({ unit: "week", every: 2 }), "Every 2 weeks");
+  assert.equal(Due.formatRepeat({ unit: "day", every: 3 }), "Every 3 days");
+  assert.equal(Due.formatRepeat(null), "");
+});

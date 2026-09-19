@@ -140,7 +140,30 @@ function makeEngine(send = realSend, store = { async load() { return []; }, asyn
   assert.equal(A.model.todosById.get(shared).done, true, "A picked up B's change");
   assert.equal(A.model.todosById.get(shared).title, "from A", "and kept its own");
 
+  // repeating todo: complete it, and the next occurrence appears after the reload
+  const R = makeEngine();
+  const rtmp = R.engine.enqueue({ kind: "create", payload: { title: tag + "-repeat", due_date: "2026-09-14" } });
+  R.engine.enqueue({ kind: "patch", target_id: rtmp, payload: { repeat: { unit: "week", every: 1 } } });
+  await R.engine.flush();
+  const rid = R.engine.resolve(rtmp);
+  R.engine.enqueue({ kind: "split", target_id: rid, payload: { descriptions: ["r-kid"] } });
+  R.engine.enqueue({ kind: "patch", target_id: rid, payload: { done: true } });
+  R.engine.enqueue({ kind: "repeat", target_id: rid, payload: { today: "2026-09-14" } });
+  R.engine.enqueue({ kind: "repeat", target_id: rid, payload: { today: "2026-09-14" } }); // a second one must not double-copy
+  await R.engine.flush();
+  const original = R.model.todosById.get(rid);
+  assert.equal(original.done, true);
+  assert.ok(original.spawned_id && original.spawned_id !== "pending", "the reload brought the real spawned id");
+  const next = R.model.todosById.get(original.spawned_id);
+  assert.ok(next, "the new occurrence is in the model after the reload");
+  assert.equal(next.done, false);
+  assert.equal(next.due_date.slice(0, 10), "2026-09-21");
+  assert.equal(next.child_ids.length, 1, "its subtask came along");
+  assert.equal(R.model.todosById.get(next.child_ids[0]).title, "r-kid");
+  const same = [...R.model.todosById.values()].filter((t) => t.title === tag + "-repeat");
+  assert.equal(same.length, 2, "exactly one copy");
+
   // cleanup
-  for (const id of [real, copies[0].todo_id, shared]) await fetch(`${BASE}/todos/${id}`, { method: "DELETE" });
+  for (const id of [real, copies[0].todo_id, shared, rid, original.spawned_id]) await fetch(`${BASE}/todos/${id}`, { method: "DELETE" });
   console.log("e2e ok");
 })().catch((e) => { console.error(e); process.exit(1); });

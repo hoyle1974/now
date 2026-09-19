@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "17";
+const APP_VERSION = "18";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -225,10 +225,22 @@ async function toggleDone(todoId, done) {
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
   if (!done) return; // one-way: un-doing a subtask never reopens its parent
   // Finishing the last open subtask finishes the parent (and so on upward).
+  const completed = [todoId];
   for (const parentId of Autodone.ancestorsToComplete(model, todoId)) {
     celebrate(parentId);
     engine.enqueue({ kind: "patch", target_id: parentId, payload: { done: true } });
+    completed.push(parentId);
   }
+  // A repeating todo that just got completed spawns its next occurrence.
+  for (const id of completed) spawnNextOccurrence(id);
+}
+
+// Once per todo: the server ignores a second request and the local model
+// remembers one is on its way (spawned_id), so ticking and unticking is safe.
+function spawnNextOccurrence(todoId) {
+  const todo = model.todosById.get(todoId);
+  if (!todo || !todo.repeat || todo.spawned_id) return;
+  engine.enqueue({ kind: "repeat", target_id: todoId, payload: { today: getTodayString() } });
 }
 
 // Collapse state lives on the todo so it survives refresh and syncs across
@@ -275,10 +287,11 @@ function showUndo(todoId) {
   }, 5000);
 }
 
-async function saveEdit(todoId, title, dueDate) {
+async function saveEdit(todoId, title, dueDate, repeat = null) {
   setActivePanel(null);
-  // null explicitly clears the due date
-  engine.enqueue({ kind: "patch", target_id: todoId, payload: { title, due_date: dueDate || null } });
+  // null explicitly clears the due date (and a repeat rule needs a date)
+  engine.enqueue({ kind: "patch", target_id: todoId,
+    payload: { title, due_date: dueDate || null, repeat: dueDate ? repeat : null } });
 }
 
 async function saveSplit(todoId, descriptions, dueDate = null) {
@@ -357,6 +370,7 @@ const ICONS = {
   more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  repeat: '<path d="M4 11V9a3 3 0 0 1 3-3h11M15 3l3 3-3 3M20 13v2a3 3 0 0 1-3 3H6M9 21l-3-3 3-3"/>',
   pencil: '<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13.5 6.5l4 4"/>',
   split: '<path d="M6 4v5a3 3 0 0 0 3 3h9M6 9v6a3 3 0 0 0 3 3h9"/><path d="M15 9l3 3-3 3M15 15l3 3-3 3"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
@@ -498,6 +512,15 @@ function renderMeta(todo, hasChildren, counts) {
     progress.append(ring, text);
     progress.setAttribute("aria-label", `${counts.done} of ${counts.total} subtasks done`);
     meta.appendChild(progress);
+  }
+
+  if (todo.repeat) {
+    const rep = document.createElement("span");
+    rep.className = "todo-chip";
+    const label = document.createElement("span");
+    label.textContent = Due.formatRepeat(todo.repeat);
+    rep.append(icon("repeat"), label);
+    meta.appendChild(rep);
   }
 
   if (todo.due_date) {
@@ -1055,6 +1078,50 @@ function renderTimeInput(dateInput, value = "") {
   return timeInput;
 }
 
+// "Repeat every [2] [weeks]" next to the due date. Repeating needs a date to
+// count from, so it is disabled (and cleared) while the date is empty.
+function renderRepeatControls(dateInput, rule) {
+  const row = document.createElement("div");
+  row.className = "repeat-row";
+  const every = document.createElement("input");
+  every.type = "number";
+  every.min = "1";
+  every.max = "999";
+  every.inputMode = "numeric";
+  every.setAttribute("aria-label", "Repeat every");
+  const unit = document.createElement("select");
+  const units = [
+    ["", "Never"], ["day", "days"], ["weekday", "weekdays (Mon\u2013Fri)"],
+    ["week", "weeks"], ["month", "months"], ["year", "years"],
+  ];
+  for (const [value, text] of units) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = text;
+    unit.appendChild(option);
+  }
+  unit.value = rule ? rule.unit : "";
+  every.value = rule ? String(rule.every || 1) : "1";
+  const sync = () => {
+    if (!dateInput.value) unit.value = "";
+    unit.disabled = !dateInput.value;
+    every.hidden = !unit.value || unit.value === "weekday";
+  };
+  dateInput.addEventListener("input", sync);
+  unit.addEventListener("change", sync);
+  sync();
+  row.append(every, unit);
+  return {
+    row,
+    unit,
+    value: () => {
+      if (!unit.value) return null;
+      const n = Math.max(1, Math.min(999, parseInt(every.value, 10) || 1));
+      return { unit: unit.value, every: unit.value === "weekday" ? 1 : n };
+    },
+  };
+}
+
 // #6: Due date shortcuts in edit panel
 function renderEditEditor(todo) {
   const titleInput = document.createElement("input");
@@ -1068,6 +1135,7 @@ function renderEditEditor(todo) {
     dueDateInput.value = todo.due_date.slice(0, 10);
   }
   const dueTimeInput = renderTimeInput(dueDateInput, Due.timePart(todo.due_date));
+  const repeatControls = renderRepeatControls(dueDateInput, todo.repeat);
 
   // One compact row; the chip matching the current date shows as selected.
   const shortcutsDiv = document.createElement("div");
@@ -1101,7 +1169,7 @@ function renderEditEditor(todo) {
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
     if (!title) return;
-    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value)));
+    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value), repeatControls.value()));
   });
 
   return renderSheet(
@@ -1112,6 +1180,8 @@ function renderEditEditor(todo) {
     shortcutsDiv,
     sheetLabel("Time (optional)", dueTimeInput),
     dueTimeInput,
+    sheetLabel("Repeat every", repeatControls.unit),
+    repeatControls.row,
     buttons
   );
 }

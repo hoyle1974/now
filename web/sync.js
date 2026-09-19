@@ -13,7 +13,7 @@
   const MAX_CONFLICTS = 3;
   const BACKOFF_BASE_MS = 1000;
   const BACKOFF_CAP_MS = 30000;
-  const PATCH_FIELDS = ["title", "done", "due_date", "collapsed"];
+  const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat"];
 
   const isTmp = (id) => typeof id === "string" && id.startsWith("tmp:");
 
@@ -47,7 +47,7 @@
     return {
       todo_id: id, title, done: false, create_date: new Date().toISOString(),
       due_date: normalizeDue(dueDate), order_idx: orderIdx, parent_id: parentId,
-      child_ids: [], deleted: false, collapsed: false, version: 0,
+      child_ids: [], deleted: false, collapsed: false, repeat: null, spawned_id: null, version: 0,
     };
   }
 
@@ -159,6 +159,14 @@
         else model.roots = sibs;
         return true;
       }
+      case "repeat": {
+        // The copy is made by the server; locally we only remember that this
+        // todo is already spawning, so completing it again queues nothing.
+        const node = model.todosById.get(id);
+        if (!node) return false;
+        if (!node.spawned_id) node.spawned_id = "pending";
+        return true;
+      }
       case "reparent": {
         const node = model.todosById.get(id);
         if (!node) return false;
@@ -219,6 +227,9 @@
       case "move":
         conditional();
         return { method: "PATCH", path: `/todos/${id}/move/${p.direction}`, headers };
+      case "repeat":
+        // Not conditional: the server spawns at most once per todo, whatever its version.
+        return { method: "POST", path: `/todos/${id}/repeat`, headers, body: { today: p.today } };
       case "reparent":
         conditional();
         return { method: "PATCH", path: `/todos/${id}/reparent`, headers,
@@ -510,6 +521,16 @@
       if (code >= 200 && code < 300) {
         ackSuccess(op, body);
         dropHead(op);
+        // The new occurrence (a whole subtree with server ids) exists only on
+        // the server, so reload to bring it in.
+        if (op.kind === "repeat") await refetchAndRebuild();
+        return true;
+      }
+      if (code === 400 && op.kind === "repeat") {
+        // The rule was cleared on another device: nothing to spawn.
+        dropHead(op);
+        log("drop", "repeat: 400, no longer repeating; reloading");
+        await refetchAndRebuild();
         return true;
       }
       if (code === 409) {

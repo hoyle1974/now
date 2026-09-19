@@ -43,5 +43,14 @@
     return startOfDay(iso) < startOfDay(now);
   }
 
-  return { hasTime, timePart, combine, isOverdue };
+  // "Daily", "Weekdays", "Every 2 weeks"...
+  function formatRepeat(rule) {
+    if (!rule) return "";
+    const every = rule.every || 1;
+    if (rule.unit === "weekday") return "Weekdays";
+    if (every === 1) return { day: "Daily", week: "Weekly", month: "Monthly", year: "Yearly" }[rule.unit] || "";
+    return `Every ${every} ${rule.unit}s`;
+  }
+
+  return { hasTime, timePart, combine, isOverdue, formatRepeat };
 });

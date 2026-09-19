@@ -683,3 +683,73 @@ test("a 404 on reparent reloads instead of deleting the moved todo locally", asy
   assert.ok(h.model.todosById.has("x"));
   assert.equal(h.model.todosById.get("x").parent_id, null);
 });
+
+// ---- repeating todos ----------------------------------------------------
+
+test("a repeat rule patches like any field, and null clears it", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 2 })), script: [
+    ok(todo("a", { version: 3, repeat: { unit: "week", every: 2 } })),
+    ok(todo("a", { version: 4, repeat: null })),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { repeat: { unit: "week", every: 2 } } });
+  assert.deepEqual(h.model.todosById.get("a").repeat, { unit: "week", every: 2 });
+  await h.engine.flush();
+  assert.deepEqual(h.calls[0].body, { repeat: { unit: "week", every: 2 } });
+  assert.equal(h.calls[0].headers["If-Match"], "2");
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { repeat: null } });
+  await h.engine.flush();
+  assert.deepEqual(h.calls[1].body, { repeat: null });
+  assert.equal(h.model.todosById.get("a").repeat, null);
+});
+
+test("a repeat op posts to /repeat with the client's date and no If-Match", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 5, repeat: { unit: "day", every: 1 } })), script: [
+    ok({ created: true, spawned_id: "n1" }),
+  ] });
+  h.engine.enqueue({ kind: "repeat", target_id: "a", payload: { today: "2026-09-19" } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].method, "POST");
+  assert.equal(h.calls[0].path, "/todos/a/repeat");
+  assert.deepEqual(h.calls[0].body, { today: "2026-09-19" });
+  assert.equal(h.calls[0].headers["If-Match"], undefined);
+  assert.ok(h.calls[0].headers["X-Txn-Id"]);
+});
+
+test("enqueueing a repeat marks the todo as spawning so it isn't queued twice", () => {
+  const h = harness({ tree: treeOf(todo("a", { repeat: { unit: "day", every: 1 } })), script: [] });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "repeat", target_id: "a", payload: { today: "2026-09-19" } });
+  assert.ok(h.model.todosById.get("a").spawned_id);
+});
+
+test("when a repeat lands the tree is reloaded so the new copy appears", async () => {
+  const fresh = treeOf(todo("a", { done: true, spawned_id: "n1" }), todo("n1"));
+  const h = harness({ tree: treeOf(todo("a", { done: true })), refetchTree: fresh, script: [
+    ok({ created: true, spawned_id: "n1" }),
+  ] });
+  h.engine.enqueue({ kind: "repeat", target_id: "a", payload: { today: "2026-09-19" } });
+  await h.engine.flush();
+  assert.equal(h.refetches, 1);
+  assert.ok(h.model.todosById.has("n1"));
+});
+
+test("a 400 on repeat (rule cleared elsewhere) reloads quietly instead of erroring", async () => {
+  const h = harness({ tree: treeOf(todo("a")), refetchTree: treeOf(todo("a")), script: [
+    ok({ detail: "this todo does not repeat" }, 400),
+  ] });
+  h.engine.enqueue({ kind: "repeat", target_id: "a", payload: { today: "2026-09-19" } });
+  await h.engine.flush();
+  assert.equal(h.refetches, 1);
+  assert.equal(h.notices.filter((n) => n.level === "error").length, 0);
+});
+
+test("a repeat queued after the done patch keeps its order and doesn't merge", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 1, repeat: { unit: "day", every: 1 } })), refetchTree: treeOf(todo("a", { done: true })), script: [
+    ok(todo("a", { version: 2, done: true })),
+    ok({ created: true, spawned_id: "n1" }),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  h.engine.enqueue({ kind: "repeat", target_id: "a", payload: { today: "2026-09-19" } });
+  await h.engine.flush();
+  assert.deepEqual(h.calls.map((c) => c.path), ["/todos/a", "/todos/a/repeat"]);
+});

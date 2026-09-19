@@ -627,6 +627,7 @@ svg {
 .sheet input[type="text"],
 .sheet input[type="date"],
 .sheet input[type="time"],
+.sheet input[type="number"],
 .sheet textarea {
   display: block;
   width: 100%;
@@ -1287,4 +1288,34 @@ body[data-tab="next"] .composer {
 
 @keyframes ptr-spin {
   to { transform: rotate(360deg); }
+}
+
+/* ---------- Repeat controls (edit sheet) ---------- */
+
+.repeat-row {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.repeat-row input[type="number"] {
+  flex: 0 0 76px;
+  width: 76px;
+  margin: 0;
+}
+
+.repeat-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 17px;
+  padding: 11px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: var(--card);
+  color: inherit;
+}
+
+/* The generic sheet input rule sets display:block, which would beat [hidden]. */
+.repeat-row input[hidden][type="number"] {
+  display: none;
 }
