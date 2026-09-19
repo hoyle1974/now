@@ -2,12 +2,45 @@
 from __future__ import annotations
 from app import models
 from app import db_firestore_helpers
-import uuid
+import contextvars
 import datetime
+import json
+import uuid
+from typing import Callable
 from google.cloud import firestore
 
 _client = None
 _todos_collection = None
+
+TXN_COLLECTION = "txn_log"
+
+# Set while run_atomic is executing. Every read then joins the Firestore
+# transaction and every write is buffered in it, so a request's version check,
+# its writes and its txn_log record commit (or retry) together. Firestore
+# requires all of a transaction's reads to come before its writes, which is
+# why the functions below read everything first and hand back the updated
+# todo instead of re-reading it afterwards.
+_tx: contextvars.ContextVar = contextvars.ContextVar("firestore_tx", default=None)
+
+
+def _get(target):
+    tx = _tx.get()
+    return target.get() if tx is None else target.get(transaction=tx)
+
+def _set(ref, data: dict):
+    tx = _tx.get()
+    if tx is None:
+        ref.set(data)
+    else:
+        tx.set(ref, data)
+
+def _update(ref, data: dict):
+    tx = _tx.get()
+    if tx is None:
+        ref.update(data)
+    else:
+        tx.update(ref, data)
+
 
 def init(memory: bool = False):
     """Initialize Firestore connection"""
@@ -29,12 +62,75 @@ def teardown():
     _client = None
     _todos_collection = None
 
+
+def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) -> tuple[int, dict | None]:
+    """Run fn() in one Firestore transaction, at most once per txn_id.
+
+    fn returns (status, body). The writes it makes and the txn_log record
+    commit together; a retry with a known txn_id replays the stored
+    (status, body) without running fn again. Exceptions (e.g. 404) abort the
+    transaction and are not logged.
+    """
+    client = get_conn()
+    log_ref = None if txn_id is None else client.collection(TXN_COLLECTION).document(txn_id)
+
+    @firestore.transactional
+    def run(tx):
+        token = _tx.set(tx)
+        try:
+            if log_ref is not None:
+                snap = log_ref.get(transaction=tx)
+                if snap.exists:
+                    logged = snap.to_dict()
+                    raw = logged.get("response_json")
+                    return logged["status"], (None if raw is None else json.loads(raw))
+            status, body = fn()
+            if log_ref is not None:
+                tx.set(log_ref, {
+                    "status": status,
+                    "response_json": None if body is None else json.dumps(body),
+                    "created_at": datetime.datetime.now(datetime.timezone.utc),
+                })
+            return status, body
+        finally:
+            _tx.reset(token)
+
+    return run(client.transaction())
+
+def prune_txn_log(hours: int = 24) -> int:
+    """Delete idempotency records older than a client's retry window."""
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    removed = 0
+    for doc in get_conn().collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
+        doc.reference.delete()
+        removed += 1
+    return removed
+
+
+def _child_docs(parent_id: str, include_deleted: bool = False) -> list[dict]:
+    docs = [d.to_dict() for d in _get(_todos_collection.where("parent_id", "==", parent_id))]
+    if include_deleted:
+        return docs
+    return [d for d in docs if not d.get("deleted", False)]
+
+def _sorted_by_order(docs: list[dict]) -> list[dict]:
+    return sorted(docs, key=lambda d: d.get("order_idx") if d.get("order_idx") is not None else 999999)
+
+def _child_ids(parent_id: str, include_deleted: bool = False) -> list[models.TodoId]:
+    docs = _sorted_by_order(_child_docs(parent_id, include_deleted))
+    return [models.TodoId(uuid.UUID(d["todo_id"])) for d in docs]
+
+def _next_order_idx(parent_id: str) -> int:
+    docs = _child_docs(parent_id)
+    return max([d.get("order_idx") if d.get("order_idx") is not None else -1 for d in docs] or [-1]) + 1
+
+
 def create_todo(todo: models.Todo):
     """Create a new todo in Firestore"""
     global _todos_collection
 
     doc_data = db_firestore_helpers.todo_to_doc(todo)
-    _todos_collection.document(str(todo.todo_id)).set(doc_data)
+    _set(_todos_collection.document(str(todo.todo_id)), doc_data)
 
 def delete_todo(todo_id: models.TodoId):
     """Soft delete a todo and its subtree"""
@@ -48,31 +144,32 @@ def delete_todo(todo_id: models.TodoId):
     for desc_id in descendant_ids:
         _todos_collection.document(desc_id).update({"deleted": True})
 
-def reorder_todo(todo_id: models.TodoId, direction: str):
-    """Move a todo up or down within its siblings"""
+def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
+    """Move a todo up or down within its siblings; returns the moved todo.
+
+    Order isn't content: only the moved todo's version is bumped, so a
+    neighbour's cached version stays valid.
+    """
     global _todos_collection
 
     if direction not in ("up", "down"):
         raise Exception("direction must be 'up' or 'down'")
 
-    todo_doc = _todos_collection.document(str(todo_id)).get()
-    if not todo_doc.exists:
+    moved_ref = _todos_collection.document(str(todo_id))
+    moved_doc = _get(moved_ref)
+    if not moved_doc.exists:
         raise Exception("Todo not found")
 
-    todo_data = todo_doc.to_dict()
-    parent_id = todo_data.get("parent_id")
-
+    moved_data = moved_doc.to_dict()
+    parent_id = moved_data.get("parent_id")
     if not parent_id:
         raise Exception("Cannot reorder root todos")
 
-    sibling_docs = _todos_collection.where("parent_id", "==", parent_id).get()
-    siblings_data = [(doc.to_dict()["todo_id"], doc.to_dict().get("order_idx", 999999)) for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
-    siblings = sorted(siblings_data, key=lambda x: x[1])
-
+    siblings = _sorted_by_order(_child_docs(parent_id))
     if len(siblings) < 2:
         raise Exception("Cannot move: no siblings to swap with")
 
-    current_pos = next((i for i, (sid, _) in enumerate(siblings) if sid == str(todo_id)), None)
+    current_pos = next((i for i, d in enumerate(siblings) if d["todo_id"] == str(todo_id)), None)
     if current_pos is None:
         raise Exception("Todo not in sibling list")
 
@@ -85,87 +182,102 @@ def reorder_todo(todo_id: models.TodoId, direction: str):
             raise Exception("Already at bottom")
         new_pos = current_pos + 1
 
-    moving_id = siblings[current_pos][0]
-    siblings.pop(current_pos)
-    siblings.insert(new_pos, (moving_id, siblings[new_pos][1] if new_pos < len(siblings) else None))
+    moved = db_firestore_helpers.doc_to_todo(moved_data)
+    moved.child_ids = _child_ids(str(todo_id))
 
-    for idx, (sibling_id, _) in enumerate(siblings):
-        _todos_collection.document(sibling_id).update({"order_idx": idx})
+    siblings.insert(new_pos, siblings.pop(current_pos))
+    for idx, sibling in enumerate(siblings):
+        if sibling["todo_id"] == str(todo_id):
+            moved.order_idx = idx
+            moved.version += 1
+            _update(moved_ref, {"order_idx": idx, "version": moved.version})
+        elif sibling.get("order_idx") != idx:
+            _update(_todos_collection.document(sibling["todo_id"]), {"order_idx": idx})
+    return moved
 
-def undelete_todo(todo_id: models.TodoId):
-    """Restore a soft-deleted todo and its entire subtree"""
+def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, int]]]:
+    """Restore a soft-deleted todo and its entire subtree.
+
+    Returns the restored todo and (todo_id, version) for every row it touched.
+    """
     global _todos_collection
 
-    descendant_ids = db_firestore_helpers.get_subtree_ids(
-        _todos_collection, str(todo_id)
-    )
-    descendant_ids.insert(0, str(todo_id))
+    root_ref = _todos_collection.document(str(todo_id))
+    root_data = _get(root_ref).to_dict()
+    subtree = db_firestore_helpers.get_subtree_docs(
+        _todos_collection, str(todo_id), getter=lambda query: _get(query))
 
-    for desc_id in descendant_ids:
-        _todos_collection.document(desc_id).update({"deleted": False})
+    order_idx = root_data.get("order_idx")
+    if root_data.get("parent_id") and order_idx is None:
+        order_idx = _next_order_idx(root_data["parent_id"])
 
-    # Assign order_idx if needed
-    todo_doc = _todos_collection.document(str(todo_id)).get()
-    todo_data = todo_doc.to_dict()
-    if todo_data.get("parent_id") and todo_data.get("order_idx") is None:
-        parent_id = todo_data["parent_id"]
-        sibling_docs = _todos_collection.where("parent_id", "==", parent_id).get()
-        sibling_data = [doc.to_dict() for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
-        max_idx = max([data.get("order_idx", -1) for data in sibling_data] or [-1])
-        _todos_collection.document(str(todo_id)).update({"order_idx": max_idx + 1})
+    affected: list[tuple[str, int]] = []
+    for data in [root_data] + subtree:
+        version = data.get("version", 1) + 1
+        fields = {"deleted": False, "version": version}
+        if data["todo_id"] == str(todo_id):
+            if order_idx is not None:
+                fields["order_idx"] = order_idx
+            root_data = {**data, **fields}
+        _update(_todos_collection.document(data["todo_id"]), fields)
+        affected.append((data["todo_id"], version))
+
+    restored = db_firestore_helpers.doc_to_todo(root_data)
+    children = _sorted_by_order([d for d in subtree if d.get("parent_id") == str(todo_id)])
+    restored.child_ids = [models.TodoId(uuid.UUID(d["todo_id"])) for d in children]
+    return restored, affected
 
 def update_todo(todo: models.Todo):
-    """Update a todo. Done state is per-todo; it never cascades to children."""
+    """Update a todo and bump its version in place. Done state is per-todo; it
+    never cascades to children."""
     global _todos_collection
 
+    todo.version += 1
     doc_data = db_firestore_helpers.todo_to_doc(todo)
-    _todos_collection.document(str(todo.todo_id)).update(doc_data)
+    _update(_todos_collection.document(str(todo.todo_id)), doc_data)
 
 def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
     """Move a todo to a different parent"""
     global _todos_collection
 
+    if parent_id is not None and not _get(_todos_collection.document(str(parent_id))).exists:
+        return None
+
     order_idx = todo.order_idx
     if parent_id and order_idx is None:
-        sibling_docs = _todos_collection.where("parent_id", "==", str(parent_id)).get()
-        sibling_data = [doc.to_dict() for doc in sibling_docs if not doc.to_dict().get("deleted", False)]
-        max_idx = max([data.get("order_idx", -1) for data in sibling_data] or [-1])
-        order_idx = max_idx + 1
+        order_idx = _next_order_idx(str(parent_id))
 
-    _todos_collection.document(str(todo.todo_id)).update({
+    todo.version += 1
+    _update(_todos_collection.document(str(todo.todo_id)), {
         "parent_id": None if parent_id is None else str(parent_id),
-        "order_idx": order_idx
+        "order_idx": order_idx,
+        "version": todo.version,
     })
 
     todo.parent_id = parent_id
     todo.order_idx = order_idx
     return todo
 
+def _doc_to_todo_with_children(data: dict, include_deleted_children: bool = False) -> models.Todo:
+    todo = db_firestore_helpers.doc_to_todo(data)
+    todo.child_ids = _child_ids(str(todo.todo_id), include_deleted_children)
+    return todo
+
 def get_root_todos() -> list[models.Todo]:
-    """Get all root-level todos (parent_id is None)"""
+    """Get all root-level todos (parent_id is None), oldest first"""
     global _todos_collection
 
-    docs = _todos_collection.where("parent_id", "==", None).get()
+    docs = _get(_todos_collection.where("parent_id", "==", None))
 
-    todos = []
-    for doc in docs:
-        data = doc.to_dict()
-        if data.get("deleted", False):
-            continue
+    todos = [
+        _doc_to_todo_with_children(doc.to_dict())
+        for doc in docs
+        if not doc.to_dict().get("deleted", False)
+    ]
 
-        todo = db_firestore_helpers.doc_to_todo(data)
-
-        # Populate children
-        children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).get()
-        children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs if not c.to_dict().get("deleted", False)]
-        children_sorted = sorted(children_data, key=lambda x: x[1])
-        child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
-        todo.child_ids = child_ids
-
-        todos.append(todo)
-
-    # Sort by order_idx
-    todos.sort(key=lambda t: t.order_idx if t.order_idx is not None else 999999)
+    # Roots have no order_idx, and Firestore returns them by random document
+    # id; creation time keeps new todos where the optimistic UI put them.
+    todos.sort(key=lambda t: (t.order_idx if t.order_idx is not None else 999999, t.create_date))
 
     return todos
 
@@ -173,7 +285,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID (excludes soft-deleted)"""
     global _todos_collection
 
-    doc = _todos_collection.document(str(todo_id)).get()
+    doc = _get(_todos_collection.document(str(todo_id)))
     if not doc.exists:
         return None
 
@@ -181,46 +293,31 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     if data.get("deleted", False):
         return None
 
-    todo = db_firestore_helpers.doc_to_todo(data)
-
-    # Populate children
-    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).get()
-    children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs if not c.to_dict().get("deleted", False)]
-    children_sorted = sorted(children_data, key=lambda x: x[1])
-    child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
-    todo.child_ids = child_ids
-
-    return todo
+    return _doc_to_todo_with_children(data)
 
 def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID regardless of deleted status"""
     global _todos_collection
 
-    doc = _todos_collection.document(str(todo_id)).get()
+    doc = _get(_todos_collection.document(str(todo_id)))
     if not doc.exists:
         return None
 
-    data = doc.to_dict()
-    todo = db_firestore_helpers.doc_to_todo(data)
+    return _doc_to_todo_with_children(doc.to_dict(), include_deleted_children=True)
 
-    # Populate children (including deleted)
-    children_docs = _todos_collection.where("parent_id", "==", str(todo_id)).get()
-    children_data = [(c.to_dict()["todo_id"], c.to_dict().get("order_idx", 999999)) for c in children_docs]
-    children_sorted = sorted(children_data, key=lambda x: x[1])
-    child_ids = [models.TodoId(uuid.UUID(cid)) for cid, _ in children_sorted]
-    todo.child_ids = child_ids
+def split_into_children(todo: models.Todo, descriptions: list[str], due_date=None) -> tuple[models.Todo, list[tuple[str, int]]]:
+    """Create child todos from descriptions.
 
-    return todo
-
-def split_into_children(todo: models.Todo, descriptions: list[str], due_date=None) -> models.Todo:
-    """Create multiple child todos from descriptions"""
+    Returns the parent (child_ids and version updated) and the affected
+    (todo_id, version) list: the parent first, then each new child in order.
+    """
     global _todos_collection
 
-    children_docs = _todos_collection.where("parent_id", "==", str(todo.todo_id)).get()
-    children_data = [doc.to_dict() for doc in children_docs if not doc.to_dict().get("deleted", False)]
-    max_idx = max([data.get("order_idx", -1) for data in children_data] or [-1])
-    next_order = max_idx + 1
+    next_order = _next_order_idx(str(todo.todo_id))
 
+    todo.version += 1
+    affected = [(str(todo.todo_id), todo.version)]
+    new_ids = []
     for description in descriptions:
         child_todo = models.Todo(
             title=description,
@@ -228,8 +325,12 @@ def split_into_children(todo: models.Todo, descriptions: list[str], due_date=Non
             order_idx=next_order,
             due_date=due_date
         )
-        doc_data = db_firestore_helpers.todo_to_doc(child_todo)
-        _todos_collection.document(str(child_todo.todo_id)).set(doc_data)
+        _set(_todos_collection.document(str(child_todo.todo_id)),
+             db_firestore_helpers.todo_to_doc(child_todo))
+        new_ids.append(child_todo.todo_id)
+        affected.append((str(child_todo.todo_id), child_todo.version))
         next_order += 1
 
-    return get_todo(todo.todo_id)
+    _update(_todos_collection.document(str(todo.todo_id)), {"version": todo.version})
+    todo.child_ids = list(todo.child_ids) + new_ids
+    return todo, affected

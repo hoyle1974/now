@@ -10,15 +10,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app import db
+from app import db, models
 import uuid
 
 client = TestClient(app)
 
 @pytest.fixture
 def db_setup():
-    # setup code runs here
-    db.init(memory=True)
+    # Fresh Firestore emulator state for every test.
+    db.init()
+    for name in ("todos", "txn_log"):
+        for doc in db.get_conn().collection(name).stream():
+            doc.reference.delete()
     yield 0
     db.teardown()
 
@@ -89,6 +92,7 @@ def test_update_todo(db_setup):
 
     response2 = client.patch(f"/todos/{id}", json=d)
     assert response2.status_code == 200
+    d["version"] = response2.json()["version"]
 
     response3 = client.get(f"/todos/{id}")
     assert response3.status_code == 200
@@ -144,6 +148,9 @@ def test_update_todo_parent(db_setup):
     response4 = client.get(f"/todos/{id}")
     assert response4.status_code == 200
 
+    # Reparenting bumps the version and gives the todo the next order_idx.
+    d["version"] = response3.json()["version"]
+    d["order_idx"] = response3.json()["order_idx"]
     assert response3.json() == d
 
     response5 = client.get(f"/todos/{parent_id}")
@@ -212,3 +219,118 @@ def test_done_does_not_cascade_to_children(db_setup):
 
     done = [client.get(f"/todos/{k}").json()["done"] for k in kids]
     assert done == [True, True, False]
+
+
+def test_version_starts_at_1_and_bumps_on_patch(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    assert t["version"] == 1
+    r = client.patch(f"/todos/{t['todo_id']}", json={"done": True})
+    assert r.json()["version"] == 2
+    assert client.get(f"/todos/{t['todo_id']}").json()["version"] == 2
+
+
+def test_legacy_doc_without_version_reads_as_1_and_bumps_to_2(db_setup):
+    id = str(uuid.uuid4())
+    db.get_conn().collection("todos").document(id).set({
+        "todo_id": id, "title": "old", "done": False,
+        "create_date": "2026-01-01T00:00:00", "due_date": None,
+        "order_idx": None, "parent_id": None, "deleted": False})
+    assert client.get(f"/todos/{id}").json()["version"] == 1
+    r = client.patch(f"/todos/{id}", json={"done": True}, headers={"If-Match": "1"})
+    assert r.status_code == 200 and r.json()["version"] == 2
+
+
+def test_move_bumps_only_moved_node(db_setup):
+    parent = client.post("/todos", json={"title": "p"}).json()
+    client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["a", "b"]})
+    kids = client.get(f"/todos/{parent['todo_id']}").json()["child_ids"]
+    r = client.patch(f"/todos/{kids[0]}/move/down")
+    assert r.status_code == 200 and r.json()["version"] == 2
+    assert client.get(f"/todos/{kids[1]}").json()["version"] == 1
+    assert client.get(f"/todos/{parent['todo_id']}").json()["child_ids"] == [kids[1], kids[0]]
+
+
+def test_if_match_stale_returns_409_with_current(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    id = t["todo_id"]
+    client.patch(f"/todos/{id}", json={"done": True})  # version -> 2
+    r = client.patch(f"/todos/{id}", json={"title": "x"}, headers={"If-Match": "1"})
+    assert r.status_code == 409
+    assert r.json()["version"] == 2 and r.json()["title"] == "a"
+
+
+def test_if_match_current_applies(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    r = client.patch(f"/todos/{t['todo_id']}", json={"title": "x"}, headers={"If-Match": "1"})
+    assert r.status_code == 200 and r.json()["version"] == 2
+
+
+def test_txn_replay_does_not_duplicate(db_setup):
+    h = {"X-Txn-Id": "txn-1"}
+    a = client.post("/todos", json={"title": "a"}, headers=h)
+    b = client.post("/todos", json={"title": "a"}, headers=h)
+    assert a.json() == b.json()
+    assert len(client.get("/todos/root").json()) == 1
+
+
+def test_txn_replays_409_consistently(db_setup):
+    id = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    client.patch(f"/todos/{id}", json={"done": True})
+    h = {"If-Match": "1", "X-Txn-Id": "txn-2"}
+    assert client.patch(f"/todos/{id}", json={"title": "x"}, headers=h).status_code == 409
+    assert client.patch(f"/todos/{id}", json={"title": "x"}, headers=h).status_code == 409
+
+
+def test_txn_replay_of_patch_applies_once(db_setup):
+    id = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    h = {"X-Txn-Id": "txn-3"}
+    a = client.patch(f"/todos/{id}", json={"done": True}, headers=h)
+    b = client.patch(f"/todos/{id}", json={"done": True}, headers=h)
+    assert a.json() == b.json()
+    assert client.get(f"/todos/{id}").json()["version"] == 2
+
+
+def test_failed_request_is_not_logged(db_setup):
+    missing = str(uuid.uuid4())
+    h = {"X-Txn-Id": "txn-4"}
+    assert client.patch(f"/todos/{missing}", json={"done": True}, headers=h).status_code == 404
+    assert list(db.get_conn().collection("txn_log").stream()) == []
+
+
+def test_split_returns_affected_parent_then_children(db_setup):
+    id = client.post("/todos", json={"title": "p"}).json()["todo_id"]
+    r = client.post(f"/todos/{id}/split", json={"descriptions": ["a", "b"]}).json()
+    assert r["affected"][0]["todo_id"] == id
+    assert r["version"] == 2 and r["affected"][0]["version"] == 2
+    assert len(r["affected"]) == 3
+    assert [a["todo_id"] for a in r["affected"][1:]] == r["child_ids"]
+    assert all(a["version"] == 1 for a in r["affected"][1:])
+    assert client.get(f"/todos/{id}").json()["version"] == 2
+
+
+def test_undelete_returns_affected_subtree(db_setup):
+    id = client.post("/todos", json={"title": "p"}).json()["todo_id"]
+    client.post(f"/todos/{id}/split", json={"descriptions": ["a"]})
+    client.delete(f"/todos/{id}")
+    r = client.patch(f"/todos/{id}/undelete").json()
+    assert id in {a["todo_id"] for a in r["affected"]}
+    assert len(r["affected"]) == 2
+    assert client.get(f"/todos/{id}").json()["version"] == r["version"]
+
+
+def test_delete_stale_returns_409_and_delete_missing_is_204(db_setup):
+    id = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    client.patch(f"/todos/{id}", json={"done": True})
+    assert client.delete(f"/todos/{id}", headers={"If-Match": "1"}).status_code == 409
+    assert client.delete(f"/todos/{id}", headers={"If-Match": "2"}).status_code == 204
+    assert client.delete(f"/todos/{id}").status_code == 204
+
+
+def test_missing_txn_or_if_match_unchanged(db_setup):
+    id = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    assert client.patch(f"/todos/{id}", json={"done": True}).status_code == 200
+
+
+def test_roots_come_back_in_creation_order(db_setup):
+    ids = [client.post("/todos", json={"title": f"t{i}"}).json()["todo_id"] for i in range(5)]
+    assert [t["todo_id"] for t in client.get("/todos/root").json()] == ids

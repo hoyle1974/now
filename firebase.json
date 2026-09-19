@@ -2,9 +2,28 @@
   "hosting": {
     "site": "now-app",
     "public": "hosting-public",
-    "ignore": ["firebase.json", "**/.*", "**/.gitkeep"],
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/.gitkeep"
+    ],
     "rewrites": [
-      { "source": "**", "run": { "serviceId": "now", "region": "us-central1" } }
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "now",
+          "region": "us-central1"
+        }
+      }
     ]
+  },
+  "emulators": {
+    "firestore": {
+      "port": 8085,
+      "host": "127.0.0.1"
+    },
+    "ui": {
+      "enabled": false
+    }
   }
 }

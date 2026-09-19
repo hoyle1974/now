@@ -1,7 +1,10 @@
 from __future__ import annotations
 from fastapi.templating import Jinja2Templates
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Response
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from typing import Callable
 import uuid
 from app import db
 from app import models
@@ -13,18 +16,63 @@ templates = Jinja2Templates(directory="templates")
 
 db.init()
 
+try:
+    # Idempotency records only need to outlive a client's retry window.
+    db.prune_txn_log()
+except Exception as e:
+    print(f"txn_log prune skipped: {e}")
+
+def _parse_if_match(value: str | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value.strip().strip('"'))
+    except ValueError:
+        raise HTTPException(400, "If-Match must be an integer version")
+
+def _reply(status: int, body: dict | None) -> Response:
+    if body is None:
+        return Response(status_code=status)
+    return JSONResponse(body, status_code=status)
+
+def _apply(todo_id: uuid.UUID, if_match: str | None, action: Callable[[models.Todo], dict | None],
+           include_deleted: bool = False, missing_ok: bool = False) -> tuple[int, dict | None]:
+    """Load the todo, enforce If-Match, run the write. A stale version returns
+    (409, current todo) so the client can rebase without an extra read.
+
+    Runs inside db.run_atomic, i.e. one transaction: the action must read
+    before it writes and return the updated todo rather than re-reading it.
+    """
+    tid = models.TodoId(todo_id)
+    todo = db.get_deleted_todo(tid) if include_deleted else db.get_todo(tid)
+    if todo is None:
+        if missing_ok:
+            return 204, None
+        raise HTTPException(404)
+    expected = _parse_if_match(if_match)
+    if expected is not None and todo.version != expected:
+        return 409, jsonable_encoder(todo)
+    result = action(todo)
+    return (200 if result is not None else 204), result
+
+def _affected(pairs: list[tuple[str, int]]) -> list[dict]:
+    return [{"todo_id": tid, "version": version} for tid, version in pairs]
+
 @app.get("/health")
 def health_check():
     """Health check endpoint for Cloud Run"""
     return {"status": "ok"}
 
-@app.post("/todos", response_model=models.Todo)
-def create_todo(body: models.TodoCreate) -> models.Todo:
-    todo = models.Todo(title = body.title)
-    if body.due_date:
-        todo.due_date = body.due_date
-    db.create_todo(todo)
-    return todo
+@app.post("/todos", response_model=None)
+def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) -> Response:
+    def create() -> tuple[int, dict | None]:
+        todo = models.Todo(title = body.title)
+        if body.due_date:
+            todo.due_date = body.due_date
+        db.create_todo(todo)
+        return 200, jsonable_encoder(todo)
+
+    return _reply(*db.run_atomic(x_txn_id, create))
 
 def _print_todo(indent:int, todo: models.Todo) -> None:
     print(f"{'':>{indent * 2}}{todo.title} Create:{todo.create_date} Due:{todo.due_date} [{'done' if todo.done else 'not done'}]")
@@ -72,87 +120,87 @@ def get_todo(todo_id: uuid.UUID) -> models.Todo:
 
     return todo
 
-@app.patch("/todos/{todo_id}", response_model=models.Todo)
-def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate) -> models.Todo:
-    todo = db.get_todo(models.TodoId(todo_id))
+@app.patch("/todos/{todo_id}", response_model=None)
+def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
+                x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    def action(todo: models.Todo) -> dict:
+        if body.title is not None:
+            todo.title = body.title
+        if body.done is not None:
+            todo.done = body.done
+        if "due_date" in body.model_fields_set:
+            # An explicit null clears the due date; omitting the field leaves it alone.
+            todo.due_date = body.due_date
+        if body.deleted is not None:
+            todo.deleted = body.deleted
+        db.update_todo(todo)
+        return jsonable_encoder(todo)
 
-    if todo is None:
-        raise HTTPException(404)
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
-    if body.title is not None:
-        todo.title = body.title
-    if body.done is not None:
-        todo.done = body.done
-    if "due_date" in body.model_fields_set:
-        # An explicit null clears the due date; omitting the field leaves it alone.
-        todo.due_date = body.due_date
-    if body.deleted is not None:
-        todo.deleted = body.deleted
+@app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=None)
+def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent,
+                       x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    def action(todo: models.Todo) -> dict:
+        result = db.update_parent_id(todo, body.parent_id)
+        if result is None:
+            raise HTTPException(404)
+        return jsonable_encoder(result)
 
-    db.update_todo(todo)
-
-    return todo
-
-@app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=models.Todo)
-def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent) -> models.Todo:
-    todo = db.get_todo(models.TodoId(todo_id))
-    if todo is None:
-        raise HTTPException(404)
-
-    result =  db.update_parent_id(todo, body.parent_id)
-    if result is None:
-        raise HTTPException(404)
-
-    return result
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 
-@app.delete("/todos/{todo_id}", status_code=204)
-def delete_todo(todo_id: uuid.UUID) -> None:
+@app.delete("/todos/{todo_id}", status_code=204, response_model=None)
+def delete_todo(todo_id: uuid.UUID,
+                x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # Soft delete - mark as deleted instead of removing
-    todo = db.get_todo(models.TodoId(todo_id))
-    if todo:
+    def action(todo: models.Todo) -> None:
         todo.deleted = True
         db.update_todo(todo)
+        return None
 
-@app.patch("/todos/{todo_id}/undelete", response_model=models.Todo)
-def undelete_todo_endpoint(todo_id: uuid.UUID) -> models.Todo:
+    return _reply(*db.run_atomic(
+        x_txn_id, lambda: _apply(todo_id, if_match, action, missing_ok=True)))
+
+@app.patch("/todos/{todo_id}/undelete", response_model=None)
+def undelete_todo_endpoint(todo_id: uuid.UUID,
+                           x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Restore a soft-deleted todo and its entire subtree (undo)"""
-    todo = db.get_deleted_todo(models.TodoId(todo_id))
-    if todo is None:
-        raise HTTPException(404)
-    # Undelete the entire subtree
-    db.undelete_todo(models.TodoId(todo_id))
-    # Return the restored todo (need to reload to get the latest state)
-    restored = db.get_todo(models.TodoId(todo_id))
-    return restored if restored else todo
+    def action(todo: models.Todo) -> dict:
+        restored, affected = db.undelete_todo(models.TodoId(todo_id))
+        return {**jsonable_encoder(restored), "affected": _affected(affected)}
 
-@app.post("/todos/{todo_id}/split", response_model=models.Todo)
-def split_todo(todo_id: uuid.UUID, body: models.TodoSplit) -> models.Todo:
-    todo = db.get_todo(models.TodoId(todo_id))
+    return _reply(*db.run_atomic(
+        x_txn_id, lambda: _apply(todo_id, if_match, action, include_deleted=True)))
 
-    if todo is None:
-        raise HTTPException(404)
+@app.post("/todos/{todo_id}/split", response_model=None)
+def split_todo(todo_id: uuid.UUID, body: models.TodoSplit,
+               x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    def action(todo: models.Todo) -> dict:
+        # affected is the parent first, then the new children in description
+        # order, so the client can map its temporary child ids to real ones by position.
+        parent, affected = db.split_into_children(todo, body.descriptions, body.due_date)
+        return {**jsonable_encoder(parent), "affected": _affected(affected)}
 
-    return db.split_into_children(todo, body.descriptions, body.due_date)
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
-@app.patch("/todos/{todo_id}/move/{direction}", response_model=models.Todo)
-def move_todo(todo_id: uuid.UUID, direction: str) -> models.Todo:
+@app.patch("/todos/{todo_id}/move/{direction}", response_model=None)
+def move_todo(todo_id: uuid.UUID, direction: str,
+              x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Move a todo up or down within its parent's children (direction: 'up' or 'down')"""
     if direction not in ("up", "down"):
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
-    todo = db.get_todo(models.TodoId(todo_id))
-    if todo is None or todo.parent_id is None:
-        raise HTTPException(404, "todo not found or has no parent")
+    def action(todo: models.Todo) -> dict:
+        if todo.parent_id is None:
+            raise HTTPException(404, "todo not found or has no parent")
+        try:
+            moved = db.reorder_todo(models.TodoId(todo_id), direction)
+        except Exception as e:
+            raise HTTPException(400, f"Cannot move: {str(e)}")
+        return jsonable_encoder(moved)
 
-    try:
-        db.reorder_todo(models.TodoId(todo_id), direction)
-    except Exception as e:
-        raise HTTPException(400, f"Cannot move: {str(e)}")
-
-    # Return the updated todo
-    updated = db.get_todo(models.TodoId(todo_id))
-    return updated if updated else todo
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 
 app.mount("/", StaticFiles(directory="web", html=True), name="web")

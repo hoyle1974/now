@@ -13,6 +13,8 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         order_idx=doc_dict.get("order_idx"),
         parent_id=None if doc_dict.get("parent_id") is None else models.TodoId(uuid.UUID(doc_dict["parent_id"])),
         deleted=doc_dict.get("deleted", False),
+        # Docs written before versioning existed have no field: treat as version 1.
+        version=doc_dict.get("version", 1),
         child_ids=[]
     )
 
@@ -26,8 +28,23 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "due_date": None if todo.due_date is None else todo.due_date.isoformat(),
         "order_idx": todo.order_idx,
         "parent_id": None if todo.parent_id is None else str(todo.parent_id),
-        "deleted": todo.deleted
+        "deleted": todo.deleted,
+        "version": todo.version
     }
+
+def get_subtree_docs(todos_collection, parent_id: str, getter=None) -> list[dict]:
+    """All descendant documents (as dicts) of a todo, deleted or not.
+
+    getter runs a query; pass one that joins the current Firestore transaction
+    so the reads are part of it.
+    """
+    getter = getter or (lambda query: query.get())
+    docs = []
+    for child_doc in getter(todos_collection.where("parent_id", "==", parent_id)):
+        data = child_doc.to_dict()
+        docs.append(data)
+        docs.extend(get_subtree_docs(todos_collection, data["todo_id"], getter))
+    return docs
 
 def get_subtree_ids(todos_collection, parent_id: str) -> list[str]:
     """Recursively get all descendant IDs for a todo"""

@@ -36,3 +36,4 @@ class Todo(BaseModel):
     parent_id: TodoId | None = Field(None)
     child_ids: list[TodoId] = Field([])
     deleted: bool = Field(False)
+    version: int = Field(1)
