@@ -63,6 +63,14 @@ never waits on the network.
   refresh waits for unsent edits to drain and for any open editor to close, so
   it never wipes typed text.
 
+- **Event log** (the small "log" link under the title): a record, kept on the
+  device (localStorage, last 300 entries), of what the page saw and did:
+  visibility/focus/blur, `pageshow`/`pagehide`, `freeze`/`resume`, online/offline,
+  each freshness check and its result, sends, retries, conflicts and tree loads.
+  Newest first, with the gap since the previous entry (a big gap means the page
+  was suspended). Copy puts it on the clipboard for pasting into a bug report.
+  It records event names and short details only, never todo titles.
+
 Design: `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
 
 ## Tests

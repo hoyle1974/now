@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=10">
+  <link rel="stylesheet" href="/style.css?v=11">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -22,6 +22,7 @@
     <p class="app-summary" id="summary" aria-live="polite"></p>
     <button type="button" id="sync-status" class="sync-status" data-state="synced"
             aria-live="polite" title="Tap to sync now"></button>
+    <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
   </header>
 
   <main class="app-main">
@@ -42,9 +43,22 @@
     </div>
   </form>
 
-  <script src="/sync.js?v=10"></script>
-  <script src="/idb-store.js?v=10"></script>
-  <script src="/freshness.js?v=10"></script>
-  <script src="/app.js?v=10"></script>
+  <section id="event-log" class="event-log" aria-label="Event log" hidden>
+    <div class="event-log-bar">
+      <strong>Event log</strong>
+      <span class="event-log-actions">
+        <button type="button" id="event-log-copy">Copy</button>
+        <button type="button" id="event-log-clear">Clear</button>
+        <button type="button" id="event-log-close">Close</button>
+      </span>
+    </div>
+    <pre id="event-log-text"></pre>
+  </section>
+
+  <script src="/eventlog.js?v=11"></script>
+  <script src="/sync.js?v=11"></script>
+  <script src="/idb-store.js?v=11"></script>
+  <script src="/freshness.js?v=11"></script>
+  <script src="/app.js?v=11"></script>
 </body>
 </html>

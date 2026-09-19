@@ -179,6 +179,72 @@ svg {
   color: var(--red);
 }
 
+/* ---------- Event log (diagnostics) ---------- */
+
+.log-toggle {
+  margin: 8px 0 0 6px;
+  padding: 3px 8px;
+  border: none;
+  background: none;
+  color: var(--label-3);
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.event-log {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  max-height: 70vh;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--card);
+  border-top: 1px solid var(--separator);
+  box-shadow: var(--shadow-pop);
+}
+
+.event-log[hidden] {
+  display: none;
+}
+
+.event-log-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--separator);
+  font-size: 14px;
+}
+
+.event-log-actions button {
+  margin-left: 8px;
+  padding: 4px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.event-log pre {
+  margin: 0;
+  padding: 10px 16px;
+  overflow: auto;
+  font: 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--label);
+  user-select: text;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* ---------- Tree: each root todo is its own inset-grouped card ---------- */
 
 .todo-tree,

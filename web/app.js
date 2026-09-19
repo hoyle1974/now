@@ -1,4 +1,34 @@
 const API_BASE = "/todos";
+const APP_VERSION = "11";
+
+// On-device diagnostics (see the "log" link under the title). Kept in
+// localStorage so it survives the phone killing the page while locked.
+let logStorage = null;
+try {
+  logStorage = window.localStorage;
+} catch (e) {
+  // Storage blocked: the log still works for this page load.
+}
+const eventLog = EventLog.create({ storage: logStorage });
+const logEvent = (kind, detail) => eventLog.log(kind, detail);
+
+function nextPageNumber() {
+  try {
+    const n = Number(logStorage.getItem("todo-page-count") || 0) + 1;
+    logStorage.setItem("todo-page-count", String(n));
+    return n;
+  } catch (e) {
+    return "?";
+  }
+}
+
+function isStandalone() {
+  return window.navigator.standalone === true ||
+    (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches);
+}
+
+logEvent("load", `page #${nextPageNumber()} v${APP_VERSION} ${document.visibilityState} ` +
+  `online=${navigator.onLine} standalone=${isStandalone()}`);
 
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
@@ -17,6 +47,7 @@ async function apiFetch(path, options = {}) {
     }
     return await response.json();
   } catch (err) {
+    logEvent("fetch-fail", `${path}: ${err.message}`);
     errorDiv.hidden = false;
     errorDiv.textContent = "Something went wrong — " + err.message;
     clearTimeout(apiFetch.hideTimer);
@@ -147,6 +178,7 @@ const engine = Sync.createEngine({
     if (st.state === "synced") freshness.poke();
   },
   onNotice: showNotice,
+  onLog: logEvent,
   onRemap: (tmp, real) => {
     // Ids the UI keeps state under change when the server assigns real ones.
     if (collapsedIds.delete(tmp)) collapsedIds.add(real);
@@ -177,6 +209,7 @@ const freshness = Freshness.create({
   refresh: () => loadAndRender(),
   editorOpen: editingInTree,
   onPhase: setPhase,
+  onLog: logEvent,
   // Retry a failed check only while someone is looking at the page.
   isActive: () => document.visibilityState === "visible",
 });
@@ -1030,11 +1063,20 @@ function renderTree() {
 async function loadAndRender() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const epoch = engine.epoch();
-    const tree = await fetchTree();
+    const startedAt = performance.now();
+    let tree;
+    try {
+      tree = await fetchTree();
+    } catch (e) {
+      logEvent("tree-fail", e.message);
+      throw e;
+    }
+    logEvent("tree", `fetched rev ${tree.rev}, ${tree.todosById.size} todos (${Math.round(performance.now() - startedAt)}ms)`);
     if (engine.epoch() === epoch) {
       engine.rebuild(tree);
       return;
     }
+    logEvent("tree", "an edit landed during the fetch; discarding and fetching again");
     await engine.flush();
   }
 }
@@ -1065,11 +1107,20 @@ function onReturn(force = false) {
   engine.kick();
   freshness.check({ awayMs, force });
 }
-window.addEventListener("blur", markAway);
-window.addEventListener("focus", () => onReturn());
-window.addEventListener("online", () => onReturn(true)); // connectivity is back: always look
-window.addEventListener("pageshow", (e) => { if (e.persisted) onReturn(); });
+window.addEventListener("blur", () => { logEvent("blur"); markAway(); });
+window.addEventListener("focus", () => { logEvent("focus"); onReturn(); });
+window.addEventListener("online", () => { logEvent("online"); onReturn(true); }); // connectivity is back: always look
+window.addEventListener("offline", () => logEvent("offline"));
+window.addEventListener("pageshow", (e) => {
+  logEvent("pageshow", e.persisted ? "restored from the back-forward cache" : "normal");
+  if (e.persisted) onReturn();
+});
+window.addEventListener("pagehide", (e) => logEvent("pagehide", e.persisted ? "going into the back-forward cache" : "unloading"));
+// Page Lifecycle events (Chromium): logged so we can see if the OS froze the page.
+document.addEventListener("freeze", () => logEvent("freeze"));
+document.addEventListener("resume", () => logEvent("resume"));
 document.addEventListener("visibilitychange", () => {
+  logEvent("visibility", document.visibilityState);
   if (document.visibilityState === "visible") onReturn();
   else markAway();
 });
@@ -1109,4 +1160,62 @@ document.getElementById("add-form").addEventListener("submit", (event) => {
   engine.enqueue({ kind: "create", payload });
   input.value = "";
   dueInput.value = "";
+});
+
+// ---- Event log panel ---------------------------------------------------------
+
+const logPanel = document.getElementById("event-log");
+const logText = document.getElementById("event-log-text");
+
+function renderLog() {
+  if (logPanel.hidden) return;
+  logText.textContent = eventLog.format() || "(no events yet)";
+}
+eventLog.subscribe(renderLog);
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    // Older/locked-down browsers: fall back to selecting a hidden textarea.
+  }
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.style.cssText = "position:fixed; opacity:0;";
+  document.body.appendChild(area);
+  area.select();
+  let ok = false;
+  try {
+    ok = document.execCommand("copy");
+  } catch (e) {
+    ok = false;
+  }
+  area.remove();
+  return ok;
+}
+
+document.getElementById("log-toggle").addEventListener("click", () => {
+  logPanel.hidden = !logPanel.hidden;
+  renderLog();
+  logText.scrollTop = 0;
+});
+document.getElementById("event-log-close").addEventListener("click", () => {
+  logPanel.hidden = true;
+});
+document.getElementById("event-log-clear").addEventListener("click", () => {
+  eventLog.clear();
+});
+document.getElementById("event-log-copy").addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  const header = [
+    `Todos v${APP_VERSION} event log, newest first`,
+    `Copied ${new Date().toString()}`,
+    navigator.userAgent,
+    `standalone=${isStandalone()} online=${navigator.onLine} visibility=${document.visibilityState}`,
+    "",
+  ].join("\n");
+  const ok = await copyText(header + eventLog.format());
+  button.textContent = ok ? "Copied" : "Copy failed";
+  setTimeout(() => { button.textContent = "Copy"; }, 1500);
 });
