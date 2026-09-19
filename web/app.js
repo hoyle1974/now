@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "16";
+const APP_VERSION = "17";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -223,6 +223,12 @@ const freshness = Freshness.create({
 // These stay async so existing `reportedFailure(action(...))` call sites work.
 async function toggleDone(todoId, done) {
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
+  if (!done) return; // one-way: un-doing a subtask never reopens its parent
+  // Finishing the last open subtask finishes the parent (and so on upward).
+  for (const parentId of Autodone.ancestorsToComplete(model, todoId)) {
+    celebrate(parentId);
+    engine.enqueue({ kind: "patch", target_id: parentId, payload: { done: true } });
+  }
 }
 
 // Collapse state lives on the todo so it survives refresh and syncs across
@@ -304,15 +310,18 @@ async function fetchTree() {
 // One-shot visual states keyed by todo id. Every edit re-renders the whole
 // list, which would wipe a CSS animation started on the live element, so the
 // renderer re-applies these classes for the length of the animation instead.
-let justCompletedId = null;
+const justCompleted = new Map(); // todo id -> timer; also holds the row in place until it sinks
 let focusedId = null;
-let justCompletedTimer = null;
 let focusedTimer = null;
 
 function celebrate(todoId) {
-  justCompletedId = todoId;
-  clearTimeout(justCompletedTimer);
-  justCompletedTimer = setTimeout(() => { justCompletedId = null; }, 1000);
+  clearTimeout(justCompleted.get(todoId));
+  justCompleted.set(todoId, setTimeout(() => {
+    justCompleted.delete(todoId);
+    // The row now drops below the open ones. Don't re-render under typed text;
+    // it will sink on the next render instead.
+    if (!editingInTree()) renderTree();
+  }, 1000));
   if (navigator.vibrate) navigator.vibrate(12); // Android only; iOS ignores it
 }
 
@@ -377,6 +386,14 @@ function daysUntil(isoString) {
 // Relative phrasing for the next week, a short date beyond that — the way
 // native reminders apps talk about time ("Today", "Tomorrow", "Fri").
 function formatDue(isoString) {
+  const day = formatDueDay(isoString);
+  // A timed due shows its time ("Today 3:00 PM"); "N days overdue" stays terse.
+  if (!Due.hasTime(isoString) || daysUntil(isoString) < -1) return day;
+  const time = new Date(isoString).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${day} ${time}`;
+}
+
+function formatDueDay(isoString) {
   const days = daysUntil(isoString);
   if (days === 0) return "Today";
   if (days === 1) return "Tomorrow";
@@ -406,7 +423,7 @@ function getTomorrowString() {
 // due-date treatment, which should stay off for something due later today.
 function isOverdue(todo) {
   if (todo.done || !todo.due_date) return false;
-  return daysUntil(todo.due_date) < 0;
+  return Due.isOverdue(todo.due_date);
 }
 
 // Overdue OR due today — used for sorting, since "due today" is also worth
@@ -685,6 +702,16 @@ function attachRowInteractions(row, todo) {
   }
 }
 
+// Done rows display below the open ones in their group, each part keeping its
+// stored order (this never touches order_idx). A row that was just completed
+// stays put until its animation ends. Under a done parent everything already
+// looks done, so the order is left alone.
+function sinkDone(todos, parentShownDone = false) {
+  if (parentShownDone) return todos;
+  const sunk = (t) => t.done && !justCompleted.has(t.todo_id);
+  return [...todos.filter((t) => !sunk(t)), ...todos.filter(sunk)];
+}
+
 function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone = false) {
   const li = document.createElement("li");
   li.className = "todo-node";
@@ -700,7 +727,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   if (shownDone) {
     row.classList.add("is-done");
   }
-  if (justCompletedId === todo.todo_id && todo.done) {
+  if (justCompleted.has(todo.todo_id) && todo.done) {
     row.classList.add("just-done");
   }
   if (focusedId === todo.todo_id) {
@@ -896,7 +923,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     const childList = document.createElement("ul");
     childList.className = "todo-children";
     // Sort children by order_idx (respecting manual reordering), then by urgency
-    const children = todo.child_ids
+    const children = sinkDone(todo.child_ids
       .map((id) => todosById.get(id))
       .sort((a, b) => {
         // Primary sort: by order_idx (respects drag-and-drop reordering)
@@ -910,7 +937,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
         if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
         if (aUrgent && bUrgent) return new Date(a.due_date) - new Date(b.due_date);
         return 0;
-      });
+      }), shownDone);
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1, shownDone));
     }
@@ -990,11 +1017,12 @@ function renderAddChildEditor(todo) {
 
   const dueDateInput = document.createElement("input");
   dueDateInput.type = "date";
+  const dueTimeInput = renderTimeInput(dueDateInput);
 
   const submit = () => {
     const title = input.value.trim();
     if (!title) return;
-    reportedFailure(saveSplit(todo.todo_id, [title], dueDateInput.value));
+    reportedFailure(saveSplit(todo.todo_id, [title], Due.combine(dueDateInput.value, dueTimeInput.value)));
   };
   input.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
@@ -1008,8 +1036,25 @@ function renderAddChildEditor(todo) {
     input,
     sheetLabel("Due date (optional)", dueDateInput),
     dueDateInput,
+    sheetLabel("Time (optional)", dueTimeInput),
+    dueTimeInput,
     renderEditorActions(submit, "Add")
   );
+}
+
+// The optional time-of-day next to a date input. It only means something with
+// a date, so it is disabled (and cleared) while the date is empty.
+function renderTimeInput(dateInput, value = "") {
+  const timeInput = document.createElement("input");
+  timeInput.type = "time";
+  timeInput.value = value;
+  const sync = () => {
+    timeInput.disabled = !dateInput.value;
+    if (!dateInput.value) timeInput.value = "";
+  };
+  dateInput.addEventListener("input", sync);
+  sync();
+  return timeInput;
 }
 
 // #6: Due date shortcuts in edit panel
@@ -1024,6 +1069,7 @@ function renderEditEditor(todo) {
   if (todo.due_date) {
     dueDateInput.value = todo.due_date.slice(0, 10);
   }
+  const dueTimeInput = renderTimeInput(dueDateInput, Due.timePart(todo.due_date));
 
   // One compact row; the chip matching the current date shows as selected.
   const shortcutsDiv = document.createElement("div");
@@ -1040,6 +1086,7 @@ function renderEditEditor(todo) {
     btn.textContent = shortcut.label;
     btn.addEventListener("click", () => {
       dueDateInput.value = shortcut.value;
+      dueDateInput.dispatchEvent(new Event("input")); // keeps the time field in step
       markChips();
     });
     shortcutsDiv.appendChild(btn);
@@ -1056,7 +1103,7 @@ function renderEditEditor(todo) {
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
     if (!title) return;
-    reportedFailure(saveEdit(todo.todo_id, title, dueDateInput.value));
+    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value)));
   });
 
   return renderSheet(
@@ -1065,6 +1112,8 @@ function renderEditEditor(todo) {
     sheetLabel("Due date", dueDateInput),
     dueDateInput,
     shortcutsDiv,
+    sheetLabel("Time (optional)", dueTimeInput),
+    dueTimeInput,
     buttons
   );
 }
@@ -1130,7 +1179,7 @@ function renderTree() {
   const descendantCounts = computeDescendantCounts(model.todosById);
   // Manual order wins, as it does for subtasks. Same ordering the sync
   // engine's move op counts steps against.
-  const roots = [...model.roots].sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999));
+  const roots = sinkDone([...model.roots].sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999)));
   for (const root of roots) {
     treeEl.appendChild(renderNode(root, model.todosById, descendantCounts));
   }
@@ -1402,7 +1451,7 @@ function renderNextRow(item) {
   if (item.effective_due) {
     const days = daysUntil(item.effective_due);
     const due = document.createElement("span");
-    due.className = "todo-chip" + (days < 0 ? " todo-chip--overdue" : days === 0 ? " todo-chip--today" : "");
+    due.className = "todo-chip" + (Due.isOverdue(item.effective_due) ? " todo-chip--overdue" : days === 0 ? " todo-chip--today" : "");
     const text = document.createElement("span");
     text.textContent = formatDue(item.effective_due) + (item.due_source === "parent" ? " · from parent" : "");
     due.append(icon("calendar"), text);

@@ -86,3 +86,17 @@ def test_endpoint_returns_ranked_items():
     assert [i["title"] for i in response.json()["items"]] == ["due", "undated"]
     assert client.get("/todos/next?limit=1").json()["items"][0]["title"] == "due"
     db.teardown()
+
+
+def at(day: int, hour: int, minute: int = 0) -> datetime.datetime:
+    return datetime.datetime(2026, 9, day, hour, minute)
+
+
+def test_same_day_earlier_time_ranks_first_and_all_day_counts_as_end_of_day():
+    late, early, all_day = mk("late", at(10, 17)), mk("early", at(10, 9, 30)), mk("all day", d(10))
+    assert titles(rank(late, all_day, early)) == ["early", "late", "all day"]
+
+
+def test_a_timed_due_still_sorts_by_date_before_time():
+    tomorrow_morning, today_evening = mk("tomorrow am", at(11, 8)), mk("today pm", at(10, 22))
+    assert titles(rank(tomorrow_morning, today_evening)) == ["today pm", "tomorrow am"]

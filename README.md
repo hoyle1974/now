@@ -79,6 +79,17 @@ never waits on the network.
   row's last subtask (`web/reorder.js` turns the drop into `{parent_id, index}`).
   It is one `reparent` op (`PATCH /todos/{id}/reparent`), applied optimistically
   like any edit; a move into the todo's own subtree is refused.
+- **Due time:** `due_date` carries an optional time. A date-only due is stored as
+  midnight and means all-day (overdue once its day ends); any other time makes
+  it a timed due, overdue the moment it passes and shown as "Today 3:00 PM"
+  (`web/due.js`). Next up ranks earlier times first within a day, with all-day
+  counting as the end of the day.
+- **Auto-done parents:** completing the last open subtask also completes its
+  parent, upward (`web/autodone.js`, sent as ordinary queued edits). It is
+  one-way: un-doing a subtask or adding one never reopens a parent.
+- **Done rows sink:** within each group, done rows display below the open ones
+  (each part keeps its stored `order_idx` order); a just-completed row waits for
+  its animation before dropping. Display only.
 - **App icon badge:** the number of open todos due today or overdue
   (`web/badge.js`, Badging API). iOS needs notification permission first, so an
   "icon badge" link appears under the title until it is answered.

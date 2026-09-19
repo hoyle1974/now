@@ -626,6 +626,7 @@ svg {
 
 .sheet input[type="text"],
 .sheet input[type="date"],
+.sheet input[type="time"],
 .sheet textarea {
   display: block;
   width: 100%;
