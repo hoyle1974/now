@@ -13,6 +13,9 @@ from app.main import app
 from app import db, models
 import uuid
 
+from app.auth import require_user
+app.dependency_overrides[require_user] = lambda: None
+
 client = TestClient(app)
 
 @pytest.fixture

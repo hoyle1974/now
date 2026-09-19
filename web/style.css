@@ -1319,3 +1319,16 @@ body[data-tab="next"] .composer {
 .repeat-row input[hidden][type="number"] {
   display: none;
 }
+
+.signin {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+  background: var(--bg); color: var(--label);
+  padding: 24px; text-align: center;
+}
+.signin[hidden] { display: none; }
+.signin-message { margin: 0; min-height: 1.2em; opacity: 0.7; }
+.signin-btn {
+  font: inherit; font-weight: 600; padding: 12px 24px; border-radius: 12px;
+  border: 0; background: #007aff; color: #fff; cursor: pointer;
+}

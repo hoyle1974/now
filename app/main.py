@@ -1,6 +1,6 @@
 from __future__ import annotations
 from fastapi.templating import Jinja2Templates
-from fastapi import FastAPI, HTTPException, Header, Query, Response
+from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -12,10 +12,11 @@ import uuid
 from app import db
 from app import models
 from app import next_up
+from app.auth import require_user
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-app = FastAPI()
+app = FastAPI(dependencies=[Depends(require_user)])
 templates = Jinja2Templates(directory="templates")
 
 # Routes go here.
@@ -273,5 +274,14 @@ def move_todo(todo_id: uuid.UUID, direction: str,
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+class RevalidatingStaticFiles(StaticFiles):
+    """Static files with ETags but no Cache-Control let iOS home-screen apps
+    heuristically reuse a stale page for days; no-cache forces a revalidation."""
+    async def get_response(self, path, scope):
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+app.mount("/", RevalidatingStaticFiles(directory=WEB_DIR, html=True), name="web")
 

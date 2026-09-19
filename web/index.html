@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=18">
+  <link rel="stylesheet" href="/style.css?v=19">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -54,6 +54,13 @@
 
   <div id="error" class="toast" role="alert" hidden></div>
 
+  <div id="signin" class="signin" hidden>
+    <h2>Todos</h2>
+    <p id="signin-message" class="signin-message"></p>
+    <button type="button" id="signin-button" class="signin-btn">Sign in with Google</button>
+    <button type="button" id="signin-signout" class="signin-btn" hidden>Sign out</button>
+  </div>
+
   <form id="add-form" class="composer">
     <div id="add-chips" class="chip-row composer-chips" hidden>
       <button type="button" class="chip" data-due="today">Today</button>
@@ -87,14 +94,18 @@
     <pre id="event-log-text"></pre>
   </section>
 
-  <script src="/eventlog.js?v=18"></script>
-  <script src="/sync.js?v=18"></script>
-  <script src="/idb-store.js?v=18"></script>
-  <script src="/freshness.js?v=18"></script>
-  <script src="/badge.js?v=18"></script>
-  <script src="/due.js?v=18"></script>
-  <script src="/autodone.js?v=18"></script>
-  <script src="/reorder.js?v=18"></script>
-  <script src="/app.js?v=18"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script src="/auth.js?v=19"></script>
+<script src="/eventlog.js?v=19"></script>
+  <script src="/sync.js?v=19"></script>
+  <script src="/idb-store.js?v=19"></script>
+  <script src="/freshness.js?v=19"></script>
+  <script src="/badge.js?v=19"></script>
+  <script src="/due.js?v=19"></script>
+  <script src="/autodone.js?v=19"></script>
+<script src="/outline.js?v=19"></script>
+  <script src="/reorder.js?v=19"></script>
+  <script src="/app.js?v=19"></script>
 </body>
 </html>

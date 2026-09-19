@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "18";
+const APP_VERSION = "19";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -378,6 +378,7 @@ const ICONS = {
   grip: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   up: '<path d="M7 14l5-5 5 5"/>',
   down: '<path d="M7 10l5 5 5-5"/>',
+  copy: '<rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/>',
 };
 
 function icon(name) {
@@ -471,6 +472,16 @@ function computeDescendantCounts(todosById) {
     countFor(todoId);
   }
   return counts;
+}
+
+async function copyOutline(todoId) {
+  const text = Outline.toOutline(model.todosById, todoId);
+  try {
+    await navigator.clipboard.writeText(text);
+    showNotice({ level: "info", message: "Copied to clipboard" });
+  } catch (e) {
+    showNotice({ level: "error", message: "Couldn't copy: " + e.message });
+  }
 }
 
 function menuItem(label, iconName, onClick, extraClass = "") {
@@ -894,6 +905,14 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       menuItem("Add subtask", "plus", openPanel("add")),
       menuItem("Edit", "pencil", openPanel("edit")),
       menuItem("Split into subtasks", "split", openPanel("split"))
+    );
+
+    menu.append(
+      menuItem("Copy with subtasks", "copy", () => {
+        setActivePanel(null);
+        renderTree();
+        copyOutline(todo.todo_id);
+      })
     );
 
     menu.append(
