@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "24";
+const APP_VERSION = "25";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -980,6 +980,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   // Assemble row: checkbox, body, trailing controls
   row.append(checkboxHit, body, trailing);
+  if (hasChildren && !isCollapsed) {
+    // Stem from this checkbox down to its subtasks (see .todo-stem).
+    const stem = document.createElement("span");
+    stem.className = "todo-stem";
+    stem.setAttribute("aria-hidden", "true");
+    row.appendChild(stem);
+  }
   li.appendChild(row);
 
   // Color accent, and a folded detail panel that a tap on the row body opens.

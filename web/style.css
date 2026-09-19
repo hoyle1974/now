@@ -25,7 +25,11 @@
   --radius-card: 16px;
   --radius-control: 12px;
   --row-min: 52px;
-  --indent: 14px;
+  --indent: 20px;
+  /* Subtask guide lines: hang from the parent's checkbox (centre 28px in). */
+  --guide: var(--label-3);
+  --guide-w: 1.5px;
+  --guide-x: calc(28px - var(--indent) - var(--guide-w) / 2);
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
@@ -290,6 +294,56 @@ svg {
   background: var(--separator);
   transform: scaleY(0.5);
   transform-origin: top;
+}
+
+/* ---------- Subtask guide lines ----------
+   A stem drops from a parent's checkbox; each child branches off it with a
+   short stub, and the last child gets a rounded elbow. Everything hangs off
+   the row's own height, so taller rows (chips, wrapped titles) still line up. */
+
+.todo-stem {
+  position: absolute;
+  left: calc(28px - var(--guide-w) / 2);
+  top: calc(50% + 13px);
+  bottom: 0;
+  width: var(--guide-w);
+  background: var(--guide);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.todo-children > .todo-node {
+  position: relative;
+}
+
+.todo-children > .todo-node:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: var(--guide-x);
+  top: 0;
+  bottom: 0;
+  width: var(--guide-w);
+  background: var(--guide);
+  pointer-events: none;
+}
+
+.todo-children > .todo-node > .todo-row::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--guide-x) + var(--guide-w));
+  top: 0;
+  width: calc(14px - var(--guide-x) - var(--guide-w));
+  height: 50%;
+  border-bottom: var(--guide-w) solid var(--guide);
+  transform: translateY(calc(var(--guide-w) / 2));
+  pointer-events: none;
+}
+
+.todo-children > .todo-node:last-child > .todo-row::after {
+  left: var(--guide-x);
+  width: calc(14px - var(--guide-x));
+  border-left: var(--guide-w) solid var(--guide);
+  border-bottom-left-radius: 8px;
 }
 
 /* ---------- Round checkbox ---------- */

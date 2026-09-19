@@ -69,3 +69,17 @@ test("sameIds and changedFields compare id lists order-insensitively", () => {
   assert.deepEqual(Fields.changedFields(todo, { color: null, links: todo.links, blocked_by: ["b", "c"], references: [] }),
     { color: null, blocked_by: ["b", "c"] });
 });
+
+test("relativeIds returns a todo's ancestors and descendants, not siblings", () => {
+  const m = byId(t("p", { child_ids: ["k", "s"] }), t("k", { parent_id: "p", child_ids: ["g"] }),
+    t("s", { parent_id: "p" }), t("g", { parent_id: "k" }), t("x"));
+  assert.deepEqual([...Fields.relativeIds(m, "k")].sort(), ["g", "p"]);
+  assert.deepEqual([...Fields.relativeIds(m, "p")].sort(), ["g", "k", "s"]);
+  assert.deepEqual([...Fields.relativeIds(m, "x")], []);
+});
+
+test("pickerCandidates leaves out todos in the exclude set", () => {
+  const m = byId(t("a"), t("b", { title: "B" }), t("c", { title: "C" }));
+  const out = Fields.pickerCandidates(m, "a", "", new Set(), new Set(["b"]));
+  assert.deepEqual(out.map((x) => x.todo.todo_id), ["c"]);
+});

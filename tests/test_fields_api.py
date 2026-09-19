@@ -76,3 +76,14 @@ def test_if_match_and_version_bump():
     assert r.status_code == 409
     r = c.patch(f"/todos/{t['todo_id']}", json={"color": "red"}, headers={"If-Match": str(t["version"])})
     assert r.json()["version"] == t["version"] + 1
+
+
+def test_blocked_by_rejects_ancestors_and_descendants():
+    parent, kid, grandkid, other = mk("p"), mk("k"), mk("g"), mk("o")
+    c.patch(f"/todos/{kid['todo_id']}/reparent", json={"parent_id": parent["todo_id"]})
+    c.patch(f"/todos/{grandkid['todo_id']}/reparent", json={"parent_id": kid["todo_id"]})
+    assert patch(parent, blocked_by=[kid["todo_id"]]).status_code == 400      # own subtask
+    assert patch(parent, blocked_by=[grandkid["todo_id"]]).status_code == 400  # deeper subtask
+    assert patch(grandkid, blocked_by=[parent["todo_id"]]).status_code == 400  # own ancestor
+    assert patch(kid, blocked_by=[other["todo_id"]]).status_code == 200        # unrelated is fine
+    assert patch(kid, references=[parent["todo_id"]]).status_code == 200       # references may relate

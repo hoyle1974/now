@@ -173,6 +173,9 @@ def _check_ids(todo: models.Todo, name: str, ids: list[models.TodoId]) -> None:
     missing = [i for i, d in docs.items() if d is None]
     if missing:
         raise HTTPException(400, f"{name}: unknown todo id {missing[0]}")
+    if name == "blocked_by" and any(
+            db.is_ancestor(str(todo.todo_id), i) or db.is_ancestor(i, str(todo.todo_id)) for i in strs):
+        raise HTTPException(400, "blocked_by cannot include a parent or subtask")
     if name == "blocked_by" and db.blocked_by_would_cycle(str(todo.todo_id), strs):
         raise HTTPException(400, "blocked_by would create a cycle")
 

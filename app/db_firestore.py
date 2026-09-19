@@ -616,6 +616,18 @@ def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
     return {i: (lambda s: s.to_dict() if s.exists else None)(_get(_todos_collection.document(i)))
             for i in todo_ids}
 
+def is_ancestor(ancestor_id: str, todo_id: str) -> bool:
+    """True if ancestor_id is somewhere above todo_id in the tree (deleted included)."""
+    seen: set[str] = set()
+    cur = todo_id
+    while cur and cur not in seen:
+        seen.add(cur)
+        doc = get_links_graph_docs([cur])[cur]
+        cur = (doc or {}).get("parent_id")
+        if cur == ancestor_id:
+            return True
+    return False
+
 def blocked_by_would_cycle(todo_id: str, new_blockers: list[str]) -> bool:
     """True if making todo_id blocked by new_blockers closes a loop, i.e. one of
     them (transitively, through blocked_by, deleted todos included) is blocked by todo_id."""

@@ -159,7 +159,7 @@ const FieldsUI = (() => {
   }
 
   // Searchable multi-select of the other todos.
-  function renderTodoPicker(todo, ids) {
+  function renderTodoPicker(todo, ids, exclude = new Set()) {
     const { todosById } = deps.model;
     const wrap = el("div", "todo-picker");
     const chosen = el("div", "picker-chosen");
@@ -190,7 +190,7 @@ const FieldsUI = (() => {
       // Nothing to show until something is typed; chosen todos are the chips above.
       list.hidden = !search.value.trim();
       if (list.hidden) return;
-      const cands = Fields.pickerCandidates(todosById, todo.todo_id, search.value, ids);
+      const cands = Fields.pickerCandidates(todosById, todo.todo_id, search.value, ids, exclude);
       cands.slice(0, 40).forEach(({ todo: c, selected }) => {
         const btn = el("button", "picker-option" + (selected ? " is-selected" : ""), c.title);
         btn.type = "button";
@@ -224,7 +224,7 @@ const FieldsUI = (() => {
     const nodes = [
       label("Color"), renderColorPicker(state),
       label("Links"), renderLinksEditor(state),
-      label("Blocked by"), renderTodoPicker(todo, blocked),
+      label("Blocked by"), renderTodoPicker(todo, blocked, Fields.relativeIds(todosById, todo.todo_id)),
       label("References"), renderTodoPicker(todo, refs),
     ];
     function changes() {

@@ -53,11 +53,30 @@
 
   // Other todos to choose from, filtered by a title search. Temp ids are left
   // out (the server doesn't know them yet), as are deleted todos and self.
-  function pickerCandidates(todosById, selfId, query, selectedIds) {
+  // Ids of a todo's ancestors and descendants: a todo already waits on its own
+  // subtasks, so these make no sense as blockers.
+  function relativeIds(todosById, id) {
+    const out = new Set();
+    let node = todosById.get(id);
+    while (node && node.parent_id && !out.has(node.parent_id)) {
+      out.add(node.parent_id);
+      node = todosById.get(node.parent_id);
+    }
+    const stack = [...((todosById.get(id) || {}).child_ids || [])];
+    while (stack.length) {
+      const cid = stack.pop();
+      if (out.has(cid)) continue;
+      out.add(cid);
+      stack.push(...((todosById.get(cid) || {}).child_ids || []));
+    }
+    return out;
+  }
+
+  function pickerCandidates(todosById, selfId, query, selectedIds, exclude = new Set()) {
     const q = (query || "").trim().toLowerCase();
     const out = [];
     for (const todo of todosById.values()) {
-      if (todo.todo_id === selfId || todo.deleted || isTmp(todo.todo_id)) continue;
+      if (todo.todo_id === selfId || todo.deleted || isTmp(todo.todo_id) || exclude.has(todo.todo_id)) continue;
       if (q && !(todo.title || "").toLowerCase().includes(q)) continue;
       out.push({ todo, selected: selectedIds.has(todo.todo_id) });
     }
@@ -85,5 +104,5 @@
     return out;
   }
 
-  return { COLORS, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, pickerCandidates, sameIds, changedFields };
+  return { COLORS, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
 });
