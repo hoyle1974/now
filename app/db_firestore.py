@@ -13,6 +13,11 @@ _client = None
 _todos_collection = None
 
 TXN_COLLECTION = "txn_log"
+# One document holding a counter that every data-changing transaction bumps.
+# Clients compare it with the value they last saw to learn that another window
+# wrote, without downloading the whole tree.
+REV_COLLECTION = "meta"
+REV_DOC = "rev"
 
 # Set while run_atomic is executing. Every read then joins the Firestore
 # transaction and every write is buffered in it, so a request's version check,
@@ -21,6 +26,9 @@ TXN_COLLECTION = "txn_log"
 # why the functions below read everything first and hand back the updated
 # todo instead of re-reading it afterwards.
 _tx: contextvars.ContextVar = contextvars.ContextVar("firestore_tx", default=None)
+# A one-element list set alongside _tx; flipped to True by the first todo write
+# so run_atomic knows whether the revision counter must move.
+_wrote: contextvars.ContextVar = contextvars.ContextVar("firestore_wrote", default=None)
 
 
 def _get(target):
@@ -32,6 +40,7 @@ def _set(ref, data: dict):
     if tx is None:
         ref.set(data)
     else:
+        _wrote.get()[0] = True
         tx.set(ref, data)
 
 def _update(ref, data: dict):
@@ -39,6 +48,7 @@ def _update(ref, data: dict):
     if tx is None:
         ref.update(data)
     else:
+        _wrote.get()[0] = True
         tx.update(ref, data)
 
 
@@ -63,36 +73,61 @@ def teardown():
     _todos_collection = None
 
 
-def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) -> tuple[int, dict | None]:
+def get_rev() -> int:
+    """Current revision (0 before the first write). One document read."""
+    snap = get_conn().collection(REV_COLLECTION).document(REV_DOC).get()
+    return snap.to_dict().get("value", 0) if snap.exists else 0
+
+
+def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) -> tuple[int, dict | None, int, int]:
     """Run fn() in one Firestore transaction, at most once per txn_id.
 
-    fn returns (status, body). The writes it makes and the txn_log record
-    commit together; a retry with a known txn_id replays the stored
-    (status, body) without running fn again. Exceptions (e.g. 404) abort the
-    transaction and are not logged.
+    fn returns (status, body). The writes it makes, the txn_log record and the
+    revision bump commit together. Returns (status, body, prev, rev): rev is the
+    revision after this request (unchanged when nothing was written, e.g. a
+    409) and prev is the revision the request started from: a client that last
+    saw a lower number than prev knows someone else wrote in between. A retry
+    with a known txn_id replays the stored (status, body, prev, rev) without
+    running fn again. Exceptions (e.g. 404) abort the transaction and
+    are not logged.
     """
     client = get_conn()
     log_ref = None if txn_id is None else client.collection(TXN_COLLECTION).document(txn_id)
+    rev_ref = client.collection(REV_COLLECTION).document(REV_DOC)
 
     @firestore.transactional
     def run(tx):
         token = _tx.set(tx)
+        wrote_token = _wrote.set([False])
         try:
+            # All reads first: Firestore rejects a read after a write.
             if log_ref is not None:
                 snap = log_ref.get(transaction=tx)
                 if snap.exists:
                     logged = snap.to_dict()
                     raw = logged.get("response_json")
-                    return logged["status"], (None if raw is None else json.loads(raw))
+                    return (logged["status"], (None if raw is None else json.loads(raw)),
+                            logged.get("prev_rev", 0), logged.get("rev", 0))
+            rev_snap = rev_ref.get(transaction=tx)
+            prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
+            rev = prev
+
             status, body = fn()
+
+            if _wrote.get()[0]:
+                rev += 1
+                tx.set(rev_ref, {"value": rev})
             if log_ref is not None:
                 tx.set(log_ref, {
                     "status": status,
                     "response_json": None if body is None else json.dumps(body),
+                    "prev_rev": prev,
+                    "rev": rev,
                     "created_at": datetime.datetime.now(datetime.timezone.utc),
                 })
-            return status, body
+            return status, body, prev, rev
         finally:
+            _wrote.reset(wrote_token)
             _tx.reset(token)
 
     return run(client.transaction())

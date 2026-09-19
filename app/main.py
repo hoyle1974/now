@@ -30,10 +30,13 @@ def _parse_if_match(value: str | None) -> int | None:
     except ValueError:
         raise HTTPException(400, "If-Match must be an integer version")
 
-def _reply(status: int, body: dict | None) -> Response:
+def _reply(status: int, body: dict | None, prev: int | None = None, rev: int | None = None) -> Response:
+    # X-Rev-Prev / X-Rev let the client notice writes made elsewhere: if
+    # Prev is ahead of what it last saw, another window wrote in between.
+    headers = {} if rev is None else {"X-Rev-Prev": str(prev), "X-Rev": str(rev)}
     if body is None:
-        return Response(status_code=status)
-    return JSONResponse(body, status_code=status)
+        return Response(status_code=status, headers=headers)
+    return JSONResponse(body, status_code=status, headers=headers)
 
 def _apply(todo_id: uuid.UUID, if_match: str | None, action: Callable[[models.Todo], dict | None],
            include_deleted: bool = False, missing_ok: bool = False) -> tuple[int, dict | None]:
@@ -89,9 +92,17 @@ def print_all_todos() -> None:
 def list_todos() -> list[models.Todo]:
     return db.get_root_todos()
 
+@app.get("/todos/rev")
+def get_rev() -> dict:
+    """Cheap change check: one document read. Compare with the last seen value."""
+    return {"rev": db.get_rev()}
+
 @app.get("/todos/tree", response_model=dict)
 def get_tree() -> dict:
     """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
+    # Read the revision first, so it can only be older than the tree we return:
+    # the worst case is one redundant refresh, never a missed change.
+    rev = db.get_rev()
     roots = db.get_root_todos()
     todosById = {}
 
@@ -106,6 +117,7 @@ def get_tree() -> dict:
         collect_tree(root)
 
     return {
+        "rev": rev,
         "roots": roots,
         "todosById": todosById
     }

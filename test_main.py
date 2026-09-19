@@ -19,7 +19,7 @@ client = TestClient(app)
 def db_setup():
     # Fresh Firestore emulator state for every test.
     db.init()
-    for name in ("todos", "txn_log"):
+    for name in ("todos", "txn_log", "meta"):
         for doc in db.get_conn().collection(name).stream():
             doc.reference.delete()
     yield 0
@@ -334,3 +334,71 @@ def test_missing_txn_or_if_match_unchanged(db_setup):
 def test_roots_come_back_in_creation_order(db_setup):
     ids = [client.post("/todos", json={"title": f"t{i}"}).json()["todo_id"] for i in range(5)]
     assert [t["todo_id"] for t in client.get("/todos/root").json()] == ids
+
+
+def rev_of(response):
+    return int(response.headers["x-rev"])
+
+
+def test_rev_starts_at_0_and_bumps_once_per_write(db_setup):
+    assert client.get("/todos/rev").json() == {"rev": 0}
+    a = client.post("/todos", json={"title": "a"})
+    assert rev_of(a) == 1
+    b = client.patch(f"/todos/{a.json()['todo_id']}", json={"done": True})
+    assert rev_of(b) == 2
+    assert client.get("/todos/rev").json() == {"rev": 2}
+
+
+def test_rev_does_not_move_for_conflicts_missing_or_reads(db_setup):
+    id = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    client.patch(f"/todos/{id}", json={"done": True})  # rev 2
+    stale = client.patch(f"/todos/{id}", json={"title": "x"}, headers={"If-Match": "1"})
+    assert stale.status_code == 409 and rev_of(stale) == 2
+    gone = client.delete(f"/todos/{uuid.uuid4()}")
+    assert gone.status_code == 204 and rev_of(gone) == 2
+    missing = client.patch(f"/todos/{uuid.uuid4()}", json={"done": True})
+    assert missing.status_code == 404
+    client.get(f"/todos/{id}")
+    assert client.get("/todos/rev").json() == {"rev": 2}
+
+
+def test_replayed_txn_returns_the_original_rev_and_does_not_bump(db_setup):
+    h = {"X-Txn-Id": "rev-1"}
+    a = client.post("/todos", json={"title": "a"}, headers=h)
+    client.post("/todos", json={"title": "other"})  # rev 2
+    b = client.post("/todos", json={"title": "a"}, headers=h)
+    assert rev_of(a) == 1 and rev_of(b) == 1
+    assert client.get("/todos/rev").json() == {"rev": 2}
+
+
+def test_tree_includes_current_rev(db_setup):
+    client.post("/todos", json={"title": "a"})
+    client.post("/todos", json={"title": "b"})
+    assert client.get("/todos/tree").json()["rev"] == 2
+
+
+def test_split_and_move_and_undelete_each_bump_rev_once(db_setup):
+    id = client.post("/todos", json={"title": "p"}).json()["todo_id"]      # 1
+    s = client.post(f"/todos/{id}/split", json={"descriptions": ["a", "b"]})  # 2
+    assert rev_of(s) == 2
+    kid = s.json()["child_ids"][0]
+    assert rev_of(client.patch(f"/todos/{kid}/move/down")) == 3
+    assert rev_of(client.delete(f"/todos/{id}")) == 4
+    assert rev_of(client.patch(f"/todos/{id}/undelete")) == 5
+
+
+def test_rev_prev_is_the_revision_the_request_started_from(db_setup):
+    a = client.post("/todos", json={"title": "a"})
+    assert (int(a.headers["x-rev-prev"]), rev_of(a)) == (0, 1)
+    b = client.patch(f"/todos/{a.json()['todo_id']}", json={"done": True})
+    assert (int(b.headers["x-rev-prev"]), rev_of(b)) == (1, 2)
+    stale = client.patch(f"/todos/{a.json()['todo_id']}", json={"title": "x"}, headers={"If-Match": "1"})
+    assert (int(stale.headers["x-rev-prev"]), rev_of(stale)) == (2, 2)
+
+
+def test_replay_keeps_the_original_prev_and_rev(db_setup):
+    h = {"X-Txn-Id": "rev-2"}
+    a = client.post("/todos", json={"title": "a"}, headers=h)
+    client.post("/todos", json={"title": "other"})
+    b = client.post("/todos", json={"title": "a"}, headers=h)
+    assert (b.headers["x-rev-prev"], b.headers["x-rev"]) == (a.headers["x-rev-prev"], a.headers["x-rev"])
