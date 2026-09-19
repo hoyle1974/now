@@ -704,15 +704,13 @@ function attachRowInteractions(row, todo) {
 
 // Done rows display below the open ones in their group, each part keeping its
 // stored order (this never touches order_idx). A row that was just completed
-// stays put until its animation ends. Under a done parent everything already
-// looks done, so the order is left alone.
-function sinkDone(todos, parentShownDone = false) {
-  if (parentShownDone) return todos;
+// stays put until its animation ends.
+function sinkDone(todos) {
   const sunk = (t) => t.done && !justCompleted.has(t.todo_id);
   return [...todos.filter((t) => !sunk(t)), ...todos.filter(sunk)];
 }
 
-function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone = false) {
+function renderNode(todo, todosById, descendantCounts, depth = 0) {
   const li = document.createElement("li");
   li.className = "todo-node";
   li.dataset.todoId = todo.todo_id;
@@ -720,8 +718,9 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   const hasChildren = todo.child_ids.length > 0;
   const isCollapsed = hasChildren && todo.collapsed;
 
-  // A done ancestor makes this row look done without touching its stored state.
-  const shownDone = todo.done || ancestorDone;
+  // A row shows only its own stored state: a done parent does not make its
+  // subtasks look done, and they can still be checked and unchecked.
+  const shownDone = todo.done;
   const row = document.createElement("div");
   row.className = "todo-row";
   if (shownDone) {
@@ -811,7 +810,6 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = shownDone;
-  checkbox.disabled = ancestorDone && !todo.done;
   checkbox.setAttribute("aria-label", `Mark "${todo.title}" ${shownDone ? "not done" : "done"}`);
   checkbox.addEventListener("change", () => {
     // #3: Instant checkbox response - update UI immediately
@@ -937,9 +935,9 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
         if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
         if (aUrgent && bUrgent) return new Date(a.due_date) - new Date(b.due_date);
         return 0;
-      }), shownDone);
+      }));
     for (const child of children) {
-      childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1, shownDone));
+      childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
       li.appendChild(childList);
   }

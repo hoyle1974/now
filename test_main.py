@@ -580,3 +580,101 @@ def test_reparent_respects_if_match(db_setup):
     a, b = _mk("a"), _mk("b")
     assert _reparent(b, a, headers={"If-Match": "9"}).status_code == 409
     assert _reparent(b, a, headers={"If-Match": "1"}).status_code == 200
+
+
+# ---- repeating todos ----------------------------------------------------
+
+def _repeating(title="water plants", due="2026-09-14T09:00:00", unit="week", every=1):
+    t = client.post("/todos", json={"title": title, "due_date": due}).json()["todo_id"]
+    r = client.patch(f"/todos/{t}", json={"repeat": {"unit": unit, "every": every}})
+    assert r.status_code == 200
+    return t
+
+
+def _spawn(todo, today="2026-09-14", **kw):
+    return client.post(f"/todos/{todo}/repeat", json={"today": today}, **kw)
+
+
+def test_repeat_rule_can_be_set_persisted_and_cleared(db_setup):
+    t = _repeating(unit="week", every=2)
+    assert client.get(f"/todos/{t}").json()["repeat"] == {"unit": "week", "every": 2}
+    r = client.patch(f"/todos/{t}", json={"repeat": None})
+    assert r.json()["repeat"] is None
+    assert client.get(f"/todos/{t}").json()["repeat"] is None
+
+
+def test_repeat_rule_rejects_unknown_units_and_bad_intervals(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    assert client.patch(f"/todos/{t}", json={"repeat": {"unit": "fortnight"}}).status_code == 422
+    assert client.patch(f"/todos/{t}", json={"repeat": {"unit": "day", "every": 0}}).status_code == 422
+
+
+def test_spawn_creates_the_next_open_occurrence_after_the_original(db_setup):
+    t = _repeating(unit="week")
+    other = client.post("/todos", json={"title": "other"}).json()["todo_id"]
+    client.patch(f"/todos/{t}", json={"done": True})
+    r = _spawn(t)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["created"] is True
+    copy = client.get(f"/todos/{body['spawned_id']}").json()
+    assert copy["title"] == "water plants" and copy["done"] is False
+    assert copy["due_date"] == "2026-09-21T09:00:00"
+    assert copy["repeat"] == {"unit": "week", "every": 1}
+    assert copy["spawned_id"] is None
+    assert client.get(f"/todos/{t}").json()["spawned_id"] == body["spawned_id"]
+    order = [x["todo_id"] for x in client.get("/todos/root").json()]
+    assert order == [t, body["spawned_id"], other]
+
+
+def test_spawn_uses_the_clients_today_to_skip_missed_occurrences(db_setup):
+    t = _repeating(unit="day", due="2026-09-14T00:00:00")
+    body = _spawn(t, today="2026-09-20").json()
+    assert client.get(f"/todos/{body['spawned_id']}").json()["due_date"] == "2026-09-21T00:00:00"
+
+
+def test_spawn_copies_the_live_subtree_reset_to_open_with_shifted_dates(db_setup):
+    t = _repeating(unit="week", due="2026-09-14T00:00:00")
+    k1 = _mk("k1", t)
+    k2 = _mk("k2", t)
+    gone = _mk("gone", t)
+    g = _mk("g", k1)
+    client.patch(f"/todos/{k1}", json={"done": True, "due_date": "2026-09-15T00:00:00"})
+    client.patch(f"/todos/{g}", json={"done": True})
+    client.delete(f"/todos/{gone}")
+
+    body = _spawn(t).json()
+    copy = client.get(f"/todos/{body['spawned_id']}").json()
+    kids = [client.get(f"/todos/{c}").json() for c in copy["child_ids"]]
+    assert [k["title"] for k in kids] == ["k1", "k2"]          # deleted one left out, order kept
+    assert all(k["done"] is False for k in kids)
+    assert kids[0]["due_date"] == "2026-09-22T00:00:00"        # shifted by the same 7 days
+    assert kids[1]["due_date"] is None
+    grand = client.get(f"/todos/{kids[0]['child_ids'][0]}").json()
+    assert grand["title"] == "g" and grand["done"] is False
+    assert kids[0]["todo_id"] != k1                             # new ids, originals untouched
+    assert client.get(f"/todos/{k1}").json()["done"] is True
+
+
+def test_a_todo_spawns_at_most_once(db_setup):
+    t = _repeating()
+    first = _spawn(t).json()
+    again = _spawn(t).json()
+    assert again["created"] is False and again["spawned_id"] == first["spawned_id"]
+    assert len(client.get("/todos/root").json()) == 2
+
+
+def test_spawn_retry_with_the_same_txn_id_replays_the_answer(db_setup):
+    t = _repeating()
+    a = _spawn(t, headers={"X-Txn-Id": "spawn-1"}).json()
+    b = _spawn(t, headers={"X-Txn-Id": "spawn-1"}).json()
+    assert a == b
+    assert len(client.get("/todos/root").json()) == 2
+
+
+def test_spawn_needs_a_repeat_rule_and_a_live_todo(db_setup):
+    plain = client.post("/todos", json={"title": "a"}).json()["todo_id"]
+    assert _spawn(plain).status_code == 400
+    t = _repeating()
+    client.delete(f"/todos/{t}")
+    assert _spawn(t).status_code == 404

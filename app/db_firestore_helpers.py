@@ -14,6 +14,8 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         parent_id=None if doc_dict.get("parent_id") is None else models.TodoId(uuid.UUID(doc_dict["parent_id"])),
         deleted=doc_dict.get("deleted", False),
         collapsed=doc_dict.get("collapsed", False),
+        repeat=doc_dict.get("repeat"),
+        spawned_id=None if doc_dict.get("spawned_id") is None else models.TodoId(uuid.UUID(doc_dict["spawned_id"])),
         # Docs written before versioning existed have no field: treat as version 1.
         version=doc_dict.get("version", 1),
         child_ids=[]
@@ -31,6 +33,8 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "parent_id": None if todo.parent_id is None else str(todo.parent_id),
         "deleted": todo.deleted,
         "collapsed": todo.collapsed,
+        "repeat": None if todo.repeat is None else todo.repeat.model_dump(),
+        "spawned_id": None if todo.spawned_id is None else str(todo.spawned_id),
         "version": todo.version
     }
 

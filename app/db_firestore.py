@@ -2,6 +2,7 @@
 from __future__ import annotations
 from app import models
 from app import db_firestore_helpers
+from app import recurrence
 import contextvars
 import datetime
 import json
@@ -300,6 +301,85 @@ def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> mode
     todo.parent_id = parent_id
     todo.order_idx = order_idx
     return todo
+
+def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Todo:
+    """Create the next occurrence of a repeating todo and mark the original as spawned.
+
+    The copy is a sibling placed right after the original. It takes the next
+    due date (see app/recurrence.py) and brings the original's live subtree
+    along, every todo open again, each dated subtask shifted by the same amount.
+    Deleted subtasks are left behind. Returns the copy's root.
+    """
+    global _todos_collection
+
+    original_ref = _todos_collection.document(str(todo.todo_id))
+    parent = None if todo.parent_id is None else str(todo.parent_id)
+
+    # All reads first: Firestore rejects a read after a write.
+    def live_children(doc_id: str) -> list[dict]:
+        return _sorted_by_order(_child_docs(doc_id))
+
+    tree: dict[str, list[dict]] = {}
+    pending = [str(todo.todo_id)]
+    while pending:
+        node = pending.pop()
+        tree[node] = live_children(node)
+        pending.extend(d["todo_id"] for d in tree[node])
+    siblings = _sorted_by_order(_child_docs(parent))
+
+    new_due = recurrence.next_due(todo.due_date, todo.repeat, today)
+    shift = None if todo.due_date is None else new_due - todo.due_date
+
+    def clone(doc: dict, new_parent: models.TodoId | None, due: datetime.datetime | None) -> models.Todo:
+        copy = db_firestore_helpers.doc_to_todo(doc)
+        copy.todo_id = models.TodoId(uuid.uuid4())
+        copy.parent_id = new_parent
+        copy.done = False
+        copy.deleted = False
+        copy.create_date = datetime.datetime.now()
+        copy.due_date = due
+        copy.spawned_id = None
+        copy.version = 1
+        return copy
+
+    copies: list[models.Todo] = []
+
+    def clone_children(old_id: str, new_id: models.TodoId) -> None:
+        for child in tree[old_id]:
+            child_due = child_due_date(child)
+            copy = clone(child, new_id, child_due)
+            copies.append(copy)
+            clone_children(child["todo_id"], copy.todo_id)
+
+    def child_due_date(doc: dict) -> datetime.datetime | None:
+        if doc.get("due_date") is None:
+            return None
+        due = datetime.datetime.fromisoformat(doc["due_date"])
+        return due + shift if shift is not None else due
+
+    original_doc = _get(original_ref).to_dict()
+    root = clone(original_doc, todo.parent_id, new_due)
+
+    # Slot the copy in right after the original and renumber the siblings.
+    ids = [d["todo_id"] for d in siblings]
+    at = ids.index(str(todo.todo_id)) + 1 if str(todo.todo_id) in ids else len(ids)
+    ids.insert(at, str(root.todo_id))
+    root.order_idx = at
+    copies.insert(0, root)
+    clone_children(str(todo.todo_id), root.todo_id)
+
+    old_idx = {d["todo_id"]: d.get("order_idx") for d in siblings}
+    for i, sid in enumerate(ids):
+        if sid != str(root.todo_id) and old_idx.get(sid) != i:
+            _update(_todos_collection.document(sid), {"order_idx": i})
+    for copy in copies:
+        _set(_todos_collection.document(str(copy.todo_id)), db_firestore_helpers.todo_to_doc(copy))
+
+    todo.spawned_id = root.todo_id
+    todo.version += 1
+    _update(original_ref, {"spawned_id": str(root.todo_id), "version": todo.version})
+    return root
+
 
 class ReparentError(Exception):
     """Raised for a move that can't be done: "missing" parent or a "cycle"."""

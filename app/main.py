@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Header, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+import datetime
 from pathlib import Path
 from typing import Callable
 import re
@@ -169,6 +170,9 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
             todo.deleted = body.deleted
         if body.collapsed is not None:
             todo.collapsed = body.collapsed
+        if "repeat" in body.model_fields_set:
+            # An explicit null clears the rule; omitting the field leaves it alone.
+            todo.repeat = body.repeat
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
@@ -184,6 +188,24 @@ def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent,
         return jsonable_encoder(result)
 
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
+
+
+@app.post("/todos/{todo_id}/repeat", response_model=None)
+def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
+                x_txn_id: str | None = Header(None)) -> Response:
+    """Create the next occurrence of a repeating todo (call it after completing
+    the original). A todo spawns at most once: later calls return the same copy."""
+    today = body.today or datetime.date.today()
+
+    def action(todo: models.Todo) -> dict:
+        if todo.repeat is None:
+            raise HTTPException(400, "this todo does not repeat")
+        if todo.spawned_id is not None:
+            return {"created": False, "spawned_id": str(todo.spawned_id)}
+        copy = db.spawn_next_occurrence(todo, today)
+        return {"created": True, "spawned_id": str(copy.todo_id), "todo": jsonable_encoder(copy)}
+
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, None, action)))
 
 
 @app.patch("/todos/{todo_id}/reparent", response_model=None)
