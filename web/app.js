@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "13";
+const APP_VERSION = "14";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -204,7 +204,13 @@ const freshness = Freshness.create({
   fetchRev: async () => {
     const response = await fetch(`${API_BASE}/rev`);
     if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
-    return (await response.json()).rev;
+    return response.json(); // { rev, version }
+  },
+  appVersion: APP_VERSION,
+  reload: () => location.reload(),
+  reloadGuard: {
+    get: () => { try { return sessionStorage.getItem("reloaded-for-version"); } catch (e) { return null; } },
+    set: (v) => { try { sessionStorage.setItem("reloaded-for-version", v); } catch (e) { /* private mode: no guard */ } },
   },
   refresh: () => loadAndRender(),
   editorOpen: editingInTree,

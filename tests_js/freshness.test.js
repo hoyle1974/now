@@ -3,9 +3,10 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const Freshness = require("../web/freshness.js");
 
-function setup({ serverRev = 5, knownRev = 5, pending = 0, editor = false, revFails = false, active = true } = {}) {
-  const s = { serverRev, knownRev, pending, editor, revFails, active, stale: false,
-    revFetches: 0, refreshes: 0, clock: 1_000_000, timers: [], phases: [], logs: [] };
+function setup({ serverRev = 5, knownRev = 5, pending = 0, editor = false, revFails = false, active = true,
+                 serverVersion = "13", appVersion = "13", guard = null } = {}) {
+  const s = { serverRev, knownRev, pending, editor, revFails, active, stale: false, serverVersion,
+    reloads: 0, guardValue: guard, revFetches: 0, refreshes: 0, clock: 1_000_000, timers: [], phases: [], logs: [] };
   const engine = {
     knownRev: () => s.knownRev,
     pending: () => s.pending,
@@ -14,7 +15,10 @@ function setup({ serverRev = 5, knownRev = 5, pending = 0, editor = false, revFa
   };
   const f = Freshness.create({
     engine,
-    fetchRev: async () => { s.revFetches++; if (s.revFails) throw new Error("offline"); return s.serverRev; },
+    fetchRev: async () => { s.revFetches++; if (s.revFails) throw new Error("offline"); return { rev: s.serverRev, version: s.serverVersion }; },
+    appVersion,
+    reload: () => { s.reloads++; },
+    reloadGuard: { get: () => s.guardValue, set: (v) => { s.guardValue = v; } },
     refresh: async () => { s.refreshes++; s.knownRev = s.serverRev; s.stale = false; },
     editorOpen: () => s.editor,
     now: () => s.clock,
@@ -355,4 +359,45 @@ test("logs a refresh held back by an open editor", async () => {
   s.clock += 60000;
   await f.check();
   assert.ok(lk(s).includes("waiting"));
+});
+
+test("reloads the page when the server's app version differs", async () => {
+  const { s, f } = setup({ serverVersion: "14" });
+  s.clock += 60000;
+  await f.check();
+  assert.equal(s.reloads, 1);
+  assert.equal(s.refreshes, 0);
+  assert.ok(s.logs.some(([k]) => k === "version"));
+});
+
+test("no reload when versions match", async () => {
+  const { s, f } = setup();
+  s.clock += 60000;
+  await f.check();
+  assert.equal(s.reloads, 0);
+});
+
+test("a version mismatch waits while an editor is open, then reloads on poke", async () => {
+  const { s, f } = setup({ serverVersion: "14", editor: true });
+  s.clock += 60000;
+  await f.check();
+  assert.equal(s.reloads, 0);
+  s.editor = false;
+  await f.poke();
+  assert.equal(s.reloads, 1);
+});
+
+test("reloads at most once per target version", async () => {
+  const { s, f } = setup({ serverVersion: "14", guard: "14" });
+  s.clock += 60000;
+  await f.check();
+  assert.equal(s.reloads, 0);
+  assert.ok(s.logs.some(([k, d]) => k === "version" && /already/.test(d)));
+});
+
+test("unsent edits are not lost: a mismatch still defers behind the outbox", async () => {
+  const { s, f } = setup({ serverVersion: "14", pending: 2 });
+  s.clock += 60000;
+  await f.check();
+  assert.equal(s.reloads, 0);
 });

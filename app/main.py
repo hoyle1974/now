@@ -4,11 +4,15 @@ from fastapi import FastAPI, HTTPException, Header, Query, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 from typing import Callable
+import re
 import uuid
 from app import db
 from app import models
 from app import next_up
+
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 app = FastAPI()
 templates = Jinja2Templates(directory="templates")
@@ -93,10 +97,22 @@ def print_all_todos() -> None:
 def list_todos() -> list[models.Todo]:
     return db.get_root_todos()
 
+def _read_app_version() -> str:
+    """The version of the web code this container serves: APP_VERSION in
+    web/app.js is the single source of truth, so bumping it there is enough."""
+    try:
+        match = re.search(r'APP_VERSION\s*=\s*"([^"]+)"', (WEB_DIR / "app.js").read_text())
+        return match.group(1) if match else "unknown"
+    except OSError:
+        return "unknown"
+
+APP_VERSION = _read_app_version()
+
 @app.get("/todos/rev")
 def get_rev() -> dict:
-    """Cheap change check: one document read. Compare with the last seen value."""
-    return {"rev": db.get_rev()}
+    """Cheap change check: one document read. Compare rev with the last seen
+    value; a different version means the page is running old code and must reload."""
+    return {"rev": db.get_rev(), "version": APP_VERSION}
 
 def _load_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
     return db.get_tree()
@@ -221,5 +237,5 @@ def move_todo(todo_id: uuid.UUID, direction: str,
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 
-app.mount("/", StaticFiles(directory="web", html=True), name="web")
+app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 

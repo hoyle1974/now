@@ -340,12 +340,12 @@ def rev_of(response):
 
 
 def test_rev_starts_at_0_and_bumps_once_per_write(db_setup):
-    assert client.get("/todos/rev").json() == {"rev": 0}
+    assert client.get("/todos/rev").json()["rev"] == 0
     a = client.post("/todos", json={"title": "a"})
     assert rev_of(a) == 1
     b = client.patch(f"/todos/{a.json()['todo_id']}", json={"done": True})
     assert rev_of(b) == 2
-    assert client.get("/todos/rev").json() == {"rev": 2}
+    assert client.get("/todos/rev").json()["rev"] == 2
 
 
 def test_rev_does_not_move_for_conflicts_missing_or_reads(db_setup):
@@ -358,7 +358,7 @@ def test_rev_does_not_move_for_conflicts_missing_or_reads(db_setup):
     missing = client.patch(f"/todos/{uuid.uuid4()}", json={"done": True})
     assert missing.status_code == 404
     client.get(f"/todos/{id}")
-    assert client.get("/todos/rev").json() == {"rev": 2}
+    assert client.get("/todos/rev").json()["rev"] == 2
 
 
 def test_replayed_txn_returns_the_original_rev_and_does_not_bump(db_setup):
@@ -367,7 +367,7 @@ def test_replayed_txn_returns_the_original_rev_and_does_not_bump(db_setup):
     client.post("/todos", json={"title": "other"})  # rev 2
     b = client.post("/todos", json={"title": "a"}, headers=h)
     assert rev_of(a) == 1 and rev_of(b) == 1
-    assert client.get("/todos/rev").json() == {"rev": 2}
+    assert client.get("/todos/rev").json()["rev"] == 2
 
 
 def test_tree_includes_current_rev(db_setup):
@@ -500,3 +500,12 @@ def test_move_compacts_legacy_roots_without_order_idx(db_setup):
         db.get_conn().collection("todos").document(i).update({"order_idx": None})
     client.patch(f"/todos/{ids[2]}/move/up")
     assert [t["todo_id"] for t in client.get("/todos/root").json()] == [ids[0], ids[2], ids[1]]
+
+
+def test_rev_endpoint_reports_app_version(db_setup):
+    r = client.get("/todos/rev").json()
+    assert "rev" in r
+    # Same number the page ships with (APP_VERSION in web/app.js).
+    import re
+    shipped = re.search(r'APP_VERSION = "([^"]+)"', open("web/app.js").read()).group(1)
+    assert r["version"] == shipped
