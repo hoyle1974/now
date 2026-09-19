@@ -43,15 +43,12 @@ def _set(ref, data: dict):
         _wrote.get()[0] = True
         tx.set(ref, data)
 
-def _update(ref, data: dict, view_only: bool = False):
-    """view_only writes (e.g. collapsed) skip the revision bump: they are last
-    write wins and must not make every other window refetch the whole tree."""
+def _update(ref, data: dict):
     tx = _tx.get()
     if tx is None:
         ref.update(data)
     else:
-        if not view_only:
-            _wrote.get()[0] = True
+        _wrote.get()[0] = True
         tx.update(ref, data)
 
 
@@ -280,7 +277,7 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
     if bump_version:
         todo.version += 1
     doc_data = db_firestore_helpers.todo_to_doc(todo)
-    _update(_todos_collection.document(str(todo.todo_id)), doc_data, view_only=not bump_version)
+    _update(_todos_collection.document(str(todo.todo_id)), doc_data)
 
 def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
     """Move a todo to a different parent"""

@@ -463,12 +463,14 @@ def test_tree_is_one_collection_read_and_matches_structure(db_setup, monkeypatch
     assert len(tree["todosById"]) == 4  # p, other, a, a1 (b deleted, dead subtree hidden)
 
 
-def test_collapsed_only_patch_does_not_bump_rev(db_setup):
+def test_collapsed_only_patch_bumps_rev(db_setup):
+    # Collapse skips the version check but is a real write: bumping the rev is
+    # what lets other windows notice it and refetch.
     t = client.post("/todos", json={"title": "a"}).json()
     before = client.get("/todos/rev").json()["rev"]
     r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True})
-    assert rev_of(r) == before
-    assert client.get("/todos/rev").json()["rev"] == before
+    assert rev_of(r) == before + 1
+    assert client.get("/todos/rev").json()["rev"] == before + 1
 
 
 def test_roots_get_order_idx_and_can_be_moved(db_setup):
