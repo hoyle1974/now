@@ -172,6 +172,7 @@ const ICONS = {
   split: '<path d="M6 4v5a3 3 0 0 0 3 3h9M6 9v6a3 3 0 0 0 3 3h9"/><path d="M15 9l3 3-3 3M15 15l3 3-3 3"/>',
   trash: '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  grip: '<path d="M4 7h16M4 12h16M4 17h16"/>',
   up: '<path d="M7 14l5-5 5 5"/>',
   down: '<path d="M7 10l5 5 5-5"/>',
 };
@@ -524,7 +525,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     dragHandle = document.createElement("button");
     dragHandle.type = "button";
     dragHandle.className = "todo-drag-handle";
-    dragHandle.textContent = "≡";
+    dragHandle.appendChild(icon("grip"));
     dragHandle.setAttribute("aria-label", "Drag to reorder");
 
     dragHandle.addEventListener("pointerdown", (e) => {

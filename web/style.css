@@ -382,6 +382,12 @@ svg {
   user-select: none;
 }
 
+.todo-drag-handle svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 2.4;
+}
+
 .todo-drag-handle:active {
   cursor: grabbing;
   color: var(--accent);
