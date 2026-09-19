@@ -207,6 +207,8 @@
     const onStatus = opts.onStatus || (() => {});
     const onNotice = opts.onNotice || (() => {});
     const onRemap = opts.onRemap || (() => {});
+    // Diagnostics only (kind, short detail); never receives todo titles.
+    const log = opts.onLog || (() => {});
     const timers = opts.timers || { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) };
     const random = opts.random || Math.random;
     const uuid = opts.uuid || defaultUuid;
@@ -256,7 +258,10 @@
     // already accounted for.
     function observeRev(prev, rev) {
       if (prev == null || rev == null) return;
-      if (knownRev !== null && prev > knownRev) stale = true;
+      if (knownRev !== null && prev > knownRev) {
+        stale = true;
+        log("stale", `remote write detected: prev ${prev} > known ${knownRev}`);
+      }
       if (knownRev === null || rev > knownRev) knownRev = rev;
     }
 
@@ -350,7 +355,9 @@
       }
       const applied = applyOp(model, op);
       if (!applied && kind !== "undelete") return false;
-      if (!tryCoalesce(op)) ops.push(op);
+      const merged = tryCoalesce(op);
+      if (!merged) ops.push(op);
+      log("enqueue", `${kind}${merged ? " (merged)" : ""}, ${ops.length} pending`);
       epoch += 1;
       persist();
       onChange();
@@ -368,10 +375,12 @@
     function scheduleRetry(op) {
       op.attempts += 1;
       op.state = "pending";
+      const delay = backoffDelay(op.attempts);
+      log("backoff", `${Math.round(delay)}ms, attempt ${op.attempts}`);
       backoffTimer = timers.setTimeout(() => {
         backoffTimer = null;
         run();
-      }, backoffDelay(op.attempts));
+      }, delay);
       persist();
       emitStatus();
     }
@@ -443,6 +452,7 @@
       if (code === 409) {
         if (op.kind === "patch" || op.kind === "move") {
           op.conflicts += 1;
+          log("conflict", `${op.kind} #${op.conflicts}, server v${body && body.version}`);
           const node = model.todosById.get(op.target_id);
           if (op.conflicts > MAX_CONFLICTS || !node || !body) {
             return failPermanently(op, "kept conflicting with changes from another device");
@@ -461,11 +471,13 @@
           return true;
         }
         dropHead(op);
+        log("conflict", `${op.kind}: reloading from the server`);
         notice("info", "Changed on another device; reloaded.");
         await refetchAndRebuild();
         return true;
       }
       if (code === 404) {
+        log("drop", `${op.kind}: 404, item is gone`);
         const target = op.target_id;
         removeOps((o) => o.target_id === target);
         for (const n of subtreeNodes(model, target)) model.todosById.delete(n.todo_id);
@@ -487,6 +499,7 @@
     }
 
     async function failPermanently(op, why) {
+      log("drop", `${op.kind}: ${why}`);
       dropHead(op);
       lastError = true;
       notice("error", `Couldn't save your ${op.kind}: ${why}.`);
@@ -510,12 +523,15 @@
           emitStatus();
           const version = model.todosById.get(op.target_id)?.version;
           let res;
+          const startedAt = Date.now();
           try {
             res = await send(buildRequest(op, version));
           } catch (e) {
+            log("send-fail", `${op.kind} ${e && e.message ? e.message : e} (${Date.now() - startedAt}ms)`);
             scheduleRetry(op);
             break;
           }
+          log("send", `${op.kind} ${res.status} (${Date.now() - startedAt}ms) rev ${res.prev ?? "?"}->${res.rev ?? "?"}`);
           observeRev(res.prev, res.rev);
           const proceed = await handle(op, res);
           emitStatus();
@@ -548,6 +564,7 @@
     async function load() {
       const saved = await store.load();
       ops = (saved || []).map((o) => ({ ...o, state: "pending" }));
+      log("outbox", `${ops.length} unsent edit(s) restored`);
       emitStatus();
     }
 
@@ -567,6 +584,7 @@
         if (op.kind === "move" && op.sent) continue;
         applyOp(model, op);
       }
+      log("rebuild", `rev ${tree.rev ?? "?"}, ${todosById.size} todos, ${ops.length} pending`);
       onChange();
     }
 

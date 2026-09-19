@@ -5,8 +5,9 @@ const Freshness = require("../web/freshness.js");
 
 function setup({ serverRev = 5, knownRev = 5, pending = 0, editor = false, revFails = false, active = true } = {}) {
   const s = { serverRev, knownRev, pending, editor, revFails, active, stale: false,
-    revFetches: 0, refreshes: 0, clock: 1_000_000, timers: [], phases: [] };
+    revFetches: 0, refreshes: 0, clock: 1_000_000, timers: [], phases: [], logs: [] };
   const engine = {
+    knownRev: () => s.knownRev,
     pending: () => s.pending,
     isStale: () => s.stale,
     noteRemoteRev: (rev) => { if (rev > s.knownRev) s.stale = true; },
@@ -20,6 +21,7 @@ function setup({ serverRev = 5, knownRev = 5, pending = 0, editor = false, revFa
     minGapMs: 30000,
     isActive: () => s.active,
     onPhase: (p) => s.phases.push(p),
+    onLog: (k, d) => s.logs.push([k, d]),
     timers: {
       setTimeout: (fn, ms) => { s.timers.push({ fn, ms, live: true }); return s.timers.length - 1; },
       clearTimeout: (id) => { if (s.timers[id]) s.timers[id].live = false; },
@@ -295,4 +297,62 @@ test("phases: a failed refresh says unreachable", async () => {
   });
   await f.poke();
   assert.deepEqual(s.phases, ["refreshing", "unreachable"]);
+});
+
+
+// ---- event log hooks -------------------------------------------------------
+
+const lk = (s) => s.logs.map(([k]) => k);
+
+test("logs a check that finds nothing", async () => {
+  const { s, f } = setup();
+  s.clock += 60000;
+  await f.check({ awayMs: 9000 });
+  assert.deepEqual(lk(s), ["check", "rev"]);
+  assert.match(s.logs[0][1], /away=9000ms/);
+  assert.match(s.logs[1][1], /server 5, known 5/);
+});
+
+test("logs a check that finds a remote write and refreshes", async () => {
+  const { s, f } = setup({ serverRev: 8 });
+  s.clock += 60000;
+  await f.check();
+  assert.deepEqual(lk(s), ["check", "rev", "refresh", "refresh"]);
+  assert.match(s.logs[1][1], /server 8, known 5.*stale/);
+  assert.match(s.logs[3][1], /ok/);
+});
+
+test("logs why a check was skipped", async () => {
+  const { s, f } = setup();
+  await f.check();
+  assert.deepEqual(lk(s), ["check", "skip"]);
+  assert.match(s.logs[1][1], /debounced/);
+});
+
+test("logs a check held back by unsent edits", async () => {
+  const { s, f } = setup({ pending: 2 });
+  s.clock += 60000;
+  await f.check();
+  assert.deepEqual(lk(s), ["check", "defer"]);
+  assert.match(s.logs[1][1], /2 unsent/);
+});
+
+test("logs failures and retries", async () => {
+  const { s, f } = setup({ revFails: true });
+  s.clock += 60000;
+  await f.check();
+  assert.deepEqual(lk(s), ["check", "rev-fail", "retry"]);
+  assert.match(s.logs[1][1], /offline/);
+  assert.match(s.logs[2][1], /in 2000ms/);
+  s.active = false;
+  await s.fireRetry();
+  assert.equal(s.logs.at(-1)[0], "retry");
+  assert.match(s.logs.at(-1)[1], /dropped/);
+});
+
+test("logs a refresh held back by an open editor", async () => {
+  const { s, f } = setup({ serverRev: 8, editor: true });
+  s.clock += 60000;
+  await f.check();
+  assert.ok(lk(s).includes("waiting"));
 });

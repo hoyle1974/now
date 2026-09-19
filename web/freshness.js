@@ -28,6 +28,8 @@
     // "refreshing" | "retrying" (no network yet, will try again) | "waiting"
     // (changes found but held back by an open editor) | "unreachable".
     onPhase = () => {},
+    // Diagnostics (kind, short detail) for the on-device event log.
+    onLog = () => {},
     timers = { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) },
   }) {
     // Starts "just checked": the page load already fetched the tree.
@@ -47,11 +49,18 @@
 
     // Returns whether another attempt is scheduled.
     function scheduleRetry() {
-      if (retryCount >= retryDelaysMs.length || !isActive()) return false;
+      if (retryCount >= retryDelaysMs.length || !isActive()) {
+        onLog("retry", retryCount >= retryDelaysMs.length ? "giving up" : "not scheduled, page not visible");
+        return false;
+      }
       const delay = retryDelaysMs[retryCount++];
+      onLog("retry", `in ${delay}ms (#${retryCount})`);
       retryTimer = timers.setTimeout(async () => {
         retryTimer = null;
-        if (running || !isActive()) return; // backgrounded meanwhile: stay quiet
+        if (running || !isActive()) {
+          onLog("retry", "dropped, page not visible"); // backgrounded meanwhile: stay quiet
+          return;
+        }
         await attempt();
       }, delay);
       return true;
@@ -65,14 +74,17 @@
         // is what pokes us again.
         if (engine.pending() > 0) {
           deferred = true;
+          onLog("defer", `${engine.pending()} unsent edit(s), check later`);
           return;
         }
         if (!engine.isStale()) {
           let rev;
           onPhase("checking");
+          const startedAt = now();
           try {
             rev = await fetchRev();
           } catch (e) {
+            onLog("rev-fail", `${e && e.message ? e.message : e} (${now() - startedAt}ms)`);
             // No network yet (e.g. just after unlocking a phone). This attempt
             // must not count as a check, or it would block the retries and the
             // `online` event behind the debounce.
@@ -82,6 +94,8 @@
           }
           lastCheck = now();
           retryCount = 0;
+          const known = engine.knownRev ? engine.knownRev() : null;
+          onLog("rev", `server ${rev}, known ${known ?? "?"}${known === null || rev > known ? " -> stale" : ""} (${now() - startedAt}ms)`);
           engine.noteRemoteRev(rev);
         }
         if (!engine.isStale()) {
@@ -93,15 +107,20 @@
         if (editorOpen()) {
           deferred = true;
           onPhase("waiting");
+          onLog("waiting", "editor open, refresh held");
           return;
         }
         deferred = false;
         onPhase("refreshing");
+        onLog("refresh", "start");
+        const refreshStart = now();
         try {
           await refresh();
+          onLog("refresh", `ok (${now() - refreshStart}ms)`);
           onPhase("idle");
         } catch (e) {
           // Still stale; the next trigger retries.
+          onLog("refresh-fail", e && e.message ? e.message : String(e));
           onPhase("unreachable");
         }
       } finally {
@@ -112,11 +131,19 @@
     // The window came back. awayMs is how long it was away (0 if unknown);
     // force skips the debounce (e.g. connectivity just returned).
     async function check({ awayMs = 0, force = false } = {}) {
-      if (running) return;
+      onLog("check", `away=${Math.round(awayMs)}ms force=${force}`);
+      if (running) {
+        onLog("skip", "another check is running");
+        return;
+      }
       clearRetry();
       retryCount = 0;
-      const debounced = now() - lastCheck < minGapMs && awayMs < awayBypassMs;
-      if (!force && !engine.isStale() && debounced) return;
+      const sinceLast = now() - lastCheck;
+      const debounced = sinceLast < minGapMs && awayMs < awayBypassMs;
+      if (!force && !engine.isStale() && debounced) {
+        onLog("skip", `debounced (${sinceLast}ms since last check)`);
+        return;
+      }
       await attempt();
     }
 
@@ -124,6 +151,7 @@
     // refresh is actually waiting.
     async function poke() {
       if (running || (!deferred && !engine.isStale())) return;
+      onLog("poke", `deferred=${deferred} stale=${engine.isStale()}`);
       await attempt();
     }
 

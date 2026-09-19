@@ -34,6 +34,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
   model.todosById = tree.todosById;
   const calls = [];
   const notices = [];
+  const logs = [];
   const remaps = [];
   const timers = [];
   let refetches = 0;
@@ -49,6 +50,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
     },
     refetch: async () => { refetches++; return refetchTree || treeOf(); },
     onChange() {}, onStatus() {},
+    onLog: (k, d) => logs.push([k, d]),
     onNotice: (x) => notices.push(x),
     onRemap: (a, b) => remaps.push([a, b]),
     timers: {
@@ -59,7 +61,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
     uuid: () => "u" + (++n),
   });
   const fire = () => { const t = timers.filter((x) => x.live).pop(); t.live = false; t.fn(); };
-  return { model, engine, calls, notices, remaps, timers, store, fire, get refetches() { return refetches; } };
+  return { model, engine, calls, notices, logs, remaps, timers, store, fire, get refetches() { return refetches; } };
 }
 
 // ---- 1. local application ------------------------------------------------
@@ -452,4 +454,55 @@ test("without a known revision (first load failed) we treat the server as ahead"
   const h = harness();
   h.engine.noteRemoteRev(0);
   assert.equal(h.engine.isStale(), true);
+});
+
+
+// ---- event log hooks -------------------------------------------------------
+
+const kinds = (h) => h.logs.map(([k]) => k);
+
+test("logs enqueue and send, without leaking titles", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [ok(todo("a", { version: 2 }), 200, { prev: 1, rev: 2 })] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "secret title" } });
+  await h.engine.flush();
+  assert.deepEqual(kinds(h), ["enqueue", "send"]);
+  assert.match(h.logs[1][1], /patch 200/);
+  assert.match(h.logs[1][1], /rev 1->2/);
+  assert.ok(!JSON.stringify(h.logs).includes("secret title"));
+});
+
+test("logs a failed send and the backoff", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [netFail()] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  assert.deepEqual(kinds(h), ["enqueue", "send-fail", "backoff"]);
+  assert.match(h.logs[1][1], /network/);
+  assert.match(h.logs[2][1], /750ms.*attempt 1/);
+});
+
+test("logs a 409 conflict and the remote write it reveals", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [
+    ok(todo("a", { version: 5 }), 409, { prev: 8, rev: 8 }),
+    ok(todo("a", { version: 6 }), 200, { prev: 8, rev: 9 }),
+  ] });
+  h.engine.rebuild(Object.assign(treeOf(todo("a")), { rev: 5 }));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.ok(kinds(h).includes("conflict"));
+  assert.ok(kinds(h).includes("stale"));
+  assert.match(h.logs.find(([k]) => k === "stale")[1], /prev 8 > known 5/);
+});
+
+test("logs a rebuild with the revision and counts", () => {
+  const h = harness();
+  h.engine.rebuild(Object.assign(treeOf(todo("a"), todo("b")), { rev: 12 }));
+  assert.equal(h.logs.at(-1)[0], "rebuild");
+  assert.match(h.logs.at(-1)[1], /rev 12.*2 todos.*0 pending/);
+});
+
+test("logs dropped ops (404 / permanent failure)", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [ok({}, 404)] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  assert.ok(kinds(h).includes("drop"));
 });
