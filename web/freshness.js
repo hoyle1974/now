@@ -1,8 +1,8 @@
 // Decides when a window should re-download the todo tree because another
-// window (or device) wrote to it. It never polls on a timer: the app calls
-// check() when the window regains focus or visibility, and poke() when
-// something that was blocking a refresh (unsent edits, an open editor) clears.
-// No DOM access, so it runs under `node --test`.
+// window (or device) wrote to it. There is no polling timer: the app calls
+// check() when the window comes back (focus, visibility, pageshow, online), and
+// poke() when something that was blocking a refresh (unsent edits, an open
+// editor) clears. No DOM access, so it runs under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -12,12 +12,50 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  function create({ engine, fetchRev, refresh, editorOpen = () => false, now = Date.now, minGapMs = 30000 }) {
+  function create({
+    engine, fetchRev, refresh,
+    editorOpen = () => false,
+    now = Date.now,
+    // At most one server check per minGapMs when the window only flickered...
+    minGapMs = 30000,
+    // ...but a window that was away at least this long always checks.
+    awayBypassMs = 5000,
+    // A phone that just woke often has no network for a second or two, so a
+    // failed check is retried (only while the window is still active), twice.
+    retryDelaysMs = [2000, 6000],
+    isActive = () => true,
+    // Reports what we're doing so the UI can say so: "idle" | "checking" |
+    // "refreshing" | "retrying" (no network yet, will try again) | "waiting"
+    // (changes found but held back by an open editor) | "unreachable".
+    onPhase = () => {},
+    timers = { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) },
+  }) {
     // Starts "just checked": the page load already fetched the tree.
     let lastCheck = now();
     let running = false;
     // True when a check or refresh was held back and should run on the next poke.
     let deferred = false;
+    let retryTimer = null;
+    let retryCount = 0;
+
+    function clearRetry() {
+      if (retryTimer !== null) {
+        timers.clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+    }
+
+    // Returns whether another attempt is scheduled.
+    function scheduleRetry() {
+      if (retryCount >= retryDelaysMs.length || !isActive()) return false;
+      const delay = retryDelaysMs[retryCount++];
+      retryTimer = timers.setTimeout(async () => {
+        retryTimer = null;
+        if (running || !isActive()) return; // backgrounded meanwhile: stay quiet
+        await attempt();
+      }, delay);
+      return true;
+    }
 
     async function attempt() {
       if (running) return;
@@ -30,41 +68,55 @@
           return;
         }
         if (!engine.isStale()) {
-          lastCheck = now();
           let rev;
+          onPhase("checking");
           try {
             rev = await fetchRev();
           } catch (e) {
-            deferred = false; // offline: the next focus will try again
+            // No network yet (e.g. just after unlocking a phone). This attempt
+            // must not count as a check, or it would block the retries and the
+            // `online` event behind the debounce.
+            deferred = false;
+            onPhase(scheduleRetry() ? "retrying" : "unreachable");
             return;
           }
+          lastCheck = now();
+          retryCount = 0;
           engine.noteRemoteRev(rev);
         }
         if (!engine.isStale()) {
           deferred = false;
+          onPhase("idle");
           return;
         }
         // A refresh re-renders the list and would wipe half-typed text.
         if (editorOpen()) {
           deferred = true;
+          onPhase("waiting");
           return;
         }
         deferred = false;
+        onPhase("refreshing");
         try {
           await refresh();
+          onPhase("idle");
         } catch (e) {
           // Still stale; the next trigger retries.
+          onPhase("unreachable");
         }
       } finally {
         running = false;
       }
     }
 
-    // A focus / visibility / online event. At most one server check per minGapMs
-    // unless we already know we're stale.
-    async function check() {
+    // The window came back. awayMs is how long it was away (0 if unknown);
+    // force skips the debounce (e.g. connectivity just returned).
+    async function check({ awayMs = 0, force = false } = {}) {
       if (running) return;
-      if (!engine.isStale() && now() - lastCheck < minGapMs) return;
+      clearRetry();
+      retryCount = 0;
+      const debounced = now() - lastCheck < minGapMs && awayMs < awayBypassMs;
+      if (!force && !engine.isStale() && debounced) return;
       await attempt();
     }
 

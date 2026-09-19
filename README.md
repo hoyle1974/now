@@ -52,8 +52,13 @@ never waits on the network.
   comes back into focus (or its tab becomes visible; `pageshow` on phones), or
   by tapping the sync pill. There is no timer: an unfocused or backgrounded
   window sends nothing. The check is one tiny `GET /todos/rev` (a single
-  Firestore document, bumped by every data-changing transaction), debounced to
-  once per 30s; the tree is re-downloaded only if the revision moved. A write
+  Firestore document, bumped by every data-changing transaction); the tree is
+  re-downloaded only if the revision moved. Rapid flicker is debounced to one
+  check per 30s, but a window that was away 5s+ (or that just came back
+  online) always checks. If the check fails (a phone that just woke has no
+  network yet) it retries after 2s and 6s while visible, then stops. The sync
+  pill says what is happening: *Checking for changes…*, *Updating…*,
+  *Reconnecting…*, *Updates waiting*, *Couldn't check for updates*. A write
   response also reveals a remote write (`X-Rev-Prev` ahead of what we knew). The
   refresh waits for unsent edits to drain and for any open editor to close, so
   it never wipes typed text.

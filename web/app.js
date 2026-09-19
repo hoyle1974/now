@@ -77,13 +77,61 @@ function showNotice({ level, message }) {
   }
 }
 
-function renderSyncStatus({ state, pending }) {
+// What the pill shows combines two things: the outbox (Syncing / Offline /
+// Error) and, when the outbox is empty, what the freshness check is doing.
+let engineStatus = { state: "synced", pending: 0 };
+let phase = "idle";
+let phaseSince = 0;
+let phaseTimer = null;
+const MIN_PHASE_MS = 800; // long enough to actually be read
+
+function renderSyncStatus(st) {
+  if (st) engineStatus = st;
   const el = document.getElementById("sync-status");
-  el.dataset.state = state;
-  el.textContent =
-    state === "syncing" ? `Syncing ${pending}…` :
-    state === "offline" ? `Offline · ${pending} pending` :
-    state === "error" ? "Sync error" : "Synced";
+  const { state, pending } = engineStatus;
+  let dataState = state;
+  let text;
+  if (state === "syncing") {
+    text = `Syncing ${pending}…`;
+  } else if (state === "offline") {
+    text = `Offline · ${pending} pending`;
+  } else if (state === "error") {
+    text = "Sync error";
+  } else if (phase === "checking") {
+    dataState = "checking";
+    text = "Checking for changes…";
+  } else if (phase === "refreshing") {
+    dataState = "checking";
+    text = "Updating…";
+  } else if (phase === "retrying") {
+    dataState = "checking";
+    text = "Reconnecting…";
+  } else if (phase === "waiting") {
+    dataState = "waiting";
+    text = "Updates waiting";
+  } else if (phase === "unreachable") {
+    dataState = "offline";
+    text = "Couldn't check for updates";
+  } else {
+    text = "Synced";
+  }
+  el.dataset.state = dataState;
+  el.textContent = text;
+}
+
+// Called by the freshness check. A transient phase (checking/updating) that
+// would end almost immediately is held for MIN_PHASE_MS so it can be seen.
+function setPhase(next) {
+  clearTimeout(phaseTimer);
+  const held = performance.now() - phaseSince;
+  const transient = phase === "checking" || phase === "refreshing" || phase === "retrying";
+  if (next === "idle" && transient && held < MIN_PHASE_MS) {
+    phaseTimer = setTimeout(() => setPhase("idle"), MIN_PHASE_MS - held);
+    return;
+  }
+  phase = next;
+  phaseSince = performance.now();
+  renderSyncStatus();
 }
 
 const model = Sync.createModel();
@@ -128,6 +176,9 @@ const freshness = Freshness.create({
   },
   refresh: () => loadAndRender(),
   editorOpen: editingInTree,
+  onPhase: setPhase,
+  // Retry a failed check only while someone is looking at the page.
+  isActive: () => document.visibilityState === "visible",
 });
 
 // These stay async so existing `reportedFailure(action(...))` call sites work.
@@ -1002,16 +1053,25 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 // Coming back to the app: resend anything pending and see if another window
 // wrote while we were away. visibilitychange/pageshow are the reliable signals
-// on phones; focus covers switching between desktop windows.
-function onReturn() {
-  engine.kick();
-  freshness.check();
+// on phones; focus covers switching between desktop windows. How long we were
+// away decides whether the 30s debounce applies: a real absence always checks.
+let leftAt = null;
+function markAway() {
+  if (leftAt === null) leftAt = Date.now();
 }
-window.addEventListener("online", onReturn);
-window.addEventListener("focus", onReturn);
+function onReturn(force = false) {
+  const awayMs = leftAt === null ? 0 : Date.now() - leftAt;
+  leftAt = null;
+  engine.kick();
+  freshness.check({ awayMs, force });
+}
+window.addEventListener("blur", markAway);
+window.addEventListener("focus", () => onReturn());
+window.addEventListener("online", () => onReturn(true)); // connectivity is back: always look
 window.addEventListener("pageshow", (e) => { if (e.persisted) onReturn(); });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") onReturn();
+  else markAway();
 });
 // Leaving the rename box (or any inline field) can unblock a deferred refresh.
 document.getElementById("todo-tree").addEventListener("focusout", () => {

@@ -168,7 +168,9 @@ svg {
   cursor: pointer;
 }
 
-.sync-status[data-state="syncing"] {
+.sync-status[data-state="syncing"],
+.sync-status[data-state="checking"],
+.sync-status[data-state="waiting"] {
   color: var(--accent);
 }
 
