@@ -186,6 +186,20 @@ def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent,
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 
+@app.patch("/todos/{todo_id}/reparent", response_model=None)
+def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
+                  x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    """Move a todo under another parent (or to the top level) at an index."""
+    def action(todo: models.Todo) -> dict:
+        try:
+            moved = db.reparent_todo(todo, body.parent_id, body.index)
+        except db.ReparentError as e:
+            raise HTTPException(400 if e.kind == "cycle" else 404, e.kind)
+        return jsonable_encoder(moved)
+
+    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
+
+
 @app.delete("/todos/{todo_id}", status_code=204, response_model=None)
 def delete_todo(todo_id: uuid.UUID,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:

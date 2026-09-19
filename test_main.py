@@ -509,3 +509,74 @@ def test_rev_endpoint_reports_app_version(db_setup):
     import re
     shipped = re.search(r'APP_VERSION = "([^"]+)"', open("web/app.js").read()).group(1)
     assert r["version"] == shipped
+
+
+def _mk(title, parent=None):
+    t = client.post("/todos", json={"title": title}).json()["todo_id"]
+    if parent is not None:
+        client.patch(f"/todos/{t}/parent/{parent}", json={"parent_id": parent})
+    return t
+
+
+def _reparent(todo, parent, index=None, **kw):
+    body = {"parent_id": parent}
+    if index is not None:
+        body["index"] = index
+    return client.patch(f"/todos/{todo}/reparent", json=body, **kw)
+
+
+def test_reparent_under_another_todo_appends_and_bumps_version(db_setup):
+    a, b = _mk("a"), _mk("b")
+    r = _reparent(b, a)
+    assert r.status_code == 200
+    assert r.json()["parent_id"] == a and r.json()["version"] == 2
+    assert client.get(f"/todos/{a}").json()["child_ids"] == [b]
+    assert [t["todo_id"] for t in client.get("/todos/root").json()] == [a]
+
+
+def test_reparent_inserts_at_index_and_renumbers_siblings(db_setup):
+    p = _mk("p")
+    k1, k2, k3 = _mk("k1", p), _mk("k2", p), _mk("k3", p)
+    x = _mk("x")
+    assert _reparent(x, p, 1).status_code == 200
+    assert client.get(f"/todos/{p}").json()["child_ids"] == [k1, x, k2, k3]
+    idx = [client.get(f"/todos/{i}").json()["order_idx"] for i in (k1, x, k2, k3)]
+    assert idx == sorted(idx) and len(set(idx)) == 4
+
+
+def test_reparent_to_top_level_at_index(db_setup):
+    a, b = _mk("a"), _mk("b")
+    c = _mk("c", b)
+    r = _reparent(c, None, 0)
+    assert r.status_code == 200 and r.json()["parent_id"] is None
+    assert [t["todo_id"] for t in client.get("/todos/root").json()] == [c, a, b]
+    assert client.get(f"/todos/{b}").json()["child_ids"] == []
+
+
+def test_reparent_within_same_parent_reorders(db_setup):
+    p = _mk("p")
+    k1, k2, k3 = _mk("k1", p), _mk("k2", p), _mk("k3", p)
+    assert _reparent(k3, p, 0).status_code == 200
+    assert client.get(f"/todos/{p}").json()["child_ids"] == [k3, k1, k2]
+
+
+def test_reparent_into_own_subtree_is_rejected(db_setup):
+    a = _mk("a")
+    b = _mk("b", a)
+    c = _mk("c", b)
+    assert _reparent(a, c).status_code == 400
+    assert _reparent(a, a).status_code == 400
+    assert client.get(f"/todos/{a}").json()["parent_id"] is None
+
+
+def test_reparent_to_missing_or_deleted_parent_is_404(db_setup):
+    a, b = _mk("a"), _mk("b")
+    assert _reparent(a, str(uuid.uuid4())).status_code == 404
+    client.delete(f"/todos/{b}")
+    assert _reparent(a, b).status_code == 404
+
+
+def test_reparent_respects_if_match(db_setup):
+    a, b = _mk("a"), _mk("b")
+    assert _reparent(b, a, headers={"If-Match": "9"}).status_code == 409
+    assert _reparent(b, a, headers={"If-Match": "1"}).status_code == 200

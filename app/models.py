@@ -23,6 +23,10 @@ class TodoUpdate(BaseModel):
 class TodoUpdateParent(BaseModel):
     parent_id: TodoId | None = Field(None)
 
+class TodoReparent(BaseModel):
+    parent_id: TodoId | None = Field(None)  # null moves to the top level
+    index: int | None = Field(None)         # position among the new siblings; null = last
+
 class TodoSplit(BaseModel):
     descriptions: list[str] = Field([])
     due_date: datetime.datetime | None = Field(None)

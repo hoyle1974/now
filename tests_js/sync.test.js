@@ -595,3 +595,91 @@ test("kick(true) sends even when the device claims to be offline", async () => {
   await h.engine.flush();
   assert.equal(h.calls.length, 1);
 });
+
+// ---- reparent (drag a todo under another parent) -------------------------
+
+function modelOf(...todos) {
+  const t = treeOf(...todos);
+  const model = Sync.createModel();
+  model.roots = t.roots; model.todosById = t.todosById;
+  return model;
+}
+const reparent = (model, id, parent_id, index = null) =>
+  Sync.applyOp(model, { kind: "reparent", target_id: id, payload: { parent_id, index } });
+
+test("applyOp reparent nests a root under another todo at an index", () => {
+  const model = modelOf(
+    todo("p", { child_ids: ["k1", "k2"] }),
+    todo("k1", { parent_id: "p", order_idx: 0 }), todo("k2", { parent_id: "p", order_idx: 1 }),
+    todo("x", { order_idx: 1 }),
+  );
+  model.roots = [model.todosById.get("p"), model.todosById.get("x")];
+  assert.equal(reparent(model, "x", "p", 1), true);
+  assert.deepEqual(model.todosById.get("p").child_ids, ["k1", "x", "k2"]);
+  assert.equal(model.todosById.get("x").parent_id, "p");
+  assert.deepEqual(["k1", "x", "k2"].map((i) => model.todosById.get(i).order_idx), [0, 1, 2]);
+  assert.deepEqual(model.roots.map((r) => r.todo_id), ["p"]);
+});
+
+test("applyOp reparent to the top level inserts among the roots", () => {
+  const model = modelOf(
+    todo("a", { order_idx: 0 }), todo("b", { order_idx: 1, child_ids: ["c"] }),
+    todo("c", { parent_id: "b", order_idx: 0 }),
+  );
+  assert.equal(reparent(model, "c", null, 0), true);
+  assert.deepEqual(model.roots.map((r) => r.todo_id), ["c", "a", "b"]);
+  assert.equal(model.todosById.get("c").parent_id, null);
+  assert.deepEqual(model.todosById.get("b").child_ids, []);
+  assert.deepEqual(model.roots.map((r) => r.order_idx), [0, 1, 2]);
+});
+
+test("applyOp reparent refuses a move into the todo's own subtree", () => {
+  const model = modelOf(
+    todo("a", { child_ids: ["b"] }), todo("b", { parent_id: "a", child_ids: ["c"] }),
+    todo("c", { parent_id: "b" }),
+  );
+  assert.equal(reparent(model, "a", "c"), false);
+  assert.equal(reparent(model, "a", "a"), false);
+  assert.equal(model.todosById.get("a").parent_id, null);
+});
+
+test("applyOp reparent refuses an unknown target or parent", () => {
+  const model = modelOf(todo("a"));
+  assert.equal(reparent(model, "zzz", null), false);
+  assert.equal(reparent(model, "a", "zzz"), false);
+});
+
+test("reparent is sent as PATCH .../reparent with If-Match", async () => {
+  const h = harness({ tree: treeOf(todo("p", { version: 3 }), todo("x", { version: 4 })), script: [
+    ok(todo("x", { version: 5, parent_id: "p", order_idx: 0 })),
+  ] });
+  h.engine.enqueue({ kind: "reparent", target_id: "x", payload: { parent_id: "p", index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].method, "PATCH");
+  assert.equal(h.calls[0].path, "/todos/x/reparent");
+  assert.deepEqual(h.calls[0].body, { parent_id: "p", index: 0 });
+  assert.equal(h.calls[0].headers["If-Match"], "4");
+  assert.equal(h.model.todosById.get("x").version, 5);
+});
+
+test("a temp parent id in a queued reparent is rewritten when the create lands", async () => {
+  const h = harness({ tree: treeOf(todo("x")), script: [
+    ok({ todo_id: "real1", version: 1, create_date: "x", order_idx: 0 }),
+    ok(todo("x", { version: 2, parent_id: "real1", order_idx: 0 })),
+  ] });
+  const tmp = h.engine.enqueue({ kind: "create", payload: { title: "p" } });
+  h.engine.enqueue({ kind: "reparent", target_id: "x", payload: { parent_id: tmp, index: null } });
+  await h.engine.flush();
+  assert.equal(h.calls[1].body.parent_id, "real1");
+});
+
+test("a 404 on reparent reloads instead of deleting the moved todo locally", async () => {
+  const fresh = treeOf(todo("x"));
+  const h = harness({ tree: treeOf(todo("p"), todo("x")), refetchTree: fresh, script: [
+    ok({ detail: "missing" }, 404),
+  ] });
+  h.engine.enqueue({ kind: "reparent", target_id: "x", payload: { parent_id: "p", index: null } });
+  await h.engine.flush();
+  assert.ok(h.model.todosById.has("x"));
+  assert.equal(h.model.todosById.get("x").parent_id, null);
+});

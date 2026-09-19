@@ -159,6 +159,24 @@
         else model.roots = sibs;
         return true;
       }
+      case "reparent": {
+        const node = model.todosById.get(id);
+        if (!node) return false;
+        const newParentId = payload.parent_id ?? null;
+        const newParent = newParentId === null ? null : model.todosById.get(newParentId);
+        if (newParentId !== null && !newParent) return false;
+        // Moving a todo into its own subtree would orphan it.
+        if (newParentId !== null && subtreeNodes(model, id).some((n) => n.todo_id === newParentId)) return false;
+        detach(model, node);
+        const sibs = (newParent ? sortedSiblings(model, newParent) : sortedRoots(model)).filter((s) => s !== node);
+        const at = payload.index == null ? sibs.length : Math.max(0, Math.min(payload.index, sibs.length));
+        sibs.splice(at, 0, node);
+        sibs.forEach((s, i) => { s.order_idx = i; });
+        node.parent_id = newParentId;
+        if (newParent) newParent.child_ids = sibs.map((s) => s.todo_id);
+        else model.roots = sibs;
+        return true;
+      }
       default:
         return false;
     }
@@ -201,6 +219,10 @@
       case "move":
         conditional();
         return { method: "PATCH", path: `/todos/${id}/move/${p.direction}`, headers };
+      case "reparent":
+        conditional();
+        return { method: "PATCH", path: `/todos/${id}/reparent`, headers,
+                 body: { parent_id: p.parent_id ?? null, index: p.index ?? null } };
       default:
         throw new Error("unknown op kind " + op.kind);
     }
@@ -308,7 +330,10 @@
 
     function remapId(tmp, real) {
       aliases.set(tmp, real);
-      for (const op of ops) if (op.target_id === tmp) op.target_id = real;
+      for (const op of ops) {
+        if (op.target_id === tmp) op.target_id = real;
+        if (op.payload && op.payload.parent_id === tmp) op.payload.parent_id = real;
+      }
 
       // Undo snapshots can hold the temporary id in several places: as their own
       // key, as a member, as a member's parent or child, or as the parent the
@@ -451,7 +476,8 @@
           break;
         }
         case "patch":
-        case "move": {
+        case "move":
+        case "reparent": {
           const node = model.todosById.get(op.target_id);
           if (node && body) node.version = body.version;
           break;
@@ -487,7 +513,7 @@
         return true;
       }
       if (code === 409) {
-        if (op.kind === "patch" || op.kind === "move") {
+        if (op.kind === "patch" || op.kind === "move" || op.kind === "reparent") {
           op.conflicts += 1;
           log("conflict", `${op.kind} #${op.conflicts}, server v${body && body.version}`);
           const node = model.todosById.get(op.target_id);
@@ -510,6 +536,15 @@
         dropHead(op);
         log("conflict", `${op.kind}: reloading from the server`);
         notice("info", "Changed on another device; reloaded.");
+        await refetchAndRebuild();
+        return true;
+      }
+      if (code === 404 && op.kind === "reparent") {
+        // Either the todo or its new parent is gone; the local model can't tell
+        // which, so reload rather than guess.
+        dropHead(op);
+        log("drop", "reparent: 404, reloading from the server");
+        notice("info", "Couldn't move that; reloaded.");
         await refetchAndRebuild();
         return true;
       }

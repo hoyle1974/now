@@ -301,6 +301,61 @@ def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> mode
     todo.order_idx = order_idx
     return todo
 
+class ReparentError(Exception):
+    """Raised for a move that can't be done: "missing" parent or a "cycle"."""
+    def __init__(self, kind: str):
+        super().__init__(kind)
+        self.kind = kind
+
+
+def reparent_todo(todo: models.Todo, parent_id: models.TodoId | None, index: int | None) -> models.Todo:
+    """Move a todo under another parent (or to the top level) at a position.
+
+    index is the position among the new siblings (None or past the end means
+    last). The new siblings are renumbered 0..n so the order is exact; only the
+    moved todo's version is bumped (order isn't content, as in reorder_todo).
+    Moving within the same parent is just a reorder to that index.
+    Raises ReparentError("missing") for an unknown/deleted parent and
+    ReparentError("cycle") for a move into the todo's own subtree.
+    """
+    global _todos_collection
+
+    new_parent = None if parent_id is None else str(parent_id)
+    moved_id = str(todo.todo_id)
+
+    # All reads first: Firestore rejects a read after a write.
+    if new_parent is not None:
+        # Walk up from the new parent: meeting the moved todo means a cycle.
+        seen = set()
+        cursor = new_parent
+        while cursor is not None:
+            if cursor == moved_id:
+                raise ReparentError("cycle")
+            if cursor in seen:
+                break
+            seen.add(cursor)
+            snap = _get(_todos_collection.document(cursor))
+            if not snap.exists or snap.to_dict().get("deleted", False):
+                raise ReparentError("missing")
+            cursor = snap.to_dict().get("parent_id")
+
+    siblings = [d for d in _sorted_by_order(_child_docs(new_parent)) if d["todo_id"] != moved_id]
+    position = len(siblings) if index is None else max(0, min(index, len(siblings)))
+    ids = [d["todo_id"] for d in siblings]
+    ids.insert(position, moved_id)
+    old_idx = {d["todo_id"]: d.get("order_idx") for d in siblings}
+
+    todo.version += 1
+    _update(_todos_collection.document(moved_id), {
+        "parent_id": new_parent, "order_idx": position, "version": todo.version})
+    for i, sid in enumerate(ids):
+        if sid != moved_id and old_idx.get(sid) != i:
+            _update(_todos_collection.document(sid), {"order_idx": i})
+
+    todo.parent_id = parent_id
+    todo.order_idx = position
+    return todo
+
 def _doc_to_todo_with_children(data: dict, include_deleted_children: bool = False) -> models.Todo:
     todo = db_firestore_helpers.doc_to_todo(data)
     todo.child_ids = _child_ids(str(todo.todo_id), include_deleted_children)
