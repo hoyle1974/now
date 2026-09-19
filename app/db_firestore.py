@@ -255,19 +255,81 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
     root_ref = _todos_collection.document(str(todo_id))
     root_data = _get(root_ref).to_dict()
 
+    # If any ancestor is deleted (or gone) the restored todo would stay
+    # invisible, so it goes to the top level instead.
+    parent_id = root_data.get("parent_id")
+    cursor, seen = parent_id, set()
+    while cursor is not None:
+        snap = _get(_todos_collection.document(cursor))
+        if not snap.exists or snap.to_dict().get("deleted", False) or cursor in seen:
+            parent_id = None
+            break
+        seen.add(cursor)
+        cursor = snap.to_dict().get("parent_id")
+
     order_idx = root_data.get("order_idx")
-    if order_idx is None:
-        order_idx = _next_order_idx(root_data.get("parent_id"))
+    if order_idx is None or parent_id != root_data.get("parent_id"):
+        order_idx = _next_order_idx(parent_id)
 
     child_ids = _child_ids(str(todo_id))  # reads must precede the write
 
     version = root_data.get("version", 1) + 1
-    fields = {"deleted": False, "version": version, "order_idx": order_idx}
+    fields = {"deleted": False, "version": version, "order_idx": order_idx,
+              "parent_id": parent_id}
     _update(root_ref, fields)
 
     restored = db_firestore_helpers.doc_to_todo({**root_data, **fields})
     restored.child_ids = child_ids
     return restored, [(str(todo_id), version)]
+
+def _stream_all():
+    tx = _tx.get()
+    return _todos_collection.stream() if tx is None else _todos_collection.stream(transaction=tx)
+
+def clear_completed() -> list[tuple[str, int]]:
+    """Soft-delete every done todo whose whole live subtree is done.
+
+    Only the topmost such todo of each subtree is flagged (like a normal
+    delete): its descendants stay unflagged and hidden, so undoing it brings
+    the subtree back intact. Done todos with an unfinished descendant are kept.
+    Returns [(todo_id, new_version)].
+    """
+    live: dict[str, dict] = {}
+    for doc in _stream_all():
+        data = doc.to_dict()
+        if not data.get("deleted", False):
+            live[data["todo_id"]] = data
+    children: dict[str | None, list[str]] = {}
+    for tid, data in live.items():
+        children.setdefault(data.get("parent_id"), []).append(tid)
+
+    all_done: dict[str, bool] = {}
+    def check(tid: str) -> bool:
+        if tid not in all_done:
+            all_done[tid] = False  # cycle guard
+            all_done[tid] = live[tid].get("done", False) and all(
+                [check(c) for c in children.get(tid, [])])
+        return all_done[tid]
+
+    cleared = []
+    pending = list(children.get(None, []))
+    while pending:
+        tid = pending.pop()
+        if check(tid):
+            data = live[tid]
+            version = data.get("version", 1) + 1
+            _update(_todos_collection.document(tid), {"deleted": True, "version": version})
+            cleared.append((tid, version))
+        else:
+            pending.extend(children.get(tid, []))
+    return cleared
+
+def get_trash(limit: int = 200) -> list[models.Todo]:
+    """Soft-deleted todos, newest created first (no delete timestamp is kept)."""
+    items = [db_firestore_helpers.doc_to_todo(d.to_dict())
+             for d in _todos_collection.where("deleted", "==", True).stream()]
+    items.sort(key=lambda t: (t.create_date, str(t.todo_id)), reverse=True)
+    return items[:limit]
 
 def update_todo(todo: models.Todo, bump_version: bool = True):
     """Update a todo and bump its version in place. Done state is per-todo; it

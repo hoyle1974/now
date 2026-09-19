@@ -141,6 +141,19 @@ def get_tree() -> dict:
     }
 
 
+@app.get("/todos/trash", response_model=None)
+def get_trash() -> dict:
+    """Soft-deleted todos, for the Trash view."""
+    return {"items": jsonable_encoder(db.get_trash())}
+
+@app.post("/todos/clear-completed", response_model=None)
+def clear_completed(x_txn_id: str | None = Header(None)) -> Response:
+    """Soft-delete every done todo whose whole subtree is done, in one transaction."""
+    def clear() -> tuple[int, dict | None]:
+        return 200, {"cleared": _affected(db.clear_completed())}
+
+    return _reply(*db.run_atomic(x_txn_id, clear))
+
 @app.get("/todos/{todo_id}", response_model=models.Todo)
 def get_todo(todo_id: uuid.UUID) -> models.Todo:
     todo =  db.get_todo(models.TodoId(todo_id))

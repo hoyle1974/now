@@ -133,9 +133,20 @@ firebase-tools); `conftest.py` refuses to run otherwise.
 
 ```bash
 scripts/test.sh                    # python (server + firestore layer)
-node --test tests_js/sync.test.js  # client sync engine
+node --test tests_js/*.test.js     # client sync engine, trash
 scripts/e2e.sh                     # engine vs. the running app + emulator
 ```
+
+## Clear completed and Trash
+
+- **Clear completed** (button under the list) is one outbox op,
+  `POST /todos/clear-completed`: in a single transaction it soft-deletes every
+  done todo whose whole subtree is done (only the topmost of each subtree is
+  flagged, so undoing it restores the subtree). Done todos with unfinished
+  descendants are kept. The toast has an Undo that queues an `undelete` per item.
+- **Trash** (footer link) lists `GET /todos/trash` and restores with the normal
+  `undelete` op. If an ancestor is also deleted, the todo is restored at the
+  top level so it doesn't stay invisible. Code: `web/trash.js`.
 
 ## Deploy
 

@@ -1332,3 +1332,99 @@ body[data-tab="next"] .composer {
   font: inherit; font-weight: 600; padding: 12px 24px; border-radius: 12px;
   border: 0; background: #007aff; color: #fff; cursor: pointer;
 }
+
+/* ---------- Clear completed + Trash ---------- */
+
+.list-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 16px 0 8px;
+}
+
+body[data-tab="next"] .list-footer,
+body[data-tab="trash"] .list-footer,
+body[data-tab="trash"] .composer {
+  display: none;
+}
+
+.footer-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--fill);
+  color: var(--label);
+  font: inherit;
+  font-size: 15px;
+}
+
+.footer-btn--quiet {
+  background: none;
+  color: var(--label-2);
+}
+
+.trash-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.trash-bar .next-caption {
+  margin: 0;
+}
+
+.trash-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.trash-list:empty {
+  display: none;
+}
+
+.trash-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 6px 8px 6px 14px;
+}
+
+.trash-row + .trash-row {
+  box-shadow: inset 0 0.5px 0 var(--separator);
+}
+
+.trash-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.trash-title.is-done {
+  color: var(--label-2);
+  text-decoration: line-through;
+}
+
+.trash-restore {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: none;
+  color: var(--accent, #007aff);
+  font: inherit;
+  font-size: 15px;
+}
+
+.trash-view .next-note {
+  color: var(--label-2);
+}

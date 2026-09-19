@@ -88,6 +88,31 @@
     return model.roots.slice().sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999));
   }
 
+  // Ids "Clear completed" would delete: done todos whose whole subtree is done.
+  // Only the topmost of each such subtree (it takes its descendants with it),
+  // mirroring the server (db_firestore.clear_completed).
+  function clearableIds(model) {
+    const memo = new Map();
+    const allDone = (node) => {
+      if (!memo.has(node.todo_id)) {
+        memo.set(node.todo_id, false);
+        memo.set(node.todo_id, !!node.done && node.child_ids.every((c) => {
+          const child = model.todosById.get(c);
+          return !child || allDone(child);
+        }));
+      }
+      return memo.get(node.todo_id);
+    };
+    const out = [];
+    const pending = model.roots.slice();
+    while (pending.length) {
+      const node = pending.pop();
+      if (allDone(node)) out.push(node.todo_id);
+      else node.child_ids.forEach((c) => { const n = model.todosById.get(c); if (n) pending.push(n); });
+    }
+    return out;
+  }
+
   // Apply an op to the local model. Returns false when it can't apply
   // (unknown target, move off the end of the list, ...).
   function applyOp(model, op) {
@@ -115,6 +140,12 @@
         const index = detach(model, node);
         model.trash.set(id, { nodes, parent_id: node.parent_id, index });
         nodes.forEach((n) => model.todosById.delete(n.todo_id));
+        return true;
+      }
+      case "clear_completed": {
+        const ids = clearableIds(model);
+        if (!ids.length) return false;
+        ids.forEach((cid) => applyOp(model, { kind: "delete", target_id: cid }));
         return true;
       }
       case "undelete": {
@@ -215,6 +246,8 @@
       case "delete":
         conditional();
         return { method: "DELETE", path: `/todos/${id}`, headers };
+      case "clear_completed":
+        return { method: "POST", path: "/todos/clear-completed", headers };
       case "undelete":
         // Undo of a delete we just made: nothing to be stale against.
         return { method: "PATCH", path: `/todos/${id}/undelete`, headers };
@@ -705,5 +738,5 @@
     };
   }
 
-  return { createModel, applyOp, buildRequest, createEngine, normalizeDue, isTmp };
+  return { createModel, applyOp, clearableIds, buildRequest, createEngine, normalizeDue, isTmp };
 });

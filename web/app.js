@@ -1475,11 +1475,12 @@ function setTab(tab) {
   }
   treeEl.hidden = tab !== "list";
   nextView.hidden = tab !== "next";
+  if (window.Trash) Trash.onTab(tab); // web/trash.js
   if (tab === "next") {
     renderNext();
     reportedFailure(refreshNext());
   }
-  window.scrollTo(0, scrollByTab[tab]);
+  window.scrollTo(0, scrollByTab[tab] || 0);
 }
 
 for (const btn of document.querySelectorAll(".segmented-btn")) {
