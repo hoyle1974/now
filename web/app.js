@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "14";
+const APP_VERSION = "15";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -419,20 +419,6 @@ function isUrgent(todo) {
   return daysUntil(todo.due_date) <= 0;
 }
 
-// Surfaces overdue/due-today items first within each sibling group (stable
-// otherwise via Array.sort), so opening the tree each day shows what needs
-// attention first without flattening or otherwise disturbing the underlying
-// parent/child structure.
-function sortByUrgency(todos) {
-  return [...todos].sort((a, b) => {
-    const aUrgent = isUrgent(a);
-    const bUrgent = isUrgent(b);
-    if (aUrgent !== bUrgent) return aUrgent ? -1 : 1;
-    if (aUrgent && bUrgent) return new Date(a.due_date) - new Date(b.due_date);
-    return 0;
-  });
-}
-
 // Descendant { total, done } counts for every node, computed once per render
 // in one memoized bottom-up pass rather than re-walking each parent's subtree
 // independently (which would revisit shared descendants once per ancestor).
@@ -708,9 +694,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     row.classList.add("is-focused");
   }
 
-  // Drag handle, only while this todo's siblings are being reordered
+  // Drag handle: always on top-level todos (when there is more than one to
+  // order), and on subtasks only while their parent is in reorder mode.
   let dragHandle = null;
-  if (todo.parent_id && String(todo.parent_id) === reorderParentId) {
+  const draggable = todo.parent_id
+    ? String(todo.parent_id) === reorderParentId
+    : model.roots.length > 1;
+  if (draggable) {
     dragHandle = document.createElement("button");
     dragHandle.type = "button";
     dragHandle.className = "todo-drag-handle";
@@ -1126,7 +1116,10 @@ function renderTree() {
     return;
   }
   const descendantCounts = computeDescendantCounts(model.todosById);
-  for (const root of sortByUrgency(model.roots)) {
+  // Manual order wins, as it does for subtasks. Same ordering the sync
+  // engine's move op counts steps against.
+  const roots = [...model.roots].sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999));
+  for (const root of roots) {
     treeEl.appendChild(renderNode(root, model.todosById, descendantCounts));
   }
   placeOpenMenu();
