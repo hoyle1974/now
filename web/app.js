@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "20";
+const APP_VERSION = "21";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -769,16 +769,9 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     row.classList.add("is-focused");
   }
 
-  // Drag handle, on every row: drop above/below another row to move there, or
+  // Long-press a row to drag it: drop above/below another row to move there, or
   // onto the middle of a row to make it a subtask of that row.
-  let dragHandle = null;
   if (model.todosById.size > 1) {
-    dragHandle = document.createElement("button");
-    dragHandle.type = "button";
-    dragHandle.className = "todo-drag-handle";
-    dragHandle.appendChild(icon("grip"));
-    dragHandle.setAttribute("aria-label", "Drag to move");
-
     // Hard press: the drag only starts after a long-press anywhere on the row
     // (so scrolling and taps are untouched). Moving before the threshold is a
     // scroll and cancels; when armed the row lifts (with a small buzz where
@@ -980,12 +973,8 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   trailing.appendChild(menuWrap);
 
-  // Assemble row: drag handle (if subtask), checkbox, body, trailing controls
-  if (dragHandle) {
-    row.append(dragHandle, checkboxHit, body, trailing);
-  } else {
-    row.append(checkboxHit, body, trailing);
-  }
+  // Assemble row: checkbox, body, trailing controls
+  row.append(checkboxHit, body, trailing);
   li.appendChild(row);
 
   // Attach swipe/tap interactions

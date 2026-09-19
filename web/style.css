@@ -451,40 +451,6 @@ svg {
   background: var(--fill);
 }
 
-.todo-drag-handle {
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  border-radius: 50%;
-  background: none;
-  color: var(--label-3);
-  cursor: grab;
-  flex: 0 0 auto;
-  transition: color 0.15s;
-  font-size: 30px;
-  font-weight: 400;
-  line-height: 1;
-  letter-spacing: 0;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-.todo-drag-handle svg {
-  width: 30px;
-  height: 30px;
-  stroke-width: 2.4;
-}
-
-.todo-drag-handle:active {
-  cursor: grabbing;
-  color: var(--accent);
-  background: var(--fill);
-}
-
 .todo-row {
   -webkit-touch-callout: none;
 }
