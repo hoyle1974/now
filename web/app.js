@@ -357,46 +357,30 @@ function animateReorder(list, mutate) {
   }
 }
 
-function attachReorderTarget(list) {
-  list.addEventListener("dragover", (e) => {
-    if (!dragState || dragState.list !== list) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = "move";
-
-    let target = e.target.closest("li");
-    while (target && target.parentElement !== list) {
-      target = target.parentElement.closest("li");
-    }
-    // Skip items mid-slide: their rect is moving, which would make the
-    // midpoint test flicker back and forth.
-    if (!target || target === dragState.li || animatingItems.has(target)) return;
-
-    const items = [...list.children];
-    const draggedIdx = items.indexOf(dragState.li);
-    const targetIdx = items.indexOf(target);
+function reorderAt(clientY) {
+  const { list, li } = dragState;
+  const items = [...list.children];
+  const draggedIdx = items.indexOf(li);
+  for (const target of items) {
+    if (target === li || animatingItems.has(target)) continue;
     const rect = target.getBoundingClientRect();
+    if (clientY < rect.top || clientY > rect.bottom) continue;
+    const targetIdx = items.indexOf(target);
     const midY = rect.top + rect.height / 2;
-
-    if (targetIdx > draggedIdx && e.clientY > midY) {
-      animateReorder(list, () => target.after(dragState.li));
-    } else if (targetIdx < draggedIdx && e.clientY < midY) {
-      animateReorder(list, () => target.before(dragState.li));
+    if (targetIdx > draggedIdx && clientY > midY) {
+      animateReorder(list, () => target.after(li));
+    } else if (targetIdx < draggedIdx && clientY < midY) {
+      animateReorder(list, () => target.before(li));
     }
-  });
-
-  list.addEventListener("drop", (e) => {
-    if (!dragState || dragState.list !== list) return;
-    e.preventDefault();
-    e.stopPropagation();
-    dragState.dropped = true;
-  });
+    return;
+  }
 }
 
 async function commitDrag() {
   const state = dragState;
   dragState = null;
   const delta = [...state.list.children].indexOf(state.li) - state.startIndex;
-  if (!state.dropped || delta === 0) {
+  if (delta === 0) {
     renderTree();
     return;
   }
@@ -416,20 +400,12 @@ function attachRowInteractions(row, todo) {
   let touchStartY = 0;
   let swiping = false;
 
-  let longPressTimer = null;
-
   row.addEventListener("touchstart", (e) => {
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
     swiping = false;
 
-    // Long-press the drag handle to start touch reordering
-    if (todo.parent_id && e.target.classList.contains("todo-drag-handle")) {
-      longPressTimer = setTimeout(() => {
-        row.classList.add("dragging");
-        row.style.opacity = "0.6";
-      }, 400);
-    }
+    if (e.target.closest(".todo-drag-handle")) touchStartX = 0;
   }, { passive: true });
 
   row.addEventListener("touchmove", (e) => {
@@ -450,7 +426,7 @@ function attachRowInteractions(row, todo) {
   }, { passive: true });
 
   row.addEventListener("touchend", (e) => {
-    clearTimeout(longPressTimer);
+    if (!touchStartX) return;
 
     const isDragging = row.classList.contains("dragging");
     const deltaX = e.changedTouches[0].clientX - touchStartX;
@@ -550,57 +526,44 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     dragHandle.className = "todo-drag-handle";
     dragHandle.textContent = "≡";
     dragHandle.setAttribute("aria-label", "Drag to reorder");
-    dragHandle.draggable = true;
 
-    dragHandle.addEventListener("dragstart", (e) => {
-      e.dataTransfer.effectAllowed = "move";
-      e.dataTransfer.setData("text/plain", String(todo.todo_id));
+    dragHandle.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      dragHandle.setPointerCapture(e.pointerId);
+      const rowRect = row.getBoundingClientRect();
+      const grabY = e.clientY - rowRect.top;
       dragState = {
         todoId: String(todo.todo_id),
         li,
         list: li.parentElement,
         startIndex: [...li.parentElement.children].indexOf(li),
-        dropped: false,
       };
       row.classList.add("dragging");
 
-      // Create visual ghost that follows the cursor
-      const dragGhost = row.cloneNode(true);
-      dragGhost.id = "drag-ghost-" + Math.random();
-      dragGhost.style.cssText = `
-        position: fixed;
-        pointer-events: none;
-        opacity: 0.8;
-        z-index: 10000;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.2);
-        background: var(--card);
-        border: 2px solid var(--accent);
-        border-radius: 12px;
-        width: 300px;
-        left: 0;
-        top: 0;
-      `;
-      document.body.appendChild(dragGhost);
+      const ghost = row.cloneNode(true);
+      ghost.classList.remove("dragging");
+      ghost.style.cssText = `position:fixed;left:${rowRect.left}px;top:0;width:${rowRect.width}px;
+        pointer-events:none;z-index:10000;background:var(--card);border-radius:12px;
+        box-shadow:0 8px 24px rgba(0,0,0,0.2);will-change:transform;
+        transform:translate3d(0,${rowRect.top}px,0);`;
+      document.body.appendChild(ghost);
 
-      // Update ghost position on drag
-      const updateGhost = (moveEvent) => {
-        dragGhost.style.left = (moveEvent.clientX - 150) + 'px';
-        dragGhost.style.top = (moveEvent.clientY - 30) + 'px';
+      const onMove = (m) => {
+        ghost.style.transform = `translate3d(0,${m.clientY - grabY}px,0)`;
+        reorderAt(m.clientY);
       };
-
-      document.addEventListener("dragover", updateGhost);
-
-      // Cleanup on dragend
-      const cleanup = () => {
-        dragGhost.remove();
-        document.removeEventListener("dragover", updateGhost);
+      const onEnd = () => {
+        dragHandle.removeEventListener("pointermove", onMove);
+        dragHandle.removeEventListener("pointerup", onEnd);
+        dragHandle.removeEventListener("pointercancel", onEnd);
+        ghost.remove();
+        row.classList.remove("dragging");
+        if (dragState) reportedFailure(commitDrag());
       };
-      dragHandle.addEventListener("dragend", cleanup, { once: true });
-    });
-
-    dragHandle.addEventListener("dragend", () => {
-      row.classList.remove("dragging");
-      if (dragState) reportedFailure(commitDrag());
+      dragHandle.addEventListener("pointermove", onMove);
+      dragHandle.addEventListener("pointerup", onEnd);
+      dragHandle.addEventListener("pointercancel", onEnd);
     });
   }
 
@@ -744,8 +707,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     for (const child of children) {
       childList.appendChild(renderNode(child, todosById, descendantCounts, depth + 1));
     }
-    attachReorderTarget(childList);
-    li.appendChild(childList);
+      li.appendChild(childList);
   }
 
   return li;
