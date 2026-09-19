@@ -73,6 +73,16 @@ never waits on the network.
   patch skips the `If-Match` check and the version bump (last write wins, no
   conflicts with content edits) but still bumps the revision, so other windows
   notice it.
+- **Color, links, dependencies:** each todo has `color` (one of red, orange,
+  yellow, green, teal, blue, purple, pink, or null), `links` (up to 20 of
+  `{url, label|null}`, http/https only), `blocked_by` and `references` (lists of
+  todo ids, up to 50). All are set via `PATCH /todos/{id}` (lists replace the
+  whole value; `color: null` clears), are content edits (`If-Match`, version
+  bump) and default to empty on older docs. Ids must exist and not be the todo
+  itself (400 otherwise); `blocked_by` must stay acyclic (400). Ids of deleted
+  todos are kept (trash is restorable) and simply ignored when computing
+  `blocked`, a derived read-only boolean that `GET /todos/tree` (only) adds:
+  true if any `blocked_by` todo is live and not done.
 - **Ordering and nesting:** every todo, roots included, has an `order_idx` and is
   shown in that order. Every row has a drag handle. Dropping above or below a
   row moves the todo next to it; dropping on the middle of a row makes it that

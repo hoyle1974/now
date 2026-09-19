@@ -163,6 +163,19 @@ def get_todo(todo_id: uuid.UUID) -> models.Todo:
 
     return todo
 
+def _check_ids(todo: models.Todo, name: str, ids: list[models.TodoId]) -> None:
+    """Every id must exist (trashed ones count) and not be the todo itself;
+    blocked_by must also stay acyclic. Reads only, so safe before the write."""
+    strs = [str(i) for i in ids]
+    if str(todo.todo_id) in strs:
+        raise HTTPException(400, f"{name} cannot contain the todo itself")
+    docs = db.get_links_graph_docs(strs)
+    missing = [i for i, d in docs.items() if d is None]
+    if missing:
+        raise HTTPException(400, f"{name}: unknown todo id {missing[0]}")
+    if name == "blocked_by" and db.blocked_by_would_cycle(str(todo.todo_id), strs):
+        raise HTTPException(400, "blocked_by would create a cycle")
+
 @app.patch("/todos/{todo_id}", response_model=None)
 def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
@@ -187,6 +200,15 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
         if "repeat" in body.model_fields_set:
             # An explicit null clears the rule; omitting the field leaves it alone.
             todo.repeat = body.repeat
+        if "color" in body.model_fields_set:
+            todo.color = body.color
+        if body.links is not None:
+            todo.links = body.links
+        for name in ("blocked_by", "references"):
+            ids = getattr(body, name)
+            if ids is not None:
+                _check_ids(todo, name, ids)
+                setattr(todo, name, ids)
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
