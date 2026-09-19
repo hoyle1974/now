@@ -25,7 +25,7 @@
   --radius-card: 16px;
   --radius-control: 12px;
   --row-min: 52px;
-  --indent: 36px;
+  --indent: 14px;
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
 
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text",
@@ -469,7 +469,6 @@ svg {
   font-weight: 400;
   line-height: 1;
   letter-spacing: 0;
-  touch-action: none;
   -webkit-user-select: none;
   user-select: none;
 }
@@ -484,6 +483,16 @@ svg {
   cursor: grabbing;
   color: var(--accent);
   background: var(--fill);
+}
+
+.todo-row {
+  -webkit-touch-callout: none;
+}
+
+.todo-row.armed,
+.todo-row.dragging {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 .todo-row.dragging {
@@ -602,7 +611,7 @@ svg {
 /* ---------- Inline editors ---------- */
 
 .sheet {
-  margin: 0 12px 12px 54px;
+  margin: 0 8px 12px;
   padding: 12px;
   background: var(--fill);
   border-radius: var(--radius-control);

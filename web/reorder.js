@@ -61,5 +61,30 @@
     return { parent_id: parentId, index };
   }
 
-  return { planDrop, zoneFor };
+  // Long-press arming: onArm fires once the pointer has stayed within `slop`
+  // px of where it went down for `delay` ms. Moving further (a scroll) or
+  // releasing first cancels. Timer functions are injectable for tests.
+  function longPress(onArm, opts = {}) {
+    const delay = opts.delay ?? 350;
+    const slop = opts.slop ?? 8;
+    const set = opts.setTimeout || ((f, ms) => setTimeout(f, ms));
+    const clear = opts.clearTimeout || ((id) => clearTimeout(id));
+    let timer = null, x0 = 0, y0 = 0;
+    const press = {
+      armed: false,
+      start(x, y) {
+        press.end();
+        x0 = x; y0 = y;
+        timer = set(() => { timer = null; press.armed = true; onArm(); }, delay);
+      },
+      move(x, y) {
+        if (timer !== null && Math.hypot(x - x0, y - y0) > slop) press.cancel();
+      },
+      cancel() { if (timer !== null) { clear(timer); timer = null; } },
+      end() { press.cancel(); press.armed = false; },
+    };
+    return press;
+  }
+
+  return { planDrop, zoneFor, longPress };
 });
