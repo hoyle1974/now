@@ -1,0 +1,78 @@
+import pytest
+from fastapi.testclient import TestClient
+from app.main import app
+from app import db
+
+c = TestClient(app)
+
+@pytest.fixture(autouse=True)
+def db_setup():
+    db.init()
+    for name in ("todos", "txn_log", "meta"):
+        for doc in db.get_conn().collection(name).stream():
+            doc.reference.delete()
+    yield
+    db.teardown()
+
+def mk(title="t"):
+    return c.post("/todos", json={"title": title}).json()
+
+def patch(t, **body):
+    return c.patch(f"/todos/{t['todo_id']}", json=body)
+
+def test_defaults():
+    t = mk()
+    assert t["color"] is None and t["links"] == [] and t["blocked_by"] == [] and t["references"] == []
+
+def test_color_set_clear_invalid():
+    t = mk()
+    assert patch(t, color="teal").json()["color"] == "teal"
+    assert c.get(f"/todos/{t['todo_id']}").json()["color"] == "teal"
+    assert patch(t, color=None).json()["color"] is None
+    assert patch(t, color="mauve").status_code == 422
+
+def test_links():
+    t = mk()
+    r = patch(t, links=[{"url": "https://a.com/x", "label": "A"}, {"url": "http://b.org"}])
+    assert r.json()["links"] == [{"url": "https://a.com/x", "label": "A"}, {"url": "http://b.org", "label": None}]
+    assert patch(t, links=[{"url": "javascript:alert(1)"}]).status_code == 422
+    assert patch(t, links=[{"url": "ftp://x.com"}]).status_code == 422
+    assert patch(t, links=[{"url": "https://a.com"}] * 21).status_code == 422
+    assert patch(t, links=[]).json()["links"] == []
+
+def test_refs_validation():
+    a, b = mk(), mk()
+    assert patch(a, references=[a["todo_id"]]).status_code == 400
+    assert patch(a, blocked_by=[a["todo_id"]]).status_code == 400
+    assert patch(a, references=["00000000-0000-4000-8000-000000000000"]).status_code == 400
+    assert patch(a, references=[b["todo_id"], b["todo_id"]]).json()["references"] == [b["todo_id"]]
+    assert patch(a, blocked_by=[b["todo_id"]]).status_code == 200
+    assert patch(b, blocked_by=[a["todo_id"]]).status_code == 400
+    x, y, z = mk(), mk(), mk()
+    patch(x, blocked_by=[y["todo_id"]])
+    patch(y, blocked_by=[z["todo_id"]])
+    assert patch(z, blocked_by=[x["todo_id"]]).status_code == 400
+    assert patch(b, references=[a["todo_id"]]).status_code == 200  # refs may be mutual
+
+def test_blocked_derived_in_tree():
+    a, b = mk(), mk()
+    patch(a, blocked_by=[b["todo_id"]])
+    def node():
+        return c.get("/todos/tree").json()["todosById"][a["todo_id"]]
+    assert node()["blocked"] is True
+    patch(b, done=True)
+    assert node()["blocked"] is False
+    patch(b, done=False)
+    assert node()["blocked"] is True
+    c.delete(f"/todos/{b['todo_id']}")
+    assert node()["blocked"] is False
+    assert node()["blocked_by"] == [b["todo_id"]]  # id kept
+    c.patch(f"/todos/{b['todo_id']}/undelete")
+    assert node()["blocked"] is True
+
+def test_if_match_and_version_bump():
+    t = mk()
+    r = c.patch(f"/todos/{t['todo_id']}", json={"color": "red"}, headers={"If-Match": "99"})
+    assert r.status_code == 409
+    r = c.patch(f"/todos/{t['todo_id']}", json={"color": "red"}, headers={"If-Match": str(t["version"])})
+    assert r.json()["version"] == t["version"] + 1

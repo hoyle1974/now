@@ -3,11 +3,41 @@ from pydantic import BaseModel,Field
 from uuid import uuid4
 import uuid
 import datetime
+from typing import Literal
+from urllib.parse import urlparse
+from pydantic import field_validator
 
 from pydantic import RootModel
 class TodoId(RootModel[uuid.UUID]):
     def __str__(self) -> str:
         return str(self.root)
+
+COLORS = ("red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
+Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
+MAX_LINKS = 20
+MAX_URL_LEN = 2048
+MAX_LABEL_LEN = 200
+MAX_REFS = 50
+
+class Link(BaseModel):
+    url: str
+    label: str | None = Field(None)
+
+    @field_validator("url")
+    @classmethod
+    def _check_url(cls, v: str) -> str:
+        v = v.strip()
+        u = urlparse(v)
+        if len(v) > MAX_URL_LEN or u.scheme not in ("http", "https") or not u.netloc:
+            raise ValueError("url must be an http(s) URL under 2048 chars")
+        return v
+
+    @field_validator("label")
+    @classmethod
+    def _check_label(cls, v: str | None) -> str | None:
+        if v is not None and len(v) > MAX_LABEL_LEN:
+            raise ValueError("label too long")
+        return v
 
 class TodoCreate(BaseModel):
     title: str
@@ -19,6 +49,27 @@ class TodoUpdate(BaseModel):
     due_date: datetime.datetime | None = Field(None)
     deleted: bool | None = Field(None)
     collapsed: bool | None = Field(None)
+    color: Color | None = Field(None)          # explicit null clears
+    links: list[Link] | None = Field(None)     # replaces the whole list
+    blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
+    references: list[TodoId] | None = Field(None)  # replaces the whole list
+
+    @field_validator("links")
+    @classmethod
+    def _cap_links(cls, v):
+        if v is not None and len(v) > MAX_LINKS:
+            raise ValueError(f"at most {MAX_LINKS} links")
+        return v
+
+    @field_validator("blocked_by", "references")
+    @classmethod
+    def _dedupe_ids(cls, v):
+        if v is None:
+            return v
+        out = list(dict.fromkeys(str(i) for i in v))
+        if len(out) > MAX_REFS:
+            raise ValueError(f"at most {MAX_REFS} ids")
+        return [TodoId(uuid.UUID(i)) for i in out]
 
 class TodoUpdateParent(BaseModel):
     parent_id: TodoId | None = Field(None)
@@ -43,3 +94,8 @@ class Todo(BaseModel):
     deleted: bool = Field(False)
     collapsed: bool = Field(False)
     version: int = Field(1)
+    color: Color | None = Field(None)
+    links: list[Link] = Field([])
+    blocked_by: list[TodoId] = Field([])
+    references: list[TodoId] = Field([])
+    blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree

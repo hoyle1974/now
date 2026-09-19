@@ -393,6 +393,9 @@ def get_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
         data = doc.to_dict()
         if not data.get("deleted", False):
             live[data["todo_id"]] = db_firestore_helpers.doc_to_todo(data)
+    # Derived flag. Ids of missing/deleted todos are simply ignored.
+    for todo in live.values():
+        todo.blocked = any(str(b) in live and not live[str(b)].done for b in todo.blocked_by)
 
     children: dict[str | None, list[models.Todo]] = {}
     for todo in live.values():
@@ -464,3 +467,26 @@ def split_into_children(todo: models.Todo, descriptions: list[str], due_date=Non
     _update(_todos_collection.document(str(todo.todo_id)), {"version": todo.version})
     todo.child_ids = list(todo.child_ids) + new_ids
     return todo, affected
+
+
+def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
+    """Raw docs (deleted or not) for the given ids; None where the id doesn't exist."""
+    return {i: (lambda s: s.to_dict() if s.exists else None)(_get(_todos_collection.document(i)))
+            for i in todo_ids}
+
+def blocked_by_would_cycle(todo_id: str, new_blockers: list[str]) -> bool:
+    """True if making todo_id blocked by new_blockers closes a loop, i.e. one of
+    them (transitively, through blocked_by, deleted todos included) is blocked by todo_id."""
+    seen: set[str] = set()
+    stack = list(new_blockers)
+    while stack:
+        cur = stack.pop()
+        if cur == todo_id:
+            return True
+        if cur in seen:
+            continue
+        seen.add(cur)
+        doc = get_links_graph_docs([cur])[cur]
+        if doc:
+            stack.extend(doc.get("blocked_by") or [])
+    return False
