@@ -84,6 +84,10 @@
       .sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999));
   }
 
+  function sortedRoots(model) {
+    return model.roots.slice().sort((a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999));
+  }
+
   // Apply an op to the local model. Returns false when it can't apply
   // (unknown target, move off the end of the list, ...).
   function applyOp(model, op) {
@@ -140,9 +144,10 @@
       }
       case "move": {
         const node = model.todosById.get(id);
-        const parent = node && node.parent_id ? model.todosById.get(node.parent_id) : null;
-        if (!parent) return false;
-        const sibs = sortedSiblings(model, parent);
+        if (!node) return false;
+        const parent = node.parent_id ? model.todosById.get(node.parent_id) : null;
+        if (node.parent_id && !parent) return false;
+        const sibs = parent ? sortedSiblings(model, parent) : sortedRoots(model);
         if (sibs.length < 2) return false;
         const pos = sibs.indexOf(node);
         const to = payload.direction === "up" ? pos - 1 : pos + 1;
@@ -150,7 +155,8 @@
         sibs.splice(pos, 1);
         sibs.splice(to, 0, node);
         sibs.forEach((s, i) => { s.order_idx = i; });
-        parent.child_ids = sibs.map((s) => s.todo_id);
+        if (parent) parent.child_ids = sibs.map((s) => s.todo_id);
+        else model.roots = sibs;
         return true;
       }
       default:
@@ -213,6 +219,9 @@
     const timers = opts.timers || { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) };
     const random = opts.random || Math.random;
     const uuid = opts.uuid || defaultUuid;
+    // navigator.onLine can't be trusted to say "yes", but a "no" is reliable
+    // enough to stop burning retries; a manual kick(true) overrides it.
+    const isOnline = opts.isOnline || (() => true);
 
     let ops = [];
     const aliases = new Map();
@@ -226,28 +235,46 @@
     // that another window has written since (see observeRev / noteRemoteRev).
     let knownRev = null;
     let stale = false;
+    // True while the outbox can't be written to device storage: edits still
+    // sync, but would be lost if the page were closed first.
+    let saveFailed = false;
+    // Holding the outbox because the device is offline (no retry timer runs).
+    let parked = false;
+    let forceOnline = false;
     let saveChain = Promise.resolve();
     const waiters = [];
 
     // -- persistence / status
     function persist() {
       const snapshot = JSON.parse(JSON.stringify(ops));
-      saveChain = saveChain.then(() => store.save(snapshot)).catch(() => {});
+      saveChain = saveChain.then(() => store.save(snapshot)).then(() => {
+        if (saveFailed) {
+          saveFailed = false;
+          emitStatus();
+        }
+      }, (e) => {
+        log("save-fail", e && e.message ? e.message : String(e));
+        if (!saveFailed) {
+          saveFailed = true;
+          notice("error", "Couldn't save your edits on this device. Keep this page open until they sync.");
+        }
+        emitStatus();
+      });
       return saveChain;
     }
 
     function status() {
       let state = "synced";
-      if (backoffTimer !== null) state = "offline";
+      if (backoffTimer !== null || parked) state = "offline";
       else if (ops.length) state = "syncing";
       else if (lastError) state = "error";
-      return { state, pending: ops.length };
+      return { state, pending: ops.length, unsaved: saveFailed && ops.length > 0 };
     }
 
     function emitStatus() { onStatus(status()); }
 
     function settleIfIdle() {
-      if (!running && (ops.length === 0 || backoffTimer !== null)) {
+      if (!running && (ops.length === 0 || backoffTimer !== null || parked)) {
         waiters.splice(0).forEach((resolve) => resolve());
       }
     }
@@ -283,13 +310,21 @@
       aliases.set(tmp, real);
       for (const op of ops) if (op.target_id === tmp) op.target_id = real;
 
+      // Undo snapshots can hold the temporary id in several places: as their own
+      // key, as a member, as a member's parent or child, or as the parent the
+      // snapshot would be restored under.
       const trashed = model.trash.get(tmp);
       if (trashed) {
-        // Deleted before its create landed: keep the undo snapshot under the real id.
         model.trash.delete(tmp);
         model.trash.set(real, trashed);
-        trashed.nodes[0].todo_id = real;
-        for (const n of trashed.nodes.slice(1)) if (n.parent_id === tmp) n.parent_id = real;
+      }
+      for (const snap of model.trash.values()) {
+        if (snap.parent_id === tmp) snap.parent_id = real;
+        for (const n of snap.nodes) {
+          if (n.todo_id === tmp) n.todo_id = real;
+          if (n.parent_id === tmp) n.parent_id = real;
+          n.child_ids = n.child_ids.map((c) => (c === tmp ? real : c));
+        }
       }
       const node = model.todosById.get(tmp);
       if (node) {
@@ -306,7 +341,8 @@
           model.todosById.delete(tmp);
         } else {
           const list = node.parent_id ? model.todosById.get(node.parent_id)?.child_ids : null;
-          if (list) list[list.indexOf(tmp)] = real;
+          const at = list ? list.indexOf(tmp) : -1;
+          if (at >= 0) list[at] = real;
           model.todosById.delete(tmp);
           node.todo_id = real;
           model.todosById.set(real, node);
@@ -511,8 +547,18 @@
     async function run() {
       if (running || backoffTimer !== null) return;
       running = true;
+      if (!ops.length) parked = false;
       try {
         while (ops.length) {
+          if (!forceOnline && !isOnline()) {
+            if (!parked) {
+              parked = true;
+              log("offline", `holding ${ops.length} edit(s) until the device is online`);
+              emitStatus();
+            }
+            break;
+          }
+          parked = false;
           const op = ops[0];
           if (op.kind !== "create" && isTmp(op.target_id)) {
             // Its parent create/split never landed, so there is nothing to target.
@@ -540,13 +586,15 @@
         }
       } finally {
         running = false;
+        forceOnline = false;
         emitStatus();
         settleIfIdle();
       }
     }
 
     // -- public
-    function kick() {
+    function kick(force = false) {
+      if (force) forceOnline = true;
       if (backoffTimer !== null) {
         timers.clearTimeout(backoffTimer);
         backoffTimer = null;

@@ -1,13 +1,13 @@
 # now — A Personal Todo App
 
-A minimal todo app built with **FastAPI + server-rendered Jinja2 HTML** + **SQLite** (migrating to **Firestore** on GCP CloudRun).
+A minimal todo app built with **FastAPI** + a vanilla-JS frontend, backed by **Firestore** on GCP Cloud Run.
 
 Designed as a learning project, but simple enough to actually use day-to-day.
 
 ## Stack
 
 - **Backend:** FastAPI + Jinja2 (server-rendered HTML, no separate JS frontend)
-- **Database:** SQLite (current) → Firestore (planned)
+- **Database:** Firestore (tests run against the emulator: `scripts/test.sh`)
 - **Deployment:** Local dev → GCP CloudRun + Firestore
 
 ## Setup
@@ -24,7 +24,7 @@ Server runs at `http://localhost:8000`
 ## What's here
 
 - `app/main.py` — FastAPI app with routes and Jinja2 templating
-- `app/db.py` — SQLite connection and schema (will migrate to Firestore)
+- `app/db.py`, `app/db_firestore.py` — Firestore data layer
 - `templates/` — Jinja2 templates for UI
 - `static/` — CSS/JS and other assets
 - `web/` — Frontend JavaScript for drag-and-drop and interactions

@@ -97,7 +97,7 @@ The sections above were written against SQLite; `now` runs on Firestore, so the 
 - **`txn_log`** documents hold `{status, response_json, created_at}`. They are pruned on startup after 24 hours (`db.prune_txn_log`).
 - **Root ordering:** roots have no `order_idx` and Firestore returns them by random document id, so roots are sorted by `create_date`. That keeps a new todo where the optimistic UI put it after a refresh.
 - **Reparenting** a todo to a parent that doesn't exist now returns 404 (SQLite got this from a foreign key).
-- **The SQLite backend (`db_sqlite3.py`) does not implement this contract** (no `run_atomic`, versions, or `affected` results) and can't be swapped back in without porting it.
+- **The SQLite backend has since been removed**; Firestore is the only backend.
 - **Testing** runs against the Firestore emulator only: `scripts/test.sh` (pytest) and `scripts/e2e.sh` (sync engine vs. the running app). `conftest.py` refuses to run without `FIRESTORE_EMULATOR_HOST`, since this machine has real credentials.
 
 ## Detecting writes from other windows

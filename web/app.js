@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "12";
+const APP_VERSION = "13";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -123,9 +123,9 @@ function renderSyncStatus(st) {
   let dataState = state;
   let text;
   if (state === "syncing") {
-    text = `Syncing ${pending}…`;
+    text = `Syncing ${pending}…` + (engineStatus.unsaved ? " (not saved on device)" : "");
   } else if (state === "offline") {
-    text = `Offline · ${pending} pending`;
+    text = `Offline · ${pending} pending` + (engineStatus.unsaved ? " (not saved on device)" : "");
   } else if (state === "error") {
     text = "Sync error";
   } else if (phase === "checking") {
@@ -179,6 +179,7 @@ const engine = Sync.createEngine({
   },
   onNotice: showNotice,
   onLog: logEvent,
+  isOnline: () => navigator.onLine !== false,
   onRemap: (tmp, real) => {
     // Ids the UI keeps state under change when the server assigns real ones.
     if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
@@ -606,7 +607,7 @@ function attachRowInteractions(row, todo) {
     const deltaY = e.changedTouches[0].clientY - touchStartY;
 
     // Handle drag reordering (vertical movement while dragging)
-    if (isDragging && todo.parent_id && Math.abs(deltaY) > 30) {
+    if (isDragging && Math.abs(deltaY) > 30) {
       row.classList.remove("dragging");
       row.style.opacity = "1";
       const direction = deltaY > 0 ? "down" : "up";
@@ -836,13 +837,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
       }));
     }
 
-    // Add move up/down for subtasks (has parent)
-    if (todo.parent_id) {
-      menu.append(
-        menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
-        menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
-      );
-    }
+    menu.append(
+      menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
+      menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
+    );
 
     menu.append(
       menuItem(
@@ -1185,6 +1183,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     day: "numeric",
   });
   renderSyncStatus(engine.status());
+  // Ask the browser not to evict the outbox under storage pressure.
+  try { navigator.storage?.persist?.(); } catch (e) { /* best effort */ }
   await engine.load();
   await reportedFailure(loadAndRender());
   engine.kick();
@@ -1229,6 +1229,7 @@ document.getElementById("todo-tree").addEventListener("focusout", () => {
 // Tapping the status pill drains the outbox, then pulls the latest from the
 // server (the way to pick up changes made on another device).
 document.getElementById("sync-status").addEventListener("click", async () => {
+  engine.kick(true); // navigator.onLine can be wrong; let a manual tap try anyway
   await engine.flush();
   if (engine.pending() === 0) {
     await reportedFailure(loadAndRender());

@@ -99,19 +99,7 @@ def get_rev() -> dict:
     return {"rev": db.get_rev()}
 
 def _load_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
-    roots = db.get_root_todos()
-    todosById: dict[str, models.Todo] = {}
-
-    def collect_tree(todo):
-        todosById[str(todo.todo_id)] = todo
-        for child_id in todo.child_ids:
-            child = db.get_todo(child_id)
-            if child:
-                collect_tree(child)
-
-    for root in roots:
-        collect_tree(root)
-    return roots, todosById
+    return db.get_tree()
 
 @app.get("/todos/next", response_model=None)
 def get_next_up(limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
@@ -147,6 +135,12 @@ def get_todo(todo_id: uuid.UUID) -> models.Todo:
 @app.patch("/todos/{todo_id}", response_model=None)
 def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    # Collapsing is view state: last write wins, so it skips the If-Match
+    # check and doesn't bump the version (no conflicts with content edits).
+    view_only = body.model_fields_set == {"collapsed"}
+    if view_only:
+        if_match = None
+
     def action(todo: models.Todo) -> dict:
         if body.title is not None:
             todo.title = body.title
@@ -162,11 +156,6 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
-    # Collapsing is view state: last write wins, so it skips the If-Match
-    # check and doesn't bump the version (no conflicts with content edits).
-    view_only = body.model_fields_set == {"collapsed"}
-    if view_only:
-        if_match = None
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 @app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=None)
@@ -223,8 +212,6 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
     def action(todo: models.Todo) -> dict:
-        if todo.parent_id is None:
-            raise HTTPException(404, "todo not found or has no parent")
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except Exception as e:

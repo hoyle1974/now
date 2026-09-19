@@ -28,7 +28,8 @@ function memoryStore() {
 const ok = (body, status = 200, revs = {}) => () => Promise.resolve({ status, body, ...revs });
 const netFail = () => () => Promise.reject(new Error("network"));
 
-function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
+function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails = false } = {}) {
+  const net = { online: true };
   const model = Sync.createModel();
   model.roots = tree.roots;
   model.todosById = tree.todosById;
@@ -40,8 +41,9 @@ function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
   let refetches = 0;
   let n = 0;
   const store = memoryStore();
+  if (saveFails) store.save = async () => { throw new Error("quota"); };
   const engine = Sync.createEngine({
-    model, store,
+    model, store, isOnline: () => net.online,
     send: (req) => {
       calls.push(req);
       const next = script.shift();
@@ -61,7 +63,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
     uuid: () => "u" + (++n),
   });
   const fire = () => { const t = timers.filter((x) => x.live).pop(); t.live = false; t.fn(); };
-  return { model, engine, calls, notices, logs, remaps, timers, store, fire, get refetches() { return refetches; } };
+  return { net, model, engine, calls, notices, logs, remaps, timers, store, fire, get refetches() { return refetches; } };
 }
 
 // ---- 1. local application ------------------------------------------------
@@ -526,4 +528,70 @@ test("collapsed mixed with a content edit stays conditional", async () => {
   await h.engine.flush();
   assert.deepEqual(h.calls[0].body, { collapsed: true, done: true });
   assert.equal(h.calls[0].headers["If-Match"], "4");
+});
+
+// ---- roots, remap holes, storage failure, offline -----------------------
+
+test("applyOp move reorders roots too", () => {
+  const t = treeOf(todo("a"), todo("b"), todo("c"));
+  const model = Sync.createModel();
+  model.roots = t.roots; model.todosById = t.todosById;
+  assert.equal(Sync.applyOp(model, { kind: "move", target_id: "c", payload: { direction: "up" } }), true);
+  assert.deepEqual(model.roots.map((r) => r.todo_id), ["a", "c", "b"]);
+  assert.equal(Sync.applyOp(model, { kind: "move", target_id: "a", payload: { direction: "up" } }), false);
+});
+
+test("remap fixes undo snapshots that reference the temp id", async () => {
+  const h = harness({ script: [ok({ todo_id: "real1", version: 1, create_date: "x", order_idx: 0 })] });
+  h.net.online = false;
+  const tmp = h.engine.enqueue({ kind: "create", payload: { title: "p" } });
+  h.engine.enqueue({ kind: "split", target_id: tmp, payload: { descriptions: ["c"] } });
+  const child = h.model.todosById.get(tmp).child_ids[0];
+  h.engine.enqueue({ kind: "delete", target_id: child });      // snapshot whose parent is tmp
+  const snap = h.model.trash.get(child);
+  assert.equal(snap.parent_id, tmp);
+  h.net.online = true;
+  h.engine.kick();
+  await h.engine.flush();
+  assert.equal(snap.parent_id, "real1");
+});
+
+test("a save failure is reported once and cleared when a save succeeds", async () => {
+  const h = harness({ saveFails: true });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "create", payload: { title: "x" } });
+  await h.engine.saved();
+  assert.equal(h.engine.status().unsaved, true);
+  assert.equal(h.notices.filter((n) => n.level === "error").length, 1);
+  h.engine.enqueue({ kind: "create", payload: { title: "y" } });
+  await h.engine.saved();
+  assert.equal(h.notices.filter((n) => n.level === "error").length, 1);
+  h.store.save = async () => {};
+  h.engine.enqueue({ kind: "create", payload: { title: "z" } });
+  await h.engine.saved();
+  assert.equal(h.engine.status().unsaved, false);
+});
+
+test("offline: nothing is sent and no retry timer runs until kicked online", async () => {
+  const h = harness({ script: [ok({ todo_id: "r", version: 1, create_date: "x", order_idx: 0 })] });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "create", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.timers.length, 0);
+  assert.equal(h.engine.status().state, "offline");
+  h.net.online = true;
+  h.engine.kick();
+  await h.engine.flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.engine.status().state, "synced");
+});
+
+test("kick(true) sends even when the device claims to be offline", async () => {
+  const h = harness({ script: [ok({ todo_id: "r", version: 1, create_date: "x", order_idx: 0 })] });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "create", payload: { title: "x" } });
+  h.engine.kick(true);
+  await h.engine.flush();
+  assert.equal(h.calls.length, 1);
 });

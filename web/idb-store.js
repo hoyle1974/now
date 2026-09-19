@@ -59,6 +59,8 @@
           localStorage.setItem(LS_KEY, JSON.stringify(ops));
         } catch (e2) {
           // Memory only: edits still sync, they just won't survive a reload.
+          // Tell the engine so it can say so.
+          throw e2;
         }
       }
     }

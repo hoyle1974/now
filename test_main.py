@@ -313,8 +313,7 @@ def test_undelete_returns_affected_subtree(db_setup):
     client.post(f"/todos/{id}/split", json={"descriptions": ["a"]})
     client.delete(f"/todos/{id}")
     r = client.patch(f"/todos/{id}/undelete").json()
-    assert id in {a["todo_id"] for a in r["affected"]}
-    assert len(r["affected"]) == 2
+    assert [a["todo_id"] for a in r["affected"]] == [id]
     assert client.get(f"/todos/{id}").json()["version"] == r["version"]
 
 
@@ -429,3 +428,73 @@ def test_collapsed_with_other_fields_still_versioned(db_setup):
     assert r.status_code == 409
     r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True, "done": True}, headers={"If-Match": "1"})
     assert r.json()["version"] == 2
+
+
+def test_undelete_does_not_resurrect_children_deleted_earlier(db_setup):
+    p = client.post("/todos", json={"title": "p"}).json()["todo_id"]
+    client.post(f"/todos/{p}/split", json={"descriptions": ["a", "b"]})
+    a, b = client.get(f"/todos/{p}").json()["child_ids"]
+    client.delete(f"/todos/{a}")
+    client.delete(f"/todos/{p}")
+    client.patch(f"/todos/{p}/undelete")
+    assert client.get(f"/todos/{p}").json()["child_ids"] == [b]
+    assert client.get(f"/todos/{a}").status_code == 404
+
+
+def test_tree_is_one_collection_read_and_matches_structure(db_setup, monkeypatch):
+    p = client.post("/todos", json={"title": "p"}).json()["todo_id"]
+    other = client.post("/todos", json={"title": "o"}).json()["todo_id"]
+    client.post(f"/todos/{p}/split", json={"descriptions": ["a", "b"]})
+    a, b = client.get(f"/todos/{p}").json()["child_ids"]
+    client.post(f"/todos/{a}/split", json={"descriptions": ["a1"]})
+    client.delete(f"/todos/{b}")
+    dead = client.post("/todos", json={"title": "dead"}).json()["todo_id"]
+    client.post(f"/todos/{dead}/split", json={"descriptions": ["orphan"]})
+    client.delete(f"/todos/{dead}")
+
+    calls = {"get_todo": 0}
+    real = db.get_todo
+    monkeypatch.setattr(db, "get_todo", lambda *a, **k: calls.__setitem__("get_todo", calls["get_todo"] + 1) or real(*a, **k))
+    tree = client.get("/todos/tree").json()
+
+    assert calls["get_todo"] == 0
+    assert [r["todo_id"] for r in tree["roots"]] == [p, other]
+    assert tree["todosById"][p]["child_ids"] == [a]
+    assert len(tree["todosById"]) == 4  # p, other, a, a1 (b deleted, dead subtree hidden)
+
+
+def test_collapsed_only_patch_does_not_bump_rev(db_setup):
+    t = client.post("/todos", json={"title": "a"}).json()
+    before = client.get("/todos/rev").json()["rev"]
+    r = client.patch(f"/todos/{t['todo_id']}", json={"collapsed": True})
+    assert rev_of(r) == before
+    assert client.get("/todos/rev").json()["rev"] == before
+
+
+def test_roots_get_order_idx_and_can_be_moved(db_setup):
+    ids = [client.post("/todos", json={"title": f"t{i}"}).json()["todo_id"] for i in range(3)]
+    idx = [client.get(f"/todos/{i}").json()["order_idx"] for i in ids]
+    assert idx == [0, 1, 2]
+    r = client.patch(f"/todos/{ids[2]}/move/up")
+    assert r.status_code == 200 and r.json()["order_idx"] == 1
+    assert [t["todo_id"] for t in client.get("/todos/root").json()] == [ids[0], ids[2], ids[1]]
+    assert client.patch(f"/todos/{ids[0]}/move/up").status_code == 400
+
+
+def test_move_touches_only_the_two_swapped_siblings(db_setup):
+    p = client.post("/todos", json={"title": "p"}).json()["todo_id"]
+    client.post(f"/todos/{p}/split", json={"descriptions": ["a", "b", "c", "d"]})
+    kids = client.get(f"/todos/{p}").json()["child_ids"]
+    before = {k: client.get(f"/todos/{k}").json()["order_idx"] for k in kids}
+    client.patch(f"/todos/{kids[1]}/move/down")
+    after = {k: client.get(f"/todos/{k}").json()["order_idx"] for k in kids}
+    assert after[kids[1]] == before[kids[2]] and after[kids[2]] == before[kids[1]]
+    assert after[kids[0]] == before[kids[0]] and after[kids[3]] == before[kids[3]]
+
+
+def test_move_compacts_legacy_roots_without_order_idx(db_setup):
+    ids = [client.post("/todos", json={"title": f"t{i}"}).json()["todo_id"] for i in range(3)]
+    for i in ids:
+        db.get_conn().collection("todos").document(i).update({"order_idx": None})
+    client.patch(f"/todos/{ids[2]}/move/up")
+    assert [t["todo_id"] for t in client.get("/todos/root").json()] == [ids[0], ids[2], ids[1]]
