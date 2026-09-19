@@ -62,6 +62,20 @@ never waits on the network.
   response also reveals a remote write (`X-Rev-Prev` ahead of what we knew). The
   refresh waits for unsent edits to drain and for any open editor to close, so
   it never wipes typed text.
+- **App version:** `GET /todos/rev` also returns `version`, read at startup from
+  `APP_VERSION` in `web/app.js` (the same number as the `?v=` on the assets in
+  `index.html`; bump both together on a release). If it differs from the page's
+  own, the page is running old code and reloads instead of refreshing, holding
+  while an editor is open and at most once per target version (a
+  `sessionStorage` guard) so cached code can't cause a reload loop.
+- **Collapse state** is a `collapsed` field on each todo, patched through the
+  same outbox and synced to every device. It is view state: a collapse-only
+  patch skips the `If-Match` check and the version bump (last write wins, no
+  conflicts with content edits) but still bumps the revision, so other windows
+  notice it.
+- **Ordering:** every todo, roots included, has an `order_idx` and is shown in
+  that order. Each row shows a drag handle (roots always; subtasks while their
+  parent's "Reorder subtasks" mode is on); a drop becomes `move` ops.
 
 - **Event log** (the small "log" link under the title): a record, kept on the
   device (localStorage, last 300 entries), of what the page saw and did:

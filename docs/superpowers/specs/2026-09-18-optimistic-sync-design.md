@@ -95,7 +95,7 @@ The sections above were written against SQLite; `now` runs on Firestore, so the 
 - **Transactions instead of a lock.** Cloud Run can run several instances, so an in-process lock can't protect the version check. `db.run_atomic(txn_id, fn)` runs each mutating request in one Firestore transaction covering the `If-Match` check, the writes, and the `txn_log/<txn_id>` record. Firestore requires all reads before any write, so the db functions read first and return the updated todo (with its new `version`) instead of re-reading it.
 - **Versions** live on each `todos` document. Documents written before this feature have no `version` field and read as `1`; their first write stores `2`.
 - **`txn_log`** documents hold `{status, response_json, created_at}`. They are pruned on startup after 24 hours (`db.prune_txn_log`).
-- **Root ordering:** roots have no `order_idx` and Firestore returns them by random document id, so roots are sorted by `create_date`. That keeps a new todo where the optimistic UI put it after a refresh.
+- **Root ordering:** roots get an `order_idx` like any other sibling group (appended at the end on create) and are sorted by it, so they can be reordered with the same `move` op as subtasks.
 - **Reparenting** a todo to a parent that doesn't exist now returns 404 (SQLite got this from a foreign key).
 - **The SQLite backend has since been removed**; Firestore is the only backend.
 - **Testing** runs against the Firestore emulator only: `scripts/test.sh` (pytest) and `scripts/e2e.sh` (sync engine vs. the running app). `conftest.py` refuses to run without `FIRESTORE_EMULATOR_HOST`, since this machine has real credentials.
@@ -113,3 +113,8 @@ Single user, several windows/devices; no fast updates wanted, and no background 
 - **Code:** `web/freshness.js` (policy, DOM-free, `tests_js/freshness.test.js`), revision tracking in `web/sync.js`, wiring in `web/app.js`.
 - **Status pill:** shows the outbox state (Syncing / Offline / Sync error) or, when the outbox is empty, the freshness phase: Checking for changes… / Updating… / Reconnecting… / Updates waiting (held back by an open editor) / Couldn't check for updates / Synced. Transient phases are held for at least 0.8s so they can be read.
 - **Event log:** `web/eventlog.js` is a persisted ring buffer (localStorage, 300 entries) fed by `onLog` hooks in the sync engine and freshness check plus page lifecycle listeners in `web/app.js`. It exists to see what a phone actually does on lock/unlock (which events fire, whether the network was up, how long the page was suspended). Titles are never logged. Shown via the "log" link (Copy / Clear / Close).
+
+## Later additions
+
+- **`collapsed`** is a todo field patched like `done`. A patch containing only `collapsed` skips `If-Match` and the version bump (view state, last write wins) but still bumps the revision so other windows refetch.
+- **App version:** `GET /todos/rev` returns `{rev, version}`; the version is `APP_VERSION` from `web/app.js`. A page whose own version differs reloads (once per target version, not while an editor is open).
