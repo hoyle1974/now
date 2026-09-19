@@ -73,9 +73,15 @@ never waits on the network.
   patch skips the `If-Match` check and the version bump (last write wins, no
   conflicts with content edits) but still bumps the revision, so other windows
   notice it.
-- **Ordering:** every todo, roots included, has an `order_idx` and is shown in
-  that order. Each row shows a drag handle (roots always; subtasks while their
-  parent's "Reorder subtasks" mode is on); a drop becomes `move` ops.
+- **Ordering and nesting:** every todo, roots included, has an `order_idx` and is
+  shown in that order. Every row has a drag handle. Dropping above or below a
+  row moves the todo next to it; dropping on the middle of a row makes it that
+  row's last subtask (`web/reorder.js` turns the drop into `{parent_id, index}`).
+  It is one `reparent` op (`PATCH /todos/{id}/reparent`), applied optimistically
+  like any edit; a move into the todo's own subtree is refused.
+- **App icon badge:** the number of open todos due today or overdue
+  (`web/badge.js`, Badging API). iOS needs notification permission first, so an
+  "icon badge" link appears under the title until it is answered.
 
 - **Event log** (the small "log" link under the title): a record, kept on the
   device (localStorage, last 300 entries), of what the page saw and did:

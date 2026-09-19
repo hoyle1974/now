@@ -284,7 +284,7 @@ svg {
   content: "";
   position: absolute;
   top: 0;
-  left: 54px;
+  left: 98px;
   right: 0;
   height: 1px;
   background: var(--separator);
@@ -1204,29 +1204,23 @@ body[data-tab="next"] .composer {
   }
 }
 
-/* ---------- Reorder mode ---------- */
+/* ---------- Drag to move ---------- */
 
-.reorder-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 2px 12px 4px 54px;
-  padding: 6px 6px 6px 14px;
+/* The insertion line shown while dragging between rows. */
+.drop-line {
+  position: fixed;
+  z-index: 9999;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+/* Dropping on the middle of a row nests the dragged todo inside it. */
+.todo-row.drop-inside {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  box-shadow: inset 0 0 0 2px var(--accent);
   border-radius: 12px;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  font-size: 14px;
-  color: var(--label-2);
-}
-
-.btn-small {
-  min-height: 32px;
-  padding: 0 16px;
-  font-size: 14px;
-}
-
-.todo-children.is-reordering .todo-row::before {
-  left: 98px;
 }
 
 /* ---------- Pull to refresh ---------- */

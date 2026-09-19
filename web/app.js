@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "15";
+const APP_VERSION = "16";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -301,9 +301,6 @@ async function fetchTree() {
   return { roots: response.roots, todosById, rev: response.rev };
 }
 
-// The parent whose children currently show drag handles (reorder mode), or null.
-let reorderParentId = null;
-
 // One-shot visual states keyed by todo id. Every edit re-renders the whole
 // list, which would wipe a CSS animation started on the live element, so the
 // renderer re-applies these classes for the length of the animation instead.
@@ -503,61 +500,77 @@ function renderMeta(todo, hasChildren, counts) {
   return meta;
 }
 
-// dataTransfer.getData() is empty during dragover (browsers only expose it on
-// drop), so the in-progress drag is tracked here instead.
+// The drag in progress, or null: { todoId, li }. Tracked here (not on the
+// DOM) because every edit re-renders the whole list.
 let dragState = null;
-const animatingItems = new Set();
 
-// FLIP: measure siblings, mutate the DOM, then animate each from its old
-// position to its new one so they visibly slide out of the way.
-function animateReorder(list, mutate) {
-  const items = [...list.children];
-  const before = new Map(items.map((el) => [el, el.getBoundingClientRect().top]));
-  mutate();
-  for (const el of items) {
-    const dy = before.get(el) - el.getBoundingClientRect().top;
-    if (!dy) continue;
-    el.style.transition = "none";
-    el.style.transform = `translateY(${dy}px)`;
-    el.getBoundingClientRect();
-    el.style.transition = "transform 200ms var(--ease)";
-    el.style.transform = "";
-    animatingItems.add(el);
-    setTimeout(() => animatingItems.delete(el), 200);
+// Where a drop at (x, y) would land: the row under the pointer, or the nearest
+// one when the pointer is between rows or beyond the ends, plus which part of
+// the row it is on (above it, below it, or in its middle, meaning "nest").
+function dropTargetAt(y) {
+  const rows = [...document.querySelectorAll("#todo-tree .todo-row")]
+    .filter((r) => !dragState.li.contains(r));
+  if (!rows.length) return null;
+  let best = null;
+  let bestDistance = Infinity;
+  for (const row of rows) {
+    const rect = row.getBoundingClientRect();
+    const distance = y < rect.top ? rect.top - y : y > rect.bottom ? y - rect.bottom : 0;
+    if (distance < bestDistance) { best = { row, rect }; bestDistance = distance; }
   }
+  const { row, rect } = best;
+  const zone = bestDistance > 0
+    ? (y < rect.top ? "before" : "after")
+    : Reorder.zoneFor(rect, y);
+  const li = row.closest("li");
+  const plan = Reorder.planDrop(model, dragState.todoId, li.dataset.todoId, zone);
+  return { row, li, zone, plan };
 }
 
-function reorderAt(clientY) {
-  const { list, li } = dragState;
-  const items = [...list.children];
-  const draggedIdx = items.indexOf(li);
-  for (const target of items) {
-    if (target === li || animatingItems.has(target)) continue;
-    const rect = target.getBoundingClientRect();
-    if (clientY < rect.top || clientY > rect.bottom) continue;
-    const targetIdx = items.indexOf(target);
-    const midY = rect.top + rect.height / 2;
-    if (targetIdx > draggedIdx && clientY > midY) {
-      animateReorder(list, () => target.after(li));
-    } else if (targetIdx < draggedIdx && clientY < midY) {
-      animateReorder(list, () => target.before(li));
-    }
+let dropLine = null;
+let dropRow = null;
+
+function clearDropHint() {
+  if (dropLine) dropLine.hidden = true;
+  if (dropRow) dropRow.classList.remove("drop-inside");
+  dropRow = null;
+}
+
+function showDropHint(target) {
+  clearDropHint();
+  if (!target || !target.plan) return;
+  if (target.zone === "inside") {
+    dropRow = target.row;
+    dropRow.classList.add("drop-inside");
     return;
   }
+  if (!dropLine) {
+    dropLine = document.createElement("div");
+    dropLine.className = "drop-line";
+    document.body.appendChild(dropLine);
+  }
+  // "Below" a row that has children means below its whole subtree.
+  const rect = (target.zone === "before" ? target.row : target.li).getBoundingClientRect();
+  const rowRect = target.row.getBoundingClientRect();
+  dropLine.style.left = `${rowRect.left + 8}px`;
+  dropLine.style.width = `${rowRect.width - 16}px`;
+  dropLine.style.top = `${(target.zone === "before" ? rect.top : rect.bottom) - 1.5}px`;
+  dropLine.hidden = false;
 }
 
-async function commitDrag() {
+// Applies the drop: one reparent op (optimistic, queued like any edit).
+function commitDrop(target) {
   const state = dragState;
   dragState = null;
-  const delta = [...state.list.children].indexOf(state.li) - state.startIndex;
-  if (delta === 0) {
+  clearDropHint();
+  if (!state || !target || !target.plan || !engine.enqueue({
+    kind: "reparent", target_id: state.todoId, payload: target.plan,
+  })) {
     renderTree();
     return;
   }
-  const direction = delta > 0 ? "down" : "up";
-  for (let i = 0; i < Math.abs(delta); i++) {
-    engine.enqueue({ kind: "move", target_id: state.todoId, payload: { direction } });
-  }
+  // Show what was just dropped into.
+  if (target.plan.parent_id) setCollapsed(target.plan.parent_id, false);
 }
 
 // #1 & #5: Swipe gestures and title tap-to-rename
@@ -694,30 +707,22 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
     row.classList.add("is-focused");
   }
 
-  // Drag handle: always on top-level todos (when there is more than one to
-  // order), and on subtasks only while their parent is in reorder mode.
+  // Drag handle, on every row: drop above/below another row to move there, or
+  // onto the middle of a row to make it a subtask of that row.
   let dragHandle = null;
-  const draggable = todo.parent_id
-    ? String(todo.parent_id) === reorderParentId
-    : model.roots.length > 1;
-  if (draggable) {
+  if (model.todosById.size > 1) {
     dragHandle = document.createElement("button");
     dragHandle.type = "button";
     dragHandle.className = "todo-drag-handle";
     dragHandle.appendChild(icon("grip"));
-    dragHandle.setAttribute("aria-label", "Drag to reorder");
+    dragHandle.setAttribute("aria-label", "Drag to move");
 
     dragHandle.addEventListener("pointerdown", (e) => {
       if (e.button !== 0) return;
       e.preventDefault();
       const rowRect = row.getBoundingClientRect();
       const grabY = e.clientY - rowRect.top;
-      dragState = {
-        todoId: String(todo.todo_id),
-        li,
-        list: li.parentElement,
-        startIndex: [...li.parentElement.children].indexOf(li),
-      };
+      dragState = { todoId: String(todo.todo_id), li };
       row.classList.add("dragging");
 
       const ghost = row.cloneNode(true);
@@ -728,14 +733,30 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
         transform:translate3d(0,${rowRect.top}px,0);`;
       document.body.appendChild(ghost);
 
-      // Reordering moves this row's DOM node, which drops pointer capture on
-      // the handle, so track the gesture on window instead.
+      // Track the gesture on window: the row can re-render under the finger.
       const pid = e.pointerId;
+      let pointerY = e.clientY;
+      let target = null;
+      let scrollTimer = null;
+      const update = () => {
+        ghost.style.transform = `translate3d(0,${pointerY - grabY}px,0)`;
+        target = dropTargetAt(pointerY);
+        showDropHint(target);
+      };
+      // Near the top or bottom edge, scroll so far-away rows can be reached.
+      const autoScroll = () => {
+        const edge = 90;
+        const speed = pointerY < edge ? -(edge - pointerY) / 6
+          : pointerY > window.innerHeight - edge ? (pointerY - (window.innerHeight - edge)) / 6 : 0;
+        if (speed) { window.scrollBy(0, speed); update(); }
+        scrollTimer = requestAnimationFrame(autoScroll);
+      };
+      scrollTimer = requestAnimationFrame(autoScroll);
       const onMove = (m) => {
         if (m.pointerId !== pid) return;
         m.preventDefault();
-        ghost.style.transform = `translate3d(0,${m.clientY - grabY}px,0)`;
-        reorderAt(m.clientY);
+        pointerY = m.clientY;
+        update();
       };
       const blockScroll = (t) => t.preventDefault();
       const onEnd = (u) => {
@@ -744,14 +765,17 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
         window.removeEventListener("pointerup", onEnd);
         window.removeEventListener("pointercancel", onEnd);
         window.removeEventListener("touchmove", blockScroll);
+        cancelAnimationFrame(scrollTimer);
         ghost.remove();
         row.classList.remove("dragging");
-        if (dragState) reportedFailure(commitDrag());
+        // A cancelled gesture (incoming call, etc.) drops nothing.
+        commitDrop(u.type === "pointercancel" ? null : target);
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onEnd);
       window.addEventListener("pointercancel", onEnd);
       window.addEventListener("touchmove", blockScroll, { passive: false });
+      update();
     });
   }
 
@@ -824,15 +848,6 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
       menuItem("Split into subtasks", "split", openPanel("split"))
     );
 
-    if (todo.child_ids.length > 1) {
-      menu.append(menuItem("Reorder subtasks", "grip", () => {
-        setCollapsed(todo.todo_id, false);
-        reorderParentId = todo.todo_id;
-        setActivePanel(null);
-        renderTree();
-      }));
-    }
-
     menu.append(
       menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
       menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
@@ -878,10 +893,8 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   }
 
   if (hasChildren && !isCollapsed) {
-    const reordering = reorderParentId === todo.todo_id;
-    if (reordering) li.appendChild(renderReorderBar());
     const childList = document.createElement("ul");
-    childList.className = "todo-children" + (reordering ? " is-reordering" : "");
+    childList.className = "todo-children";
     // Sort children by order_idx (respecting manual reordering), then by urgency
     const children = todo.child_ids
       .map((id) => todosById.get(id))
@@ -905,24 +918,6 @@ function renderNode(todo, todosById, descendantCounts, depth = 0, ancestorDone =
   }
 
   return li;
-}
-
-// Shown above a parent's children while their drag handles are visible.
-function renderReorderBar() {
-  const bar = document.createElement("div");
-  bar.className = "reorder-bar";
-  const hint = document.createElement("span");
-  hint.textContent = "Drag the handles to reorder";
-  const done = document.createElement("button");
-  done.type = "button";
-  done.className = "btn btn-primary btn-small";
-  done.textContent = "Done";
-  done.addEventListener("click", () => {
-    reorderParentId = null;
-    renderTree();
-  });
-  bar.append(hint, done);
-  return bar;
 }
 
 // Shared Cancel/Save row for the inline editors below — each editor supplies
