@@ -99,3 +99,15 @@ The sections above were written against SQLite; `now` runs on Firestore, so the 
 - **Reparenting** a todo to a parent that doesn't exist now returns 404 (SQLite got this from a foreign key).
 - **The SQLite backend (`db_sqlite3.py`) does not implement this contract** (no `run_atomic`, versions, or `affected` results) and can't be swapped back in without porting it.
 - **Testing** runs against the Firestore emulator only: `scripts/test.sh` (pytest) and `scripts/e2e.sh` (sync engine vs. the running app). `conftest.py` refuses to run without `FIRESTORE_EMULATOR_HOST`, since this machine has real credentials.
+
+## Detecting writes from other windows
+
+Single user, several windows/devices; no fast updates wanted, and no background traffic.
+
+- **Revision counter:** Firestore doc `meta/rev` (`{value}`), bumped inside every transaction that actually writes todo data (not for 409s, replays, 404s, or reads). `run_atomic` returns `(status, body, prev, rev)` and the API sends `X-Rev-Prev` / `X-Rev` headers; the txn_log record stores both so a replay answers identically.
+- **Cheap check:** `GET /todos/rev` reads one document. `GET /todos/tree` includes `rev`, read *before* the tree so it can only be older than the data (worst case one redundant refresh, never a missed change).
+- **Gap detection:** a write response whose `X-Rev-Prev` is ahead of the client's known revision means another window wrote in between; the client marks itself stale.
+- **Triggers, no timers:** `focus`, `visibilitychange` (to visible), `pageshow` (persisted) and `online`, debounced to one server check per 30s (bypassed when already known stale). Mobile relies on visibility/pageshow because `focus`/`hasFocus()` are unreliable there. A hidden or unfocused window sends nothing.
+- **Never clobber local work:** the refresh waits until the outbox is empty and no inline editor/input in the list is active, then re-downloads the tree and re-applies unsent ops (`rebuild`). It is retried when the outbox drains or the editor closes.
+- **Cost:** one document read per check, plus one small extra write per edit (the counter).
+- **Code:** `web/freshness.js` (policy, DOM-free, `tests_js/freshness.test.js`), revision tracking in `web/sync.js`, wiring in `web/app.js`.

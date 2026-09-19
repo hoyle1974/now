@@ -48,8 +48,15 @@ never waits on the network.
   edits rebase (local wins on the same field); subtree ops reload instead.
 - **New items** get a temporary `tmp:` id until the server assigns the real one;
   queued edits are re-pointed automatically.
-- Other devices are picked up on load, or by tapping the sync pill under the
-  title (which first drains the outbox).
+- **Changes from another window or device** are picked up when this window
+  comes back into focus (or its tab becomes visible; `pageshow` on phones), or
+  by tapping the sync pill. There is no timer: an unfocused or backgrounded
+  window sends nothing. The check is one tiny `GET /todos/rev` (a single
+  Firestore document, bumped by every data-changing transaction), debounced to
+  once per 30s; the tree is re-downloaded only if the revision moved. A write
+  response also reveals a remote write (`X-Rev-Prev` ahead of what we knew). The
+  refresh waits for unsent edits to drain and for any open editor to close, so
+  it never wipes typed text.
 
 Design: `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
 

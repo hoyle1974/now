@@ -25,7 +25,7 @@ function memoryStore() {
   return s;
 }
 
-const ok = (body, status = 200) => () => Promise.resolve({ status, body });
+const ok = (body, status = 200, revs = {}) => () => Promise.resolve({ status, body, ...revs });
 const netFail = () => () => Promise.reject(new Error("network"));
 
 function harness({ tree = treeOf(), script = [], refetchTree = null } = {}) {
@@ -380,4 +380,76 @@ test("epoch changes on enqueue and when an op leaves the outbox", async () => {
   const e2 = h.engine.epoch();
   h.engine.rebuild(treeOf(todo("a")));
   assert.equal(h.engine.epoch(), e2, "a rebuild is not a write");
+});
+
+// ---- revision tracking ---------------------------------------------------
+
+function withRev(tree, rev) { return Object.assign(tree, { rev }); }
+
+test("rebuild adopts the tree's revision and clears the stale flag", () => {
+  const h = harness({ tree: treeOf(todo("a")) });
+  assert.equal(h.engine.knownRev(), null);
+  h.engine.noteRemoteRev(9);
+  assert.equal(h.engine.isStale(), true);
+  h.engine.rebuild(withRev(treeOf(todo("a")), 9));
+  assert.equal(h.engine.knownRev(), 9);
+  assert.equal(h.engine.isStale(), false);
+});
+
+test("our own consecutive writes are not a remote change", async () => {
+  const h = harness({ script: [
+    ok(todo("a", { version: 2 }), 200, { prev: 4, rev: 5 }),
+    ok(todo("a", { version: 3 }), 200, { prev: 5, rev: 6 }),
+  ] });
+  h.engine.rebuild(withRev(treeOf(todo("a")), 4));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.engine.knownRev(), 6);
+  assert.equal(h.engine.isStale(), false);
+});
+
+test("a write whose prev is ahead of what we knew means another window wrote", async () => {
+  const h = harness({ script: [ok(todo("a", { version: 2 }), 200, { prev: 6, rev: 7 })] });
+  h.engine.rebuild(withRev(treeOf(todo("a")), 4));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  assert.equal(h.engine.isStale(), true);
+  assert.equal(h.engine.knownRev(), 7);
+});
+
+test("a 409 that reveals a newer revision marks us stale", async () => {
+  const h = harness({ script: [
+    ok(todo("a", { version: 5 }), 409, { prev: 8, rev: 8 }),
+    ok(todo("a", { version: 6 }), 200, { prev: 8, rev: 9 }),
+  ] });
+  h.engine.rebuild(withRev(treeOf(todo("a")), 5));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.engine.isStale(), true);
+});
+
+test("a replayed response from before our known revision is ignored", async () => {
+  const h = harness({ script: [ok(todo("a", { version: 2 }), 200, { prev: 4, rev: 5 })] });
+  h.engine.rebuild(withRev(treeOf(todo("a")), 6));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  assert.equal(h.engine.knownRev(), 6);
+  assert.equal(h.engine.isStale(), false);
+});
+
+test("noteRemoteRev only marks stale when the server is ahead", () => {
+  const h = harness();
+  h.engine.rebuild(withRev(treeOf(), 5));
+  h.engine.noteRemoteRev(5);
+  assert.equal(h.engine.isStale(), false);
+  h.engine.noteRemoteRev(6);
+  assert.equal(h.engine.isStale(), true);
+});
+
+test("without a known revision (first load failed) we treat the server as ahead", () => {
+  const h = harness();
+  h.engine.noteRemoteRev(0);
+  assert.equal(h.engine.isStale(), true);
 });

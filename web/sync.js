@@ -219,6 +219,10 @@
     // Bumped on every enqueue and every op that leaves the outbox, so a caller
     // can tell whether anything changed while it was awaiting a tree fetch.
     let epoch = 0;
+    // The server's change counter as we last saw it, and whether we've learned
+    // that another window has written since (see observeRev / noteRemoteRev).
+    let knownRev = null;
+    let stale = false;
     let saveChain = Promise.resolve();
     const waiters = [];
 
@@ -243,6 +247,23 @@
       if (!running && (ops.length === 0 || backoffTimer !== null)) {
         waiters.splice(0).forEach((resolve) => resolve());
       }
+    }
+
+    // -- revision tracking
+    // Every write response says which revision it started from (prev) and where
+    // it ended (rev). If prev is ahead of what we knew, another window wrote in
+    // between. A prev below what we know is a replayed answer to a request we
+    // already accounted for.
+    function observeRev(prev, rev) {
+      if (prev == null || rev == null) return;
+      if (knownRev !== null && prev > knownRev) stale = true;
+      if (knownRev === null || rev > knownRev) knownRev = rev;
+    }
+
+    // Result of the cheap /todos/rev poll. Deliberately leaves knownRev alone:
+    // it only moves when we actually load the newer tree.
+    function noteRemoteRev(rev) {
+      if (knownRev === null || rev > knownRev) stale = true;
     }
 
     // -- ids
@@ -495,6 +516,7 @@
             scheduleRetry(op);
             break;
           }
+          observeRev(res.prev, res.rev);
           const proceed = await handle(op, res);
           emitStatus();
           if (!proceed) break;
@@ -536,6 +558,10 @@
       model.todosById = todosById;
       model.roots = tree.roots.map((r) => todosById.get(r.todo_id) || r);
       model.trash = new Map();
+      if (tree.rev != null) {
+        knownRev = tree.rev;
+        stale = false;
+      }
       for (const op of ops) {
         // A move that may already have reached the server would apply twice.
         if (op.kind === "move" && op.sent) continue;
@@ -548,6 +574,9 @@
       enqueue, load, rebuild, flush, kick, resolve,
       pending: () => ops.length,
       epoch: () => epoch,
+      knownRev: () => knownRev,
+      isStale: () => stale,
+      noteRemoteRev,
       status,
       saved: () => saveChain,
     };

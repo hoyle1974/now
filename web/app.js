@@ -49,7 +49,11 @@ async function sendRequest(req) {
     if (response.status !== 204 && (response.headers.get("content-type") || "").includes("json")) {
       body = await response.json();
     }
-    return { status: response.status, body };
+    const header = (name) => {
+      const value = response.headers.get(name);
+      return value === null ? undefined : Number(value);
+    };
+    return { status: response.status, body, prev: header("X-Rev-Prev"), rev: header("X-Rev") };
   } finally {
     clearTimeout(timer);
   }
@@ -89,7 +93,11 @@ const engine = Sync.createEngine({
   send: sendRequest,
   refetch: () => fetchTree(),
   onChange: () => renderTree(),
-  onStatus: renderSyncStatus,
+  onStatus: (st) => {
+    renderSyncStatus(st);
+    // The outbox just drained: a refresh that was waiting on it can go ahead.
+    if (st.state === "synced") freshness.poke();
+  },
   onNotice: showNotice,
   onRemap: (tmp, real) => {
     // Ids the UI keeps state under change when the server assigns real ones.
@@ -97,6 +105,29 @@ const engine = Sync.createEngine({
     if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
     if (lastDeleted === tmp) lastDeleted = real;
   },
+});
+
+// Is the user in the middle of typing into the list (an inline editor, or the
+// rename box)? A refresh re-renders the list and would wipe that text. The
+// composer at the bottom sits outside the list, so it doesn't count.
+function editingInTree() {
+  if (activePanel && activePanel.mode !== "menu") return true;
+  const el = document.activeElement;
+  return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && !!el.closest("#todo-tree");
+}
+
+// Picks up writes made from another window or device. No timer: it checks
+// only when this window regains focus/visibility (see the listeners below), so
+// an unfocused or backgrounded window sends nothing.
+const freshness = Freshness.create({
+  engine,
+  fetchRev: async () => {
+    const response = await fetch(`${API_BASE}/rev`);
+    if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
+    return (await response.json()).rev;
+  },
+  refresh: () => loadAndRender(),
+  editorOpen: editingInTree,
 });
 
 // These stay async so existing `reportedFailure(action(...))` call sites work.
@@ -169,7 +200,7 @@ async function fetchTree() {
     todosById.set(id, todo);
   }
 
-  return { roots: response.roots, todosById };
+  return { roots: response.roots, todosById, rev: response.rev };
 }
 
 // Tracks which parent todos are collapsed (children hidden). Absence means
@@ -184,6 +215,8 @@ let activePanel = null;
 
 function setActivePanel(mode, todoId) {
   activePanel = mode ? { mode, todoId } : null;
+  // After the caller has re-rendered: the closed editor's inputs are gone by then.
+  if (!mode) setTimeout(() => freshness.poke(), 0);
 }
 
 function isActivePanel(mode, todoId) {
@@ -967,9 +1000,22 @@ document.addEventListener("DOMContentLoaded", async () => {
   engine.kick();
 });
 
-window.addEventListener("online", () => engine.kick());
+// Coming back to the app: resend anything pending and see if another window
+// wrote while we were away. visibilitychange/pageshow are the reliable signals
+// on phones; focus covers switching between desktop windows.
+function onReturn() {
+  engine.kick();
+  freshness.check();
+}
+window.addEventListener("online", onReturn);
+window.addEventListener("focus", onReturn);
+window.addEventListener("pageshow", (e) => { if (e.persisted) onReturn(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible") engine.kick();
+  if (document.visibilityState === "visible") onReturn();
+});
+// Leaving the rename box (or any inline field) can unblock a deferred refresh.
+document.getElementById("todo-tree").addEventListener("focusout", () => {
+  setTimeout(() => freshness.poke(), 0);
 });
 
 // Tapping the status pill drains the outbox, then pulls the latest from the

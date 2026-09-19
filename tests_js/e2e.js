@@ -3,6 +3,7 @@
 "use strict";
 const assert = require("node:assert/strict");
 const Sync = require("../web/sync.js");
+const Freshness = require("../web/freshness.js");
 
 const BASE = process.env.BASE || "http://localhost:8000";
 
@@ -12,12 +13,13 @@ async function realSend(req) {
     body: req.body === undefined ? undefined : JSON.stringify(req.body),
   });
   const isJson = res.status !== 204 && (res.headers.get("content-type") || "").includes("json");
-  return { status: res.status, body: isJson ? await res.json() : null };
+  const num = (h) => (res.headers.get(h) === null ? undefined : Number(res.headers.get(h)));
+  return { status: res.status, body: isJson ? await res.json() : null, prev: num("x-rev-prev"), rev: num("x-rev") };
 }
 
 async function fetchTree() {
   const r = await (await fetch(BASE + "/todos/tree")).json();
-  return { roots: r.roots, todosById: new Map(Object.entries(r.todosById)) };
+  return { roots: r.roots, todosById: new Map(Object.entries(r.todosById)), rev: r.rev };
 }
 
 function makeEngine(send = realSend, store = { async load() { return []; }, async save() {} }) {
@@ -97,7 +99,48 @@ function makeEngine(send = realSend, store = { async load() { return []; }, asyn
   const copies = [...tree.todosById.values()].filter((t) => t.title === tag + "-once");
   assert.equal(copies.length, 1, "retry must not duplicate");
 
+
+  // two windows: A must notice B's write on "focus", and not before
+  const A = makeEngine();
+  const B = makeEngine();
+  const idB = B.engine.enqueue({ kind: "create", payload: { title: tag + "-shared" } });
+  await B.engine.flush();
+  const shared = B.engine.resolve(idB);
+  A.engine.rebuild(await fetchTree());
+  let revFetches = 0;
+  const freshA = Freshness.create({
+    engine: A.engine,
+    fetchRev: async () => { revFetches++; return (await (await fetch(BASE + "/todos/rev")).json()).rev; },
+    refresh: async () => A.engine.rebuild(await fetchTree()),
+    minGapMs: 0,
+  });
+  await new Promise((r) => setTimeout(r, 5));
+  B.engine.enqueue({ kind: "patch", target_id: shared, payload: { title: "from B" } });
+  await B.engine.flush();
+  await new Promise((r) => setTimeout(r, 300));
+  assert.equal(revFetches, 0, "an unfocused window sends nothing");
+  assert.equal(A.model.todosById.get(shared).title, tag + "-shared", "A is stale until it is focused");
+  await freshA.check();
+  assert.equal(revFetches, 1);
+  assert.equal(A.model.todosById.get(shared).title, "from B", "A refreshed on focus");
+  await freshA.check();
+  assert.equal(A.engine.isStale(), false);
+  assert.equal(revFetches, 2, "second focus: one cheap check, no refresh");
+
+  // A writes while B has written since A last looked: A learns from its own response
+  B.engine.enqueue({ kind: "patch", target_id: shared, payload: { done: true } });
+  await B.engine.flush();
+  A.engine.enqueue({ kind: "patch", target_id: shared, payload: { title: "from A" } });
+  await A.engine.flush();
+  assert.equal(A.engine.isStale(), true, "the write response revealed B's write");
+  const before = revFetches;
+  await freshA.poke();
+  assert.equal(revFetches, before, "already known stale: no rev check needed");
+  assert.equal(A.engine.isStale(), false);
+  assert.equal(A.model.todosById.get(shared).done, true, "A picked up B's change");
+  assert.equal(A.model.todosById.get(shared).title, "from A", "and kept its own");
+
   // cleanup
-  for (const id of [real, copies[0].todo_id]) await fetch(`${BASE}/todos/${id}`, { method: "DELETE" });
+  for (const id of [real, copies[0].todo_id, shared]) await fetch(`${BASE}/todos/${id}`, { method: "DELETE" });
   console.log("e2e ok");
 })().catch((e) => { console.error(e); process.exit(1); });
