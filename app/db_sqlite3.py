@@ -101,8 +101,7 @@ def delete_todo(todo_id: models.TodoId):
         # Soft delete: mark the target row and its whole subtree as
         # deleted in one statement, rather than walking it level by
         # level in Python. The recursive CTE is seeded with the target
-        # id itself (not just its children) since, unlike cascade_done,
-        # there's no separate UPDATE for the root row here.
+        # id itself (not just its children) so the root row is covered too.
         cur.execute("""
             WITH RECURSIVE subtree(todo_id) AS (
                 SELECT ?
