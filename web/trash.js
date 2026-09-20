@@ -44,7 +44,7 @@
     errorDiv.textContent = message + " · ";
     const btn = document.createElement("button");
     btn.textContent = "Undo";
-    btn.style.cssText = "background:none; border:none; color:inherit; text-decoration:underline; cursor:pointer; font:inherit; min-height:44px;";
+    btn.className = "toast-action";
     btn.onclick = () => {
       clearTimeout(undoTimer);
       errorDiv.hidden = true;

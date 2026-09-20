@@ -949,6 +949,12 @@ body.menu-room {
 
 /* ---------- Error toast ---------- */
 
+/* A full-screen sheet (z-index 100) would hide save/validation errors, so lift
+   the toast above it and clear the sheet's action bar. */
+body:has(.sheet-full) .toast {
+  bottom: 96px;
+}
+
 /* While a toast is up, leave room under the list so it never covers the footer. */
 body:has(#error:not([hidden])) {
   padding-bottom: calc(var(--composer-h, 84px) + 72px);
@@ -958,7 +964,7 @@ body:has(#error:not([hidden])) {
   position: fixed;
   left: 50%;
   bottom: calc(var(--composer-h, 84px) + 12px);
-  z-index: 40;
+  z-index: 120;
   max-width: calc(100% - 32px);
   padding: 12px 18px;
   transform: translateX(-50%);
@@ -1580,3 +1586,116 @@ li.search-hit { cursor: default; }
 .search-hit.is-done { opacity: 0.55; }
 .search-hit.is-done .search-title { text-decoration: line-through; }
 .search-section { margin-top: 20px; }
+
+/* ---------- Tappable text: give every action a visible, 44pt target ---------- */
+
+.btn { min-height: 44px; }
+
+/* Tonal (soft-filled) instead of bare text, so it reads as a button. */
+.btn-plain {
+  background: var(--fill);
+}
+
+.footer-btn--quiet {
+  background: none;
+  box-shadow: inset 0 0 0 1.5px var(--guide);
+  color: var(--label);
+}
+
+.dev-toggle,
+.log-toggle {
+  position: relative;
+  margin: 0 0 0 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--label-2);
+  text-decoration: none;
+}
+
+/* Small pills keep their look but get an invisible 44pt hit area. */
+.sync-status,
+.dev-toggle,
+.log-toggle {
+  position: relative;
+}
+
+.sync-status::after,
+.dev-toggle::after,
+.log-toggle::after {
+  content: "";
+  position: absolute;
+  inset: -8px -4px;
+}
+
+.sync-status { padding: 5px 12px; }
+
+.segmented-btn { min-height: 40px; }
+
+.composer-send {
+  width: 40px;
+  height: 40px;
+  background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #ff2d95));
+}
+
+/* Undo in a toast is a real button, not link text. */
+.toast-action {
+  min-height: 36px;
+  margin-left: 6px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.toast-action:active { background: rgba(255, 255, 255, 0.4); }
+
+/* ---------- Sparkle ---------- */
+
+.confetti {
+  position: fixed;
+  z-index: 200;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.todo-empty-icon {
+  animation: empty-float 3.2s ease-in-out infinite;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent) 22%, transparent),
+    color-mix(in srgb, #ff2d95 18%, transparent));
+}
+
+@keyframes empty-float {
+  0%, 100% { transform: translateY(0) rotate(-3deg); }
+  50% { transform: translateY(-6px) rotate(3deg); }
+}
+
+/* Springy press feedback on rows and pills. */
+.todo-row:active,
+.segmented-btn:active,
+.footer-btn:active,
+.sync-status:active {
+  transform: scale(0.98);
+  transition: transform 0.12s var(--ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .todo-empty-icon { animation: none; }
+}
+
+.trash-restore {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-weight: 600;
+  transition: transform 0.12s var(--ease), background-color 0.15s;
+}
+
+.trash-restore:active {
+  transform: scale(0.95);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}

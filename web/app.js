@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "27";
+const APP_VERSION = "35";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -276,7 +276,7 @@ function showUndo(todoId) {
   errorDiv.textContent = "Deleted · ";
   const undoBtn = document.createElement("button");
   undoBtn.textContent = "Undo";
-  undoBtn.style.cssText = "background:none; border:none; color:inherit; text-decoration:underline; cursor:pointer; font:inherit;";
+  undoBtn.className = "toast-action";
   undoBtn.onclick = () => {
     clearTimeout(undoTimer);
     errorDiv.hidden = true;
@@ -345,6 +345,18 @@ function celebrate(todoId) {
     if (!justCompleted.size && !editingInTree()) renderTree();
   }, 1400));
   if (navigator.vibrate) navigator.vibrate(12); // Android only; iOS ignores it
+  // Confetti from the checkbox once the row has rendered; a bigger burst when
+  // that was the last open todo.
+  requestAnimationFrame(() => {
+    const box = document.querySelector(`[data-todo-id="${todoId}"] .todo-check`);
+    if (box && window.Sparkle) {
+      const r = box.getBoundingClientRect();
+      window.Sparkle.burst(r.left + r.width / 2, r.top + r.height / 2);
+    }
+    if (window.Sparkle && model.todosById.size && [...model.todosById.values()].every((t) => t.done)) {
+      window.Sparkle.celebrateAll();
+    }
+  });
 }
 
 function spotlight(todoId) {
