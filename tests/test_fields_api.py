@@ -2,13 +2,16 @@ import pytest
 from fastapi.testclient import TestClient
 from app.main import app
 from app import db
+from app.auth import require_user
+
+app.dependency_overrides[require_user] = lambda: None
 
 c = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def db_setup():
     db.init()
-    for name in ("todos", "txn_log", "meta"):
+    for name in ("todos", "todos_archive", "txn_log", "meta"):
         for doc in db.get_conn().collection(name).stream():
             doc.reference.delete()
     yield
@@ -87,3 +90,23 @@ def test_blocked_by_rejects_ancestors_and_descendants():
     assert patch(grandkid, blocked_by=[parent["todo_id"]]).status_code == 400  # own ancestor
     assert patch(kid, blocked_by=[other["todo_id"]]).status_code == 200        # unrelated is fine
     assert patch(kid, references=[parent["todo_id"]]).status_code == 200       # references may relate
+
+def _archive(t):
+    import datetime
+    c.delete(f"/todos/{t['todo_id']}")
+    db.archive_expired(now=datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=31))
+
+def test_archived_link_ids_stay_editable():
+    a, b, gone, fresh = mk(), mk(), mk(), mk()
+    assert patch(a, blocked_by=[gone["todo_id"]], references=[gone["todo_id"]]).status_code == 200
+    _archive(gone)
+    # An id already on the todo is kept even though its target was archived.
+    r = patch(a, blocked_by=[gone["todo_id"], b["todo_id"]], references=[gone["todo_id"], fresh["todo_id"]])
+    assert r.status_code == 200, r.text
+    assert r.json()["blocked_by"] == [gone["todo_id"], b["todo_id"]]
+    # A newly added unknown/archived id is still rejected.
+    assert patch(b, references=[gone["todo_id"]]).status_code == 400
+    # Self-reference stays rejected.
+    assert patch(a, references=[gone["todo_id"], a["todo_id"]]).status_code == 400
+    # Dropping the dead id works.
+    assert patch(a, blocked_by=[b["todo_id"]]).json()["blocked_by"] == [b["todo_id"]]

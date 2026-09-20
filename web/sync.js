@@ -16,6 +16,13 @@
   const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat",
     "color", "links", "blocked_by", "references"];
 
+  // Fields holding lists of todo ids, which can hold a temporary id.
+  const LINK_FIELDS = ["blocked_by", "references"];
+  function remapList(list, tmp, real) {
+    if (!Array.isArray(list)) return;
+    for (let i = 0; i < list.length; i++) if (list[i] === tmp) list[i] = real;
+  }
+
   const isTmp = (id) => typeof id === "string" && id.startsWith("tmp:");
 
   // The server stores naive local datetimes, and the UI parses them as local
@@ -379,6 +386,10 @@
       for (const op of ops) {
         if (op.target_id === tmp) op.target_id = real;
         if (op.payload && op.payload.parent_id === tmp) op.payload.parent_id = real;
+        for (const f of LINK_FIELDS) remapList(op.payload && op.payload[f], tmp, real);
+      }
+      for (const n of model.todosById.values()) {
+        for (const f of LINK_FIELDS) remapList(n[f], tmp, real);
       }
 
       // Undo snapshots can hold the temporary id in several places: as their own
@@ -392,6 +403,7 @@
       for (const snap of model.trash.values()) {
         if (snap.parent_id === tmp) snap.parent_id = real;
         for (const n of snap.nodes) {
+          for (const f of LINK_FIELDS) remapList(n[f], tmp, real);
           if (n.todo_id === tmp) n.todo_id = real;
           if (n.parent_id === tmp) n.parent_id = real;
           n.child_ids = n.child_ids.map((c) => (c === tmp ? real : c));
@@ -436,7 +448,10 @@
       for (let i = ops.length - 1; i >= 0; i--) {
         const prev = ops[i];
         if (prev.target_id !== op.target_id) continue;
-        if (prev.state !== "pending") return false;
+        // A sent op may already be on the server (lost response, restored
+        // outbox) and would replay its logged answer under the same txn_id, so
+        // a merged change would never apply. Queue a new op instead.
+        if (prev.state !== "pending" || prev.sent) return false;
         if (op.kind === "patch" && prev.kind === "patch") {
           Object.assign(prev.payload, op.payload);
           return true;
@@ -458,6 +473,11 @@
         target_id: kind === "create" ? "tmp:" + uuid() : resolve(target_id),
         payload: { ...payload }, state: "pending", attempts: 0, conflicts: 0, sent: false,
       };
+      // Callers may still hold a temporary id whose create has since been acked.
+      if (op.payload.parent_id) op.payload.parent_id = resolve(op.payload.parent_id);
+      for (const f of LINK_FIELDS) {
+        if (Array.isArray(op.payload[f])) op.payload[f] = op.payload[f].map(resolve);
+      }
       if (kind === "split" && !op.payload.child_tmp_ids) {
         op.payload.child_tmp_ids = op.payload.descriptions.map(() => "tmp:" + uuid());
       }

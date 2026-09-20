@@ -157,8 +157,13 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) ->
 
     return run(client.transaction())
 
-def prune_txn_log(hours: int = 24) -> int:
-    """Delete idempotency records older than a client's retry window."""
+def prune_txn_log(hours: int = 24 * 30) -> int:
+    """Delete idempotency records older than a client's retry window.
+
+    A phone can sit offline with a sent-but-unacked create/split in its outbox
+    (same txn_id kept in IndexedDB) for days; if the record were gone by the
+    time it reconnects, the replay would run again and duplicate todos. 30 days
+    is far past any realistic offline stretch and the records are tiny."""
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
     removed = 0
     for doc in get_conn().collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():

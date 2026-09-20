@@ -42,7 +42,8 @@ never waits on the network.
   backoff (1s doubling to 30s).
 - **Idempotency**: each op carries `X-Txn-Id`. The server records the outcome
   in Firestore `txn_log` in the same transaction as the write, so a retry after
-  a lost response replays the answer instead of applying twice.
+  a lost response replays the answer instead of applying twice. Records are kept
+  30 days so a long-offline device replays safely.
 - **Versions**: every todo has a `version`, bumped on each write. Writes send
   `If-Match: <version>`; a stale one gets `409` plus the current todo. Field
   edits rebase (local wins on the same field); subtree ops reload instead.

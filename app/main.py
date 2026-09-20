@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import datetime
 import logging
+import re
 from pathlib import Path
 from typing import Callable
 import re
@@ -19,7 +20,16 @@ from app.auth import require_user
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
-app = FastAPI(dependencies=[Depends(require_user)])
+# The txn id becomes a Firestore document id, so only accept a plain token
+# (clients send UUIDs). Firestore also reserves ids of the form __name__.
+_TXN_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,100}$")
+
+def check_txn_id(x_txn_id: str | None = Header(None)) -> None:
+    if x_txn_id is not None and (
+            not _TXN_ID_RE.match(x_txn_id) or (x_txn_id.startswith("__") and x_txn_id.endswith("__"))):
+        raise HTTPException(400, "invalid X-Txn-Id")
+
+app = FastAPI(dependencies=[Depends(require_user), Depends(check_txn_id)])
 templates = Jinja2Templates(directory="templates")
 
 # Routes go here.
@@ -172,12 +182,16 @@ def get_todo(todo_id: uuid.UUID) -> models.Todo:
 
 def _check_ids(todo: models.Todo, name: str, ids: list[models.TodoId]) -> None:
     """Every id must exist (trashed ones count) and not be the todo itself;
-    blocked_by must also stay acyclic. Reads only, so safe before the write."""
+    blocked_by must also stay acyclic. Reads only, so safe before the write.
+    An id the todo already holds is kept even if its target was archived since
+    (it is inert: blocked ignores it), otherwise those lists could never be
+    edited again; only newly added ids must exist."""
     strs = [str(i) for i in ids]
     if str(todo.todo_id) in strs:
         raise HTTPException(400, f"{name} cannot contain the todo itself")
     docs = db.get_links_graph_docs(strs)
-    missing = [i for i, d in docs.items() if d is None]
+    held = {str(i) for i in getattr(todo, name)}
+    missing = [i for i, d in docs.items() if d is None and i not in held]
     if missing:
         raise HTTPException(400, f"{name}: unknown todo id {missing[0]}")
     if name == "blocked_by" and any(

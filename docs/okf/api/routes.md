@@ -4,12 +4,13 @@ title: HTTP routes
 description: All routes in app/main.py.
 resource: app/main.py
 tags: [api]
-timestamp: 2026-09-19T12:00:00Z
+timestamp: 2026-09-19T20:00:00Z
 ---
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. |
 | `POST /todos` | Create. |
+| any route with `X-Txn-Id` | Header must be a safe token (`[A-Za-z0-9_-]{1,100}`, not `__x__`), else 400. |
 | `GET /todos/tree` | Full tree; adds derived `blocked`. Triggers the [archive](../features/trash-archive.md) sweep. |
 | `GET /todos/rev` | Current revision + app `version`; the cheap freshness check ([sync](../features/sync-model.md)). |
 | `GET /todos/next` | [Next up](../features/next-up.md); also accepts `X-Widget-Token` ([widget](../ops/widget.md)). |

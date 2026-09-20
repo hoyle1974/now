@@ -807,3 +807,75 @@ test("a 400 rejection surfaces the server's detail in the notice", async () => {
   await h.engine.flush();
   assert.ok(h.notices.some((n) => n.level === "error" && n.message.includes("cycle")));
 });
+
+// ---- review fixes: sent ops, tmp ids in link lists ------------------------
+
+test("a patch whose send failed (may be on the server) is not merged into", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [
+    netFail(),
+    ok(todo("a", { version: 2, done: true })),
+    ok(todo("a", { version: 3, done: true, title: "z" })),
+  ] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush(); // send failed, op is pending again with sent=true
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "z" } });
+  assert.equal(h.engine.pending(), 2);
+  h.engine.kick();
+  await h.engine.flush();
+  assert.equal(h.calls.length, 3);
+  assert.deepEqual(h.calls[0].body, { done: true });
+  assert.notEqual(h.calls[0].headers["X-Txn-Id"], h.calls[2].headers["X-Txn-Id"]);
+  assert.deepEqual(h.calls[2].body, { title: "z" });
+});
+
+test("undelete does not cancel a delete that may already be applied", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [netFail()] });
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  await h.engine.flush();
+  h.engine.enqueue({ kind: "undelete", target_id: "a" });
+  assert.equal(h.engine.pending(), 2);
+  assert.equal(h.model.todosById.has("a"), true);
+});
+
+test("tmp ids in blocked_by/references are remapped when the create is acked", async () => {
+  const h = harness({ tree: treeOf(todo("b", { blocked_by: [], references: [] })), script: [
+    ok(todo("real-1", { version: 1 })),
+    ok(todo("b", { version: 2 })),
+  ] });
+  const tmp = h.engine.enqueue({ kind: "create", payload: { title: "A" } });
+  h.engine.enqueue({ kind: "patch", target_id: "b", payload: { blocked_by: [tmp], references: ["x", tmp] } });
+  await h.engine.flush();
+  assert.deepEqual(h.calls[1].body, { blocked_by: ["real-1"], references: ["x", "real-1"] });
+  assert.deepEqual(h.model.todosById.get("b").blocked_by, ["real-1"]);
+});
+
+test("model nodes' link lists are remapped too", async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  const h = harness({ tree: treeOf(todo("b", { blocked_by: [], references: [] })), script: [
+    () => gate.then(() => ({ status: 200, body: todo("real-1", { version: 1 }) })),
+    ok(todo("b", { version: 2 })),
+  ] });
+  const tmp = h.engine.enqueue({ kind: "create", payload: { title: "A" } });
+  h.engine.enqueue({ kind: "patch", target_id: "b", payload: { blocked_by: [tmp], references: [tmp] } });
+  release();
+  await h.engine.flush();
+  const b = h.model.todosById.get("b");
+  assert.deepEqual(b.blocked_by, ["real-1"]);
+  assert.deepEqual(b.references, ["real-1"]);
+});
+
+test("enqueue resolves stale tmp ids in parent_id and link lists", async () => {
+  const h = harness({ tree: treeOf(todo("b"), todo("c")), script: [
+    ok(todo("real-1", { version: 1 })),
+    ok(todo("b", { version: 2 })),
+    ok(todo("c", { version: 2 })),
+  ] });
+  const tmp = h.engine.enqueue({ kind: "create", payload: { title: "A" } });
+  await h.engine.flush();
+  h.engine.enqueue({ kind: "patch", target_id: "b", payload: { blocked_by: [tmp] } });
+  h.engine.enqueue({ kind: "reparent", target_id: "c", payload: { parent_id: tmp } });
+  await h.engine.flush();
+  assert.deepEqual(h.calls[1].body, { blocked_by: ["real-1"] });
+  assert.equal(h.calls[2].body.parent_id, "real-1");
+});
