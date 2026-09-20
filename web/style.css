@@ -653,7 +653,7 @@ body.menu-room {
 /* ---------- Inline editors ---------- */
 
 .sheet {
-  margin: 0 8px 12px;
+  margin: 0 0 12px;
   padding: 12px;
   background: var(--fill);
   border-radius: var(--radius-control);
@@ -690,15 +690,8 @@ body.menu-room {
   padding: max(16px, env(safe-area-inset-top)) 16px 16px;
 }
 
-.sheet-full .sheet-body > *,
-.sheet-full .sheet-actions {
-  max-width: 640px;
-  margin-left: auto;
-  margin-right: auto;
-}
-
 .sheet-title {
-  margin: 0 auto 16px;
+  margin: 0 0 16px;
   font-family: var(--font-display);
   font-size: 22px;
   font-weight: 700;
@@ -719,7 +712,7 @@ body.menu-room {
 }
 
 .view-facts {
-  margin: 0 auto 16px;
+  margin: 0 0 16px;
 }
 
 .view-value {
@@ -728,7 +721,7 @@ body.menu-room {
 }
 
 .sheet-full .todo-detail {
-  margin: 0 auto;
+  margin: 0;
 }
 
 .sheet-label {
