@@ -314,7 +314,7 @@ test("409 on delete/split/undelete drops the op, refetches once and notifies", a
 // ---- 8. 404 / 4xx --------------------------------------------------------
 
 test("404 drops all ops for the target and removes the item locally", async () => {
-  const h = harness({ tree: treeOf(todo("a"), todo("b")), script: [ok({}, 404), ok(todo("b", { version: 2 }))] });
+  const h = harness({ tree: treeOf(todo("a"), todo("b")), script: [ok({ detail: "todo not found" }, 404), ok(todo("b", { version: 2 }))] });
   h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
   h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "q" } });
   h.engine.enqueue({ kind: "patch", target_id: "b", payload: { done: true } });
@@ -355,22 +355,6 @@ test("ops persist on enqueue/ack, and load()+rebuild() replays them on a fetched
   engine2.rebuild(treeOf(todo("a")));
   assert.equal(model2.todosById.get("a").title, "unsent");
   assert.equal(engine2.pending(), 1);
-});
-
-test("rebuild does not replay a move that may already have been applied", async () => {
-  const model = Sync.createModel();
-  const store = memoryStore();
-  store.ops = [{ txn_id: "t", kind: "move", target_id: "a", payload: { direction: "down" },
-    state: "pending", attempts: 1, conflicts: 0, sent: true }];
-  const engine = Sync.createEngine({
-    model, store, send: () => Promise.reject(new Error("offline")), refetch: async () => treeOf(),
-    onChange() {}, onStatus() {}, onNotice() {}, onRemap() {},
-    timers: { setTimeout: () => 0, clearTimeout() {} }, random: () => 0.5, uuid: () => "x",
-  });
-  await engine.load();
-  const p = todo("p", { child_ids: ["b", "a"] });
-  engine.rebuild(treeOf(p, todo("a", { parent_id: "p", order_idx: 1 }), todo("b", { parent_id: "p", order_idx: 0 })));
-  assert.deepEqual(model.todosById.get("p").child_ids, ["b", "a"]);
 });
 
 test("epoch changes on enqueue and when an op leaves the outbox", async () => {
@@ -503,7 +487,7 @@ test("logs a rebuild with the revision and counts", () => {
 });
 
 test("logs dropped ops (404 / permanent failure)", async () => {
-  const h = harness({ tree: treeOf(todo("a")), script: [ok({}, 404)] });
+  const h = harness({ tree: treeOf(todo("a")), script: [ok({ detail: "todo not found" }, 404)] });
   h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
   await h.engine.flush();
   assert.ok(kinds(h).includes("drop"));
@@ -878,4 +862,103 @@ test("enqueue resolves stale tmp ids in parent_id and link lists", async () => {
   await h.engine.flush();
   assert.deepEqual(h.calls[1].body, { blocked_by: ["real-1"] });
   assert.equal(h.calls[2].body.parent_id, "real-1");
+});
+
+// ---- review fixes: delete If-Match, auth errors, undelete parent, moves, 404 ----
+
+test("delete sends If-Match with the version the node had before the optimistic delete", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 4 })), script: [ok(null, 204)] });
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["If-Match"], "4");
+});
+
+test("delete after an acked patch to the same item uses the patched version", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 4 })),
+    script: [ok({ version: 5 }), ok(null, 204)] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  await h.engine.flush();
+  assert.equal(h.calls[1].headers["If-Match"], "5");
+});
+
+test("a stale delete (409) keeps the item's newer content by reloading", async () => {
+  const fresh = treeOf(todo("a", { version: 9, title: "newer" }));
+  const h = harness({ tree: treeOf(todo("a", { version: 4 })), refetchTree: fresh,
+    script: [ok({ version: 9 }, 409)] });
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 0);
+  assert.equal(h.refetches, 1);
+  assert.equal(h.model.todosById.get("a").title, "newer");
+  assert.ok(h.notices.some((n) => /another device/.test(n.message)));
+});
+
+for (const code of [401, 403, 408]) {
+  test(`${code} keeps the edit, retries with backoff and never refetches`, async () => {
+    const h = harness({ tree: treeOf(todo("a")), script: [ok(null, code), ok({ version: 2 })] });
+    h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+    await h.engine.flush();
+    assert.equal(h.engine.pending(), 1);
+    assert.equal(h.refetches, 0);
+    assert.equal(h.model.todosById.get("a").title, "x");
+    assert.equal(h.engine.status().state, "offline");
+    if (code !== 408) assert.equal(h.engine.status().auth, true);
+    h.fire();
+    await h.engine.flush();
+    assert.equal(h.engine.pending(), 0);
+    assert.equal(h.engine.status().auth, false);
+  });
+}
+
+test("undelete into a missing parent clears parent_id so later moves work", () => {
+  const model = Sync.createModel();
+  const p = todo("p", { child_ids: ["c"] });
+  const c = todo("c", { parent_id: "p", order_idx: 0 });
+  Object.assign(model, treeOf(p, c));
+  Sync.applyOp(model, { kind: "delete", target_id: "c", payload: {} });
+  Sync.applyOp(model, { kind: "delete", target_id: "p", payload: {} });
+  Sync.applyOp(model, { kind: "undelete", target_id: "c", payload: {} });
+  assert.equal(model.roots.includes(c), true);
+  assert.equal(c.parent_id, null);
+});
+
+test("rebuild re-applies an unacknowledged move that was marked sent", async () => {
+  const model = Sync.createModel();
+  const store = memoryStore();
+  store.ops = [{ txn_id: "t", kind: "move", target_id: "a", payload: { direction: "up" },
+    state: "pending", attempts: 1, conflicts: 0, sent: true }];
+  const engine = Sync.createEngine({
+    model, store, send: () => Promise.reject(new Error("offline")), refetch: async () => treeOf(),
+    onChange() {}, onStatus() {}, onNotice() {}, onRemap() {},
+    timers: { setTimeout: () => 0, clearTimeout() {} }, random: () => 0.5, uuid: () => "x",
+  });
+  await engine.load();
+  const p = todo("p", { child_ids: ["b", "a"] });
+  engine.rebuild(treeOf(p, todo("a", { parent_id: "p", order_idx: 1 }), todo("b", { parent_id: "p", order_idx: 0 })));
+  assert.deepEqual(model.todosById.get("p").child_ids, ["a", "b"]);
+});
+
+test("a create reply with no body does not wedge the outbox", async () => {
+  const h = harness({ script: [ok(null, 200), ok({ todo_id: "r1", version: 1, create_date: "d", order_idx: 0 })] });
+  h.engine.enqueue({ kind: "create", payload: { title: "n" } });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 1, "op kept");
+  assert.equal(h.timers.filter((t) => t.live).length, 1, "retry scheduled");
+  h.fire();
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 0);
+});
+
+test("a JSON 'todo not found' 404 drops the item; other 404s retry", async () => {
+  const h = harness({ tree: treeOf(todo("a")),
+    script: [ok({ detail: "Not Found" }, 404), ok({ detail: "todo not found" }, 404)] });
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 1, "route 404 retried, not dropped");
+  assert.ok(h.model.todosById.has("a"));
+  h.fire();
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 0);
+  assert.equal(h.model.todosById.has("a"), false);
 });

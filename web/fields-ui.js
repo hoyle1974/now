@@ -3,8 +3,6 @@
 // Depends on Fields (fields.js); app.js hands it the model and focusTodo.
 const FieldsUI = (() => {
   let deps = { model: null, focusTodo: () => {} };
-  // Rows whose detail panel is open. View state only; folded by default.
-  const expanded = new Set();
 
   function init(d) { deps = d; }
 
@@ -31,13 +29,6 @@ const FieldsUI = (() => {
   }
 
   // ---- detail panel ---------------------------------------------------------
-
-  function isExpanded(todoId) { return expanded.has(todoId); }
-
-  function toggleExpanded(todoId) {
-    if (expanded.has(todoId)) expanded.delete(todoId);
-    else expanded.add(todoId);
-  }
 
   // Taps on real controls inside the row must not fold/unfold it.
   function isRowTap(target) {
@@ -242,5 +233,5 @@ const FieldsUI = (() => {
     return { nodes, changes };
   }
 
-  return { init, decorateRow, blockedChip, isExpanded, toggleExpanded, isRowTap, renderDetail, renderEditFields };
+  return { init, decorateRow, blockedChip, isRowTap, renderDetail, renderEditFields };
 })();

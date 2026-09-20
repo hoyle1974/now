@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "46";
+const APP_VERSION = "47";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -144,6 +144,8 @@ function renderSyncStatus(st) {
   let text;
   if (state === "syncing") {
     text = `Syncing ${pending}…` + (engineStatus.unsaved ? " (not saved on device)" : "");
+  } else if (state === "offline" && engineStatus.auth) {
+    text = `Sign in to sync \u00b7 ${pending} pending`;
   } else if (state === "offline") {
     text = `Offline · ${pending} pending` + (engineStatus.unsaved ? " (not saved on device)" : "");
   } else if (state === "error") {
@@ -224,7 +226,9 @@ AttachmentsUI.init({
 // rename box)? A refresh re-renders the list and would wipe that text. The
 // composer at the bottom sits outside the list, so it doesn't count.
 function editingInTree() {
-  if (activePanel && activePanel.mode !== "menu" && activePanel.mode !== "view") return true;
+  // The open viewer counts too: a refresh would rebuild it (dropping an
+  // in-flight upload, the lightbox and the scroll position). Closing it pokes.
+  if (activePanel && activePanel.mode !== "menu") return true;
   const el = document.activeElement;
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && !!el.closest("#todo-tree");
 }
@@ -340,7 +344,7 @@ function showUndo(todoId) {
 }
 
 async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
-  setActivePanel(null);
+  setActivePanel(viewerOrigin === todoId ? "view" : null, todoId);
   // null explicitly clears the due date (and a repeat rule needs a date).
   // fields: only the changed color/links/blocked_by/references (see fields.js).
   engine.enqueue({ kind: "patch", target_id: todoId,
@@ -422,8 +426,15 @@ function spotlight(todoId) {
 // whatever else was open. mode is "menu" | "edit" | "add" | "split" | "view".
 let activePanel = null;
 
+// The todo whose edit sheet was opened from the viewer, so Cancel/Save/Escape
+// go back to it instead of the list.
+let viewerOrigin = null;
+
 function setActivePanel(mode, todoId) {
   activePanel = mode ? { mode, todoId } : null;
+  if (mode !== "edit") viewerOrigin = null;
+  // The full-screen viewer/edit sheet is fixed; keep the page behind it still.
+  document.body.style.overflow = mode === "view" || mode === "edit" ? "hidden" : "";
   // After the caller has re-rendered: the closed editor's inputs are gone by then.
   if (!mode) setTimeout(() => freshness.poke(), 0);
 }
@@ -1060,6 +1071,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   FieldsUI.decorateRow(row, todo);
   row.addEventListener("click", (e) => {
     if (!FieldsUI.isRowTap(e.target) || row.classList.contains("dragging")) return;
+    // A plain tap must not throw away an open editor with typed text.
+    if (activePanel && ["add", "split", "edit"].includes(activePanel.mode) &&
+        [...document.querySelectorAll("#todo-tree .sheet input, #todo-tree .sheet textarea")]
+          .some((f) => f.type !== "date" && f.type !== "time" && f.value.trim())) return;
     setActivePanel("view", todo.todo_id);
     renderTree();
   });
@@ -1123,7 +1138,8 @@ function renderEditorActions(onSave, saveLabel = "Save") {
   cancelBtn.className = "btn btn-plain";
   cancelBtn.textContent = "Cancel";
   cancelBtn.addEventListener("click", () => {
-    setActivePanel(null);
+    const back = viewerOrigin;
+    setActivePanel(back ? "view" : null, back);
     renderTree();
   });
 
@@ -1398,6 +1414,7 @@ function renderViewer(todo, counts) {
   editBtn.textContent = "Edit";
   editBtn.addEventListener("click", () => {
     setActivePanel("edit", todo.todo_id);
+    viewerOrigin = todo.todo_id;
     renderTree();
   });
   buttons.append(closeBtn, editBtn);
@@ -1470,6 +1487,7 @@ function renderTree() {
   renderSummary();
   if (model.roots.length === 0) {
     treeEl.appendChild(renderEmptyState());
+    if (activePanel && activePanel.mode === "view") setActivePanel(null);
     return;
   }
   const descendantCounts = computeDescendantCounts(model.todosById);
@@ -1479,8 +1497,26 @@ function renderTree() {
   for (const root of roots) {
     treeEl.appendChild(renderNode(root, model.todosById, descendantCounts));
   }
+  // The viewer's todo was deleted remotely or its ancestor collapsed: nothing
+  // rendered it, so don't leave a dead panel (and a scroll lock) behind.
+  if (activePanel && activePanel.mode === "view" && !treeEl.querySelector(".sheet-full")) {
+    setActivePanel(null);
+  }
   placeOpenMenu();
 }
+
+// Escape closes the viewer, or steps back from an edit sheet opened from it.
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !activePanel) return;
+  if (activePanel.mode === "view") {
+    setActivePanel(null);
+    renderTree();
+  } else if (activePanel.mode === "edit" && viewerOrigin) {
+    const id = viewerOrigin;
+    setActivePanel("view", id);
+    renderTree();
+  }
+});
 
 // The menu opens below its kebab. Near the bottom of the screen that puts it
 // under the composer, so open it upward if there's room above, otherwise

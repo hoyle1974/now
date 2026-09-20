@@ -175,14 +175,16 @@
         onLog("skip", "another check is running");
         return;
       }
-      clearRetry();
-      retryCount = 0;
       const sinceLast = now() - lastCheck;
       const debounced = sinceLast < minGapMs && awayMs < awayBypassMs;
       if (!force && !engine.isStale() && debounced) {
         onLog("skip", `debounced (${sinceLast}ms since last check)`);
         return;
       }
+      // Only a check that actually proceeds supersedes a pending retry; a
+      // debounced one must leave it, or "Reconnecting…" would never resolve.
+      clearRetry();
+      retryCount = 0;
       await attempt();
     }
 

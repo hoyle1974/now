@@ -163,6 +163,9 @@
         model.trash.delete(id);
         snap.nodes.forEach((n) => model.todosById.set(n.todo_id, n));
         const node = snap.nodes[0];
+        // The server resets a missing/trashed parent to null; mirror that so
+        // later moves and detaches look in the roots list.
+        if (!(snap.parent_id && model.todosById.get(snap.parent_id))) node.parent_id = null;
         const parent = snap.parent_id ? model.todosById.get(snap.parent_id) : null;
         const list = parent ? parent.child_ids : model.roots;
         const item = parent ? id : node;
@@ -313,6 +316,9 @@
     // True while the outbox can't be written to device storage: edits still
     // sync, but would be lost if the page were closed first.
     let saveFailed = false;
+    // The server refused our credentials (401/403) or we have none: edits are
+    // kept and retried, and the status says so.
+    let authBlocked = false;
     // Holding the outbox because the device is offline (no retry timer runs).
     let parked = false;
     let forceOnline = false;
@@ -343,7 +349,8 @@
       if (backoffTimer !== null || parked) state = "offline";
       else if (ops.length) state = "syncing";
       else if (lastError) state = "error";
-      return { state, pending: ops.length, unsaved: saveFailed && ops.length > 0 };
+      return { state, pending: ops.length, unsaved: saveFailed && ops.length > 0,
+        auth: authBlocked && ops.length > 0 };
     }
 
     function emitStatus() { onStatus(status()); }
@@ -532,10 +539,18 @@
       }
     }
 
+    // A deleted node lives in the undo snapshot until the delete is acked; its
+    // version must still follow earlier acks and be sent as If-Match.
+    function nodeOf(id) {
+      return model.todosById.get(id) || (model.trash.get(id)?.nodes[0]);
+    }
+
     function ackSuccess(op, body) {
       lastError = false;
+      authBlocked = false;
       switch (op.kind) {
         case "create": {
+          if (!body || !body.todo_id) throw new Error("create reply had no todo_id");
           remapId(op.target_id, body.todo_id);
           const node = model.todosById.get(body.todo_id);
           if (node) Object.assign(node, { version: body.version, create_date: body.create_date, order_idx: body.order_idx });
@@ -544,7 +559,7 @@
         case "patch":
         case "move":
         case "reparent": {
-          const node = model.todosById.get(op.target_id);
+          const node = nodeOf(op.target_id);
           if (node && body) node.version = body.version;
           break;
         }
@@ -624,6 +639,20 @@
         await refetchAndRebuild();
         return true;
       }
+      if (code === 404 && !(body && typeof body.detail === "string" && /todo not found/i.test(body.detail))) {
+        // A route 404 (older/newer server instance) says nothing about the
+        // item: retry, and after a few tries reconcile with the server rather
+        // than delete anything locally.
+        if (op.attempts < 3) {
+          log("retry", `${op.kind}: 404 without a todo-not-found body`);
+          scheduleRetry(op);
+          return false;
+        }
+        dropHead(op);
+        log("drop", `${op.kind}: repeated 404, reloading from the server`);
+        await refetchAndRebuild();
+        return true;
+      }
       if (code === 404) {
         log("drop", `${op.kind}: 404, item is gone`);
         const target = op.target_id;
@@ -638,6 +667,14 @@
         onChange();
         notice("info", "That item no longer exists on the server.");
         return true;
+      }
+      if (code === 401 || code === 403 || code === 408) {
+        // Expired session / signed out / timeout: the edit is still wanted, so
+        // hold it and retry (the fetch wrapper refreshes the token each time).
+        authBlocked = code !== 408;
+        log("retry", `${op.kind}: ${code}, keeping the edit`);
+        scheduleRetry(op);
+        return false;
       }
       if (code >= 500 || code === 429) {
         scheduleRetry(op);
@@ -680,19 +717,28 @@
           op.state = "sending";
           op.sent = true;
           emitStatus();
-          const version = model.todosById.get(op.target_id)?.version;
+          const version = nodeOf(op.target_id)?.version;
           let res;
           const startedAt = Date.now();
           try {
             res = await send(buildRequest(op, version));
           } catch (e) {
             log("send-fail", `${op.kind} ${e && e.message ? e.message : e} (${Date.now() - startedAt}ms)`);
+            authBlocked = !!(e && e.message === "Sign in required");
             scheduleRetry(op);
             break;
           }
           log("send", `${op.kind} ${res.status} (${Date.now() - startedAt}ms) rev ${res.prev ?? "?"}->${res.rev ?? "?"}`);
           observeRev(res.prev, res.rev);
-          const proceed = await handle(op, res);
+          let proceed;
+          try {
+            proceed = await handle(op, res);
+          } catch (e) {
+            // A malformed reply must not strand the op in "sending" with no timer.
+            log("handle-fail", `${op.kind} ${e && e.message ? e.message : e}`);
+            scheduleRetry(op);
+            break;
+          }
           emitStatus();
           if (!proceed) break;
         }
@@ -741,8 +787,9 @@
         stale = false;
       }
       for (const op of ops) {
-        // A move that may already have reached the server would apply twice.
-        if (op.kind === "move" && op.sent) continue;
+        // Every op still queued is unacknowledged (acked ops leave the
+        // outbox), so a move is re-applied even if `sent`: it may have failed
+        // or been restored from storage, and a replay is idempotent by txn_id.
         applyOp(model, op);
       }
       log("rebuild", `rev ${tree.rev ?? "?"}, ${todosById.size} todos, ${ops.length} pending`);

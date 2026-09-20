@@ -401,3 +401,14 @@ test("unsent edits are not lost: a mismatch still defers behind the outbox", asy
   await f.check();
   assert.equal(s.reloads, 0);
 });
+
+test("a debounced check does not cancel a pending reconnect retry", async () => {
+  const { s, f } = setup({ revFails: true });
+  await f.check({ force: true }); // fails: retry scheduled, lastCheck still recent
+  assert.equal(s.liveTimers().length, 1);
+  await f.check(); // flicker inside the debounce window
+  assert.equal(s.liveTimers().length, 1, "retry still pending");
+  s.revFails = false;
+  await s.fireRetry();
+  assert.equal(s.phases[s.phases.length - 1], "idle");
+});
