@@ -211,14 +211,13 @@ const AttachmentsUI = (() => {
       if (response.status === 404) {
         // Already gone (removed elsewhere): drop it locally too.
         node().attachments = list().filter((x) => x.id !== a.id);
-        release(`${todo.todo_id}/${a.id}`);
       } else if (!response.ok) {
         deps.notify("Couldn't remove the image. Please try again.");
         return;
       } else {
         adopt(await response.json(), revHeaders(response));
-        release(`${todo.todo_id}/${a.id}`);
       }
+      release(`${todo.todo_id}/${a.id}`);
       draw();
     }
 

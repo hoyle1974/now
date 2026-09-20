@@ -680,6 +680,10 @@ def _aware(dt: datetime.datetime) -> datetime.datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
 
 
+def _parse_aware(stamp: str) -> datetime.datetime:
+    return _aware(datetime.datetime.fromisoformat(stamp))
+
+
 def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AFTER_DAYS) -> int:
     """Move todos deleted at least `days` ago, with everything beneath them, from
     "todos" to the archive collection. Returns how many documents moved.
@@ -701,7 +705,7 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
         stamp = data.get("deleted_at")
         if stamp is None:
             doc.reference.update({"deleted_at": now.isoformat()})
-        elif _aware(datetime.datetime.fromisoformat(stamp)) <= cutoff and data["todo_id"] not in moving:
+        elif _parse_aware(stamp) <= cutoff and data["todo_id"] not in moving:
             moving[data["todo_id"]] = data
             for below in db_firestore_helpers.get_subtree_docs(_todos_collection, data["todo_id"]):
                 moving.setdefault(below["todo_id"], below)
@@ -778,10 +782,10 @@ def _claim_archive_run(now: datetime.datetime) -> bool:
         snap = ref.get(transaction=tx)
         doc = snap.to_dict() if snap.exists else {}
         last = doc.get("last_success") or doc.get("last_run")
-        if last and now - _aware(datetime.datetime.fromisoformat(last)) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
+        if last and now - _parse_aware(last) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
             return False
         lease = doc.get("lease_until")
-        if lease and _aware(datetime.datetime.fromisoformat(lease)) > now:
+        if lease and _parse_aware(lease) > now:
             return False
         tx.set(ref, {"last_success": last, "lease_until": (now + _ARCHIVE_LEASE).isoformat()})
         return True

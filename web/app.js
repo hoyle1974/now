@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "51";
+const APP_VERSION = "52";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -33,6 +33,18 @@ logEvent("load", `page #${nextPageNumber()} v${APP_VERSION} ${document.visibilit
 // True while the toast shows an apiFetch failure (the only thing apiFetch may clear).
 let apiErrorShown = false;
 
+// Every writer of the shared #error toast starts here: it stops the other
+// writers' timers and handlers so none can clobber (or later clear) the new one.
+function claimToast(errorDiv) {
+  clearTimeout(apiFetch.hideTimer);
+  clearTimeout(noticeTimer);
+  clearTimeout(undoTimer);
+  apiErrorShown = false;
+  lastDeleted = null;
+  errorDiv.onclick = null;
+  delete errorDiv.dataset.kind;
+}
+
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
   try {
@@ -54,14 +66,10 @@ async function apiFetch(path, options = {}) {
     return await response.json();
   } catch (err) {
     logEvent("fetch-fail", `${path}: ${err.message}`);
-    clearTimeout(undoTimer);
-    clearTimeout(noticeTimer);
-    lastDeleted = null;
-    errorDiv.onclick = null;
+    claimToast(errorDiv);
     errorDiv.hidden = false;
     errorDiv.textContent = "Something went wrong — " + err.message;
     apiErrorShown = true;
-    clearTimeout(apiFetch.hideTimer);
     apiFetch.hideTimer = setTimeout(() => {
       if (apiErrorShown) { apiErrorShown = false; errorDiv.hidden = true; }
     }, 5000);
@@ -105,18 +113,13 @@ let noticeTimer = null;
 
 function showNotice({ level, message }) {
   const errorDiv = document.getElementById("error");
-  clearTimeout(undoTimer);
-  clearTimeout(noticeTimer);
-  clearTimeout(apiFetch.hideTimer);
-  apiErrorShown = false;
-  lastDeleted = null;
+  claimToast(errorDiv);
   errorDiv.hidden = false;
   errorDiv.textContent = message;
   if (level === "error") {
     // Permanent failures stay until dismissed.
     errorDiv.onclick = () => { errorDiv.hidden = true; };
   } else {
-    errorDiv.onclick = null;
     noticeTimer = setTimeout(() => { errorDiv.hidden = true; }, 5000);
   }
 }
@@ -331,12 +334,9 @@ let lastDeleted = null;
 let undoTimer = null;
 
 function showUndo(todoId) {
-  lastDeleted = todoId;
-  apiErrorShown = false;
-  clearTimeout(apiFetch.hideTimer);
-  clearTimeout(noticeTimer);
   const errorDiv = document.getElementById("error");
-  errorDiv.onclick = null;
+  claimToast(errorDiv);
+  lastDeleted = todoId;
   errorDiv.hidden = false;
   errorDiv.textContent = "Deleted · ";
   const undoBtn = document.createElement("button");
@@ -350,7 +350,6 @@ function showUndo(todoId) {
   };
   errorDiv.appendChild(undoBtn);
 
-  clearTimeout(undoTimer);
   undoTimer = setTimeout(() => {
     if (lastDeleted === todoId) {
       errorDiv.hidden = true;
@@ -1658,18 +1657,21 @@ document.addEventListener("DOMContentLoaded", async () => {
   // held (sync.js needsTree) until a tree loads, so say so and keep trying.
   if (engine.needsTree()) {
     showNotice({ level: "error", message: `Offline — couldn't load your list. Your ${engine.pending()} unsent edit(s) are saved and will sync once it loads.` });
-    setInterval(retryFirstLoad, 15000);
+    document.getElementById("error").dataset.kind = "offline";
+    const timer = setInterval(() => (engine.needsTree() ? retryFirstLoad() : clearInterval(timer)), 15000);
   }
   engine.kick();
 });
 
-// Retry the first tree load (see above); a no-op once one has loaded.
+// Retry the first tree load (see above); a no-op once one has loaded, and only
+// one attempt runs at a time (the timer, a return to the app and a pill tap can coincide).
+let firstLoadRetry = null;
 function retryFirstLoad() {
-  if (!engine.needsTree()) return;
-  reportedFailure(loadAndRender()).then(() => {
-    if (engine.needsTree()) return;
+  if (firstLoadRetry || !engine.needsTree()) return;
+  firstLoadRetry = reportedFailure(loadAndRender()).then(() => {
+    firstLoadRetry = null;
     const errorDiv = document.getElementById("error");
-    if (errorDiv.textContent.startsWith("Offline — couldn't load your list")) errorDiv.hidden = true;
+    if (!engine.needsTree() && errorDiv.dataset.kind === "offline") errorDiv.hidden = true;
   });
 }
 

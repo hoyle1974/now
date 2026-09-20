@@ -140,7 +140,7 @@
   // so a scroll (many events a second) doesn't churn timers.
   let lastArm = 0;
   function activity(e) {
-    if (e && e.target && e.target.closest && e.target.closest(".mascot")) return;
+    if (e.target.closest?.(".mascot")) return;
     if (up) hide();
     else {
       const t = Date.now();
@@ -208,12 +208,10 @@
   }
   // The motion stream is ~60 readings a second, so only listen while the shake
   // feature is armed, the page is visible and the mascot is enabled.
-  let motionListening = false;
+  // (Adding or removing the same listener twice is a no-op.)
   function syncMotion() {
-    const want = shakeOn && enabled() && !(typeof document !== "undefined" && document.hidden);
-    if (want && !motionListening) root.addEventListener("devicemotion", onMotion);
-    else if (!want && motionListening) root.removeEventListener("devicemotion", onMotion);
-    motionListening = want;
+    const want = shakeOn && enabled() && !document.hidden;
+    root[want ? "addEventListener" : "removeEventListener"]("devicemotion", onMotion);
   }
   // Android and desktop need no permission: arm right away.
   if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();

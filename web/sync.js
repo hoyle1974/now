@@ -787,22 +787,18 @@
       const saved = await store.load();
       ops = (saved || []).map((o) => ({ ...o, state: "pending" }));
       needTree = ops.length > 0;
-      // The server keeps its replay log (txn_log) for 30 days. A create/split
-      // that was sent and then sat in the outbox nearly that long may already be
-      // committed but unacked; replaying it would duplicate it, so rebuild()
-      // checks it against the server tree first.
-      for (const op of ops) {
-        if (op.sent && (op.kind === "create" || op.kind === "split") &&
-            typeof op.queued_at === "number" && now() - op.queued_at > SUSPECT_AGE_MS) {
-          op.suspect = true;
-        }
-      }
       log("outbox", `${ops.length} unsent edit(s) restored`);
       emitStatus();
     }
 
-    // Replace the model with a fresh server tree and re-apply everything still
-    // in the outbox on top of it, so unsent edits stay visible.
+    // The server keeps its replay log (txn_log) for 30 days. A create/split that
+    // was sent and then sat in the outbox nearly that long may already be
+    // committed but unacked; replaying it would duplicate it, so rebuild()
+    // checks it against the server tree first.
+    const isSuspect = (op) =>
+      op.sent && (op.kind === "create" || op.kind === "split") &&
+      typeof op.queued_at === "number" && now() - op.queued_at > SUSPECT_AGE_MS;
+
     // True when the server tree already holds what a suspect (old, sent) op
     // would create, made after the op was queued.
     function alreadyCommitted(op, todosById) {
@@ -820,14 +816,14 @@
       return op.payload.descriptions.every((d) => kids.some((k) => k.title === d));
     }
 
+    // Replace the model with a fresh server tree and re-apply everything still
+    // in the outbox on top of it, so unsent edits stay visible.
     function rebuild(tree) {
       const todosById = tree.todosById;
       needTree = false;
       const before = ops.length;
       ops = ops.filter((op) => {
-        if (!op.suspect) return true;
-        delete op.suspect;
-        if (!alreadyCommitted(op, todosById)) return true;
+        if (!isSuspect(op) || !alreadyCommitted(op, todosById)) return true;
         log("drop", `${op.kind}: already on the server (old outbox), not replaying`);
         return false;
       });
