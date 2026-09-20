@@ -3,3 +3,4 @@ uvicorn
 jinja2
 python-multipart
 firebase-admin
+google-cloud-storage

@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "25";
+const APP_VERSION = "26";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -186,6 +186,12 @@ const engine = Sync.createEngine({
     if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
     if (lastDeleted === tmp) lastDeleted = real;
   },
+});
+
+AttachmentsUI.init({
+  model,
+  notify: (message) => showNotice({ level: "error", message }),
+  observeRev: (prev, rev) => engine.observeRev(prev, rev),
 });
 
 // Is the user in the middle of typing into the list (an inline editor, or the

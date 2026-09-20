@@ -2,6 +2,7 @@
 type: Log
 title: Change log
 description: Dated record of updates to this bundle.
-timestamp: 2026-09-19T00:00:00Z
+timestamp: 2026-09-19T12:00:00Z
 ---
 - 2026-09-19: Initial bundle drafted from README.md and the code (app/, web/).
+- 2026-09-19: Added image attachments (features/attachments.md); updated Todo, routes, code map, stack, trash-archive, deploy, testing.

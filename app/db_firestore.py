@@ -1,6 +1,7 @@
 # Firestore implementation of todo database
 from __future__ import annotations
 from app import models
+from app import blobstore
 from app import db_firestore_helpers
 from app import recurrence
 import contextvars
@@ -431,6 +432,7 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
         copy.due_date = due
         copy.spawned_id = None
         copy.version = 1
+        copy.attachments = []  # the images belong to the original occurrence
         return copy
 
     copies: list[models.Todo] = []
@@ -726,6 +728,11 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
         for data in chunk:
             batch.delete(_todos_collection.document(data["todo_id"]))
         batch.commit()
+    # Images go last: a crash before this leaves orphan blobs, never a todo
+    # pointing at a missing image.
+    for data in docs:
+        if data.get("attachments"):
+            blobstore.get_store().delete_prefix(blobstore.todo_prefix(data["todo_id"]))
     return len(docs)
 
 def maybe_archive_expired() -> int:

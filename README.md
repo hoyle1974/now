@@ -196,6 +196,32 @@ service (`app/auth.py`). Unset, the token is off.
 iOS decides when widgets refresh (the script asks for ~15 minutes), so the list
 can lag a little.
 
+## Image attachments
+
+A todo can carry up to 10 images (JPEG, PNG, GIF, WebP, 10 MB each), added from
+the todo's view sheet by picker, drag-drop or paste. Online only: nothing is
+queued offline, and a todo that hasn't synced yet can't take images.
+
+- **Bytes** live in a private Cloud Storage bucket (`<project>-attachments`,
+  `us-central1`, public access prevention on, no CORS) under
+  `todos/{todo_id}/{attachment_id}`. **Metadata** (`id`, `name`, `content_type`,
+  `size`) is `Todo.attachments` in Firestore, so it rides the normal version and
+  `If-Match` handling. The browser never talks to the bucket: uploads and
+  downloads go through the authenticated API (`POST/GET/DELETE
+  /todos/{id}/attachments[/{aid}]`), and images are shown as blob URLs.
+- The server sniffs the file's leading bytes and ignores the client's type; SVG
+  is refused. Downloads are `nosniff`, `inline`, and cached forever (an
+  attachment never changes).
+- Soft-deleting a todo keeps its images; the 30-day archive deletes them.
+  Recurring todos don't copy images to the next occurrence.
+- **One-time setup:** `scripts/create-bucket.sh` creates the bucket, grants the
+  Cloud Run service account `objectAdmin` on that bucket only, and sets
+  `ATTACHMENTS_BUCKET` on the service. Until it is set, Cloud Run refuses
+  uploads instead of storing them in memory. Locally (no bucket) an in-memory
+  store is used, so images vanish on restart.
+- Code: `app/blobstore.py` (GCS and in-memory stores), `app/attachments.py`
+  (type sniffing), `web/attachments.js` and `web/attachments-ui.js`.
+
 ## Deploy
 
 ```bash

@@ -44,6 +44,16 @@ class Link(BaseModel):
             raise ValueError("label too long")
         return v
 
+MAX_ATTACHMENTS = 10
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
+
+class Attachment(BaseModel):
+    """Metadata for one image; the bytes live in the blob store."""
+    id: str
+    name: str
+    content_type: str
+    size: int
+
 class TodoCreate(BaseModel):
     title: str
     due_date: datetime.datetime | None = Field(None)
@@ -113,4 +123,5 @@ class Todo(BaseModel):
     links: list[Link] = Field([])
     blocked_by: list[TodoId] = Field([])
     references: list[TodoId] = Field([])
+    attachments: list[Attachment] = Field([])  # only changed via the attachment endpoints
     blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree

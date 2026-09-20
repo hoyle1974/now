@@ -3,10 +3,11 @@ type: Architecture
 title: Stack
 description: Technologies and how the pieces fit together.
 tags: [architecture]
-timestamp: 2026-09-19T00:00:00Z
+timestamp: 2026-09-19T12:00:00Z
 ---
 - **Backend:** FastAPI (`app/main.py`), Python 3.13, pydantic models ([Todo](../data/todo.md)).
 - **Database:** Firestore ([collections](../data/firestore.md)). Tests use the emulator ([testing](../ops/testing.md)).
+- **Image storage:** a private Cloud Storage bucket, reached only through the API ([attachments](../features/attachments.md)).
 - **Frontend:** vanilla JS in `web/` (no framework, no build step) served with a
   single `index.html`; an offline-first outbox drives all writes
   ([sync model](../features/sync-model.md)).

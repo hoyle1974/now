@@ -23,6 +23,7 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         links=[models.Link(**l) for l in doc_dict.get("links") or []],
         blocked_by=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("blocked_by") or []],
         references=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("references") or []],
+        attachments=[models.Attachment(**a) for a in doc_dict.get("attachments") or []],
         child_ids=[]
     )
 
@@ -46,6 +47,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "links": [{"url": l.url, "label": l.label} for l in todo.links],
         "blocked_by": [str(i) for i in todo.blocked_by],
         "references": [str(i) for i in todo.references],
+        "attachments": [a.model_dump() for a in todo.attachments],
     }
 
 def get_subtree_docs(todos_collection, parent_id: str, getter=None) -> list[dict]:

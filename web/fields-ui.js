@@ -82,6 +82,7 @@ const FieldsUI = (() => {
       refs.forEach((t) => panel.appendChild(todoButton(t)));
     }
     if (!any) panel.appendChild(el("p", "detail-empty", "No links or related todos. Add them from Edit."));
+    panel.appendChild(AttachmentsUI.renderSection(todo));
     return panel;
   }
 

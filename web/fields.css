@@ -187,3 +187,69 @@
 .picker-option.is-selected { color: var(--accent); font-weight: 600; }
 .picker-option.is-selected::before { content: "\2713\00a0"; }
 .picker-option:active { background: var(--fill); }
+
+/* Image attachments (see attachments-ui.js). */
+.attachment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.attachment-thumb {
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  overflow: hidden;
+  background: var(--fill-pressed);
+  cursor: pointer;
+}
+
+.attachment-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-thumb.is-broken { opacity: 0.4; }
+
+.attachment-add { margin-top: 4px; }
+.attachment-status { margin: 4px 0; }
+
+.attachments.is-dropping {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.lightbox-img {
+  max-width: 100%;
+  max-height: calc(100% - 64px);
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.lightbox-error { color: #fff; }
+
+.lightbox-bar {
+  display: flex;
+  gap: 12px;
+}
+
+.lightbox-bar .btn { color: #fff; }
+.lightbox-bar .lightbox-remove { color: #ff6369; }

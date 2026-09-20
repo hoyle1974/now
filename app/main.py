@@ -1,6 +1,6 @@
 from __future__ import annotations
 from fastapi.templating import Jinja2Templates
-from fastapi import Depends, FastAPI, HTTPException, Header, Query, Response
+from fastapi import Depends, FastAPI, File, HTTPException, Header, Query, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Callable
 import re
 import uuid
+from app import attachments
+from app import blobstore
 from app import db
 from app import models
 from app import next_up
@@ -277,6 +279,72 @@ def delete_todo(todo_id: uuid.UUID,
 
     return _reply(*db.run_atomic(
         x_txn_id, lambda: _apply(todo_id, if_match, action, missing_ok=True)))
+
+@app.post("/todos/{todo_id}/attachments", response_model=None)
+def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
+                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    data = file.file.read(models.MAX_ATTACHMENT_BYTES + 1)
+    if len(data) > models.MAX_ATTACHMENT_BYTES:
+        raise HTTPException(413, "image too large (10 MB max)")
+    content_type = attachments.sniff_image_type(data)
+    if content_type is None:
+        raise HTTPException(400, "only JPEG, PNG, GIF and WebP images are allowed")
+    if db.get_todo(models.TodoId(todo_id)) is None:
+        raise HTTPException(404)
+
+    meta = models.Attachment(id=uuid.uuid4().hex, name=attachments.clean_name(file.filename),
+                             content_type=content_type, size=len(data))
+    key = blobstore.key_for(str(todo_id), meta.id)
+    blobstore.get_store().put(key, data, content_type)
+    used = False
+
+    def action(todo: models.Todo) -> dict:
+        nonlocal used
+        if len(todo.attachments) >= models.MAX_ATTACHMENTS:
+            raise HTTPException(400, f"at most {models.MAX_ATTACHMENTS} images per todo")
+        todo.attachments = [*todo.attachments, meta]
+        db.update_todo(todo)
+        used = True
+        return jsonable_encoder(todo)
+
+    try:
+        result = db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action))
+    finally:
+        # A 409, an error, or an idempotent replay leaves the blob unreferenced.
+        if not used:
+            blobstore.get_store().delete(key)
+    return _reply(*result)
+
+@app.get("/todos/{todo_id}/attachments/{attachment_id}", response_model=None)
+def get_attachment(todo_id: uuid.UUID, attachment_id: str) -> Response:
+    todo = db.get_deleted_todo(models.TodoId(todo_id))  # trashed todos keep their images
+    if todo is None or not any(a.id == attachment_id for a in todo.attachments):
+        raise HTTPException(404)
+    stored = blobstore.get_store().get(blobstore.key_for(str(todo_id), attachment_id))
+    if stored is None:
+        raise HTTPException(404)
+    data, content_type = stored
+    return Response(data, media_type=content_type, headers={
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": "inline",
+        # An attachment's bytes never change, so the browser may keep them forever.
+        "Cache-Control": "private, max-age=31536000, immutable",
+    })
+
+@app.delete("/todos/{todo_id}/attachments/{attachment_id}", response_model=None)
+def delete_attachment(todo_id: uuid.UUID, attachment_id: str,
+                      x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    def action(todo: models.Todo) -> dict:
+        if not any(a.id == attachment_id for a in todo.attachments):
+            raise HTTPException(404)
+        todo.attachments = [a for a in todo.attachments if a.id != attachment_id]
+        db.update_todo(todo)
+        return jsonable_encoder(todo)
+
+    result = db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action))
+    if result[0] == 200:
+        blobstore.get_store().delete(blobstore.key_for(str(todo_id), attachment_id))
+    return _reply(*result)
 
 @app.patch("/todos/{todo_id}/undelete", response_model=None)
 def undelete_todo_endpoint(todo_id: uuid.UUID,

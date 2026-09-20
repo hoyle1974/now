@@ -4,7 +4,7 @@ title: HTTP routes
 description: All routes in app/main.py.
 resource: app/main.py
 tags: [api]
-timestamp: 2026-09-19T00:00:00Z
+timestamp: 2026-09-19T12:00:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -20,6 +20,7 @@ timestamp: 2026-09-19T00:00:00Z
 | `PATCH /todos/{id}/parent/{parent_id}`, `PATCH /todos/{id}/move/{direction}` | Older move routes. |
 | `POST /todos/{id}/repeat` | Spawn next occurrence ([repeating](../features/repeating-todos.md)). |
 | `POST /todos/{id}/split` | Split into several todos. |
+| `POST /todos/{id}/attachments` (multipart `file`), `GET`/`DELETE /todos/{id}/attachments/{aid}` | Images on a todo; upload/delete return the updated todo ([attachments](../features/attachments.md)). |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
 Writes carry `X-Txn-Id` for idempotency; write responses reveal remote changes via `X-Rev-Prev`.

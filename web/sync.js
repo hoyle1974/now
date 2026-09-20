@@ -736,6 +736,7 @@
       knownRev: () => knownRev,
       isStale: () => stale,
       noteRemoteRev,
+      observeRev,
       status,
       saved: () => saveChain,
     };
