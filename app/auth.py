@@ -7,6 +7,7 @@ from fastapi import HTTPException, Request
 import firebase_admin
 from firebase_admin import auth as fb_auth
 
+# The env var wins; the literal is only the fallback for the deployed service.
 ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "you@example.com").lower()
 
 _PUBLIC_PATHS = {"/health"}

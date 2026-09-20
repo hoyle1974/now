@@ -30,6 +30,24 @@ def check_txn_id(x_txn_id: str | None = Header(None)) -> None:
         raise HTTPException(400, "invalid X-Txn-Id")
 
 app = FastAPI(dependencies=[Depends(require_user), Depends(check_txn_id)])
+
+_UPLOAD_PATH_RE = re.compile(r"^/todos/[^/]+/attachments$")
+# Multipart framing adds a little to the file's own size.
+_UPLOAD_SLACK_BYTES = 1024 * 1024
+
+@app.middleware("http")
+async def _limit_upload_size(request, call_next):
+    """Refuse an oversized upload from its Content-Length before the body is read
+    (FastAPI parses the multipart form before the route runs). The route still
+    checks the real size, for clients that send no length."""
+    if request.method == "POST" and _UPLOAD_PATH_RE.match(request.url.path):
+        try:
+            length = int(request.headers.get("content-length", ""))
+        except ValueError:
+            length = 0
+        if length > models.MAX_ATTACHMENT_BYTES + _UPLOAD_SLACK_BYTES:
+            return JSONResponse({"detail": "image too large (10 MB max)"}, status_code=413)
+    return await call_next(request)
 templates = Jinja2Templates(directory="templates")
 
 # Routes go here.
@@ -238,18 +256,6 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
 
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
-@app.patch("/todos/{todo_id}/parent/{parent_id}", response_model=None)
-def update_todo_parent(todo_id: uuid.UUID, body: models.TodoUpdateParent,
-                       x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
-    def action(todo: models.Todo) -> dict:
-        result = db.update_parent_id(todo, body.parent_id)
-        if result is None:
-            raise HTTPException(404)
-        return jsonable_encoder(result)
-
-    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
-
-
 @app.post("/todos/{todo_id}/repeat", response_model=None)
 def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
                 x_txn_id: str | None = Header(None)) -> Response:
@@ -297,6 +303,7 @@ def delete_todo(todo_id: uuid.UUID,
 @app.post("/todos/{todo_id}/attachments", response_model=None)
 def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
                    x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    # (Oversized uploads announcing their length are already refused by _limit_upload_size.)
     data = file.file.read(models.MAX_ATTACHMENT_BYTES + 1)
     if len(data) > models.MAX_ATTACHMENT_BYTES:
         raise HTTPException(413, "image too large (10 MB max)")
@@ -310,23 +317,29 @@ def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
                              content_type=content_type, size=len(data))
     key = blobstore.key_for(str(todo_id), meta.id)
     blobstore.get_store().put(key, data, content_type)
-    used = False
 
     def action(todo: models.Todo) -> dict:
-        nonlocal used
         if len(todo.attachments) >= models.MAX_ATTACHMENTS:
             raise HTTPException(400, f"at most {models.MAX_ATTACHMENTS} images per todo")
         todo.attachments = [*todo.attachments, meta]
         db.update_todo(todo)
-        used = True
         return jsonable_encoder(todo)
+
+    def referenced(body: dict | None) -> bool:
+        return body is not None and any(a["id"] == meta.id for a in body.get("attachments", []))
 
     try:
         result = db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action))
-    finally:
-        # A 409, an error, or an idempotent replay leaves the blob unreferenced.
-        if not used:
+    except BaseException:
+        # A failed attempt may have set the todo up in a transaction that never
+        # committed: keep the blob only if the stored todo really lists it.
+        stored = db.get_deleted_todo(models.TodoId(todo_id))
+        if stored is None or not any(a.id == meta.id for a in stored.attachments):
             blobstore.get_store().delete(key)
+        raise
+    if not (result[0] == 200 and referenced(result[1])):
+        # A 409, or an idempotent replay of another response, leaves the blob unreferenced.
+        blobstore.get_store().delete(key)
     return _reply(*result)
 
 @app.get("/todos/{todo_id}/attachments/{attachment_id}", response_model=None)
@@ -392,8 +405,8 @@ def move_todo(todo_id: uuid.UUID, direction: str,
     def action(todo: models.Todo) -> dict:
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
-        except Exception as e:
-            raise HTTPException(400, f"Cannot move: {str(e)}")
+        except db.MoveError as e:  # only the deliberate refusals; real failures propagate
+            raise HTTPException(404 if e.kind == "missing" else 400, f"Cannot move: {e}")
         return jsonable_encoder(moved)
 
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))

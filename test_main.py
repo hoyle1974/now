@@ -42,7 +42,7 @@ def create_test_data():
     parent_id = response2.json()["todo_id"]
 
     d["parent_id"] = parent_id
-    response3 = client.patch(f"/todos/{id}/parent/{parent_id}", json=d)
+    response3 = client.patch(f"/todos/{id}/reparent", json={"parent_id": parent_id})
 
     response4 = client.get(f"/todos/{id}")
 
@@ -145,7 +145,7 @@ def test_update_todo_parent(db_setup):
     parent_id = response2.json()["todo_id"]
 
     d["parent_id"] = parent_id
-    response3 = client.patch(f"/todos/{id}/parent/{parent_id}", json=d)
+    response3 = client.patch(f"/todos/{id}/reparent", json={"parent_id": parent_id})
     assert response3.status_code == 200
 
     response4 = client.get(f"/todos/{id}")
@@ -173,7 +173,7 @@ def test_split_after_failed_reparent(db_setup):
     fake_parent_id = str(uuid.uuid4())
     d = response1.json()
     d["parent_id"] = fake_parent_id
-    bad_reparent = client.patch(f"/todos/{id}/parent/{fake_parent_id}", json=d)
+    bad_reparent = client.patch(f"/todos/{id}/reparent", json={"parent_id": fake_parent_id})
     assert bad_reparent.status_code == 404
 
     response2 = client.post(f"/todos/{id}/split", json={"descriptions": ["a", "b"]})
@@ -212,7 +212,7 @@ def test_done_does_not_cascade_to_children(db_setup):
     kids = []
     for name in ("a", "b", "c"):
         kid = client.post("/todos", json={"title": name}).json()["todo_id"]
-        client.patch(f"/todos/{kid}/parent/{parent}", json={})
+        client.patch(f"/todos/{kid}/reparent", json={"parent_id": parent})
         kids.append(kid)
 
     client.patch(f"/todos/{kids[0]}", json={"done": True})
@@ -517,7 +517,7 @@ def test_rev_endpoint_reports_app_version(db_setup):
 def _mk(title, parent=None):
     t = client.post("/todos", json={"title": title}).json()["todo_id"]
     if parent is not None:
-        client.patch(f"/todos/{t}/parent/{parent}", json={"parent_id": parent})
+        client.patch(f"/todos/{t}/reparent", json={"parent_id": parent})
     return t
 
 

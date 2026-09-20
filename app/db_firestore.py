@@ -204,18 +204,14 @@ def create_todo(todo: models.Todo):
     doc_data = db_firestore_helpers.todo_to_doc(todo)
     _set(_todos_collection.document(str(todo.todo_id)), doc_data)
 
-def delete_todo(todo_id: models.TodoId):
-    """Soft delete a todo and its subtree"""
-    global _todos_collection
+class MoveError(Exception):
+    """A move up/down that deliberately can't happen: kind is "missing" (no such
+    todo) or "blocked" (bad direction, no siblings, already at the end). Anything
+    else raised while moving is an unexpected failure and must not look like one."""
+    def __init__(self, kind: str, message: str):
+        super().__init__(message)
+        self.kind = kind
 
-    descendant_ids = db_firestore_helpers.get_subtree_ids(
-        _todos_collection, str(todo_id)
-    )
-    descendant_ids.insert(0, str(todo_id))
-
-    for desc_id in descendant_ids:
-        _todos_collection.document(desc_id).update(
-            {"deleted": True, "deleted_at": _now_utc().isoformat()})
 
 def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
     """Move a todo up or down within its siblings (roots are siblings too).
@@ -228,27 +224,27 @@ def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
     global _todos_collection
 
     if direction not in ("up", "down"):
-        raise Exception("direction must be 'up' or 'down'")
+        raise MoveError("blocked", "direction must be 'up' or 'down'")
 
     moved_ref = _todos_collection.document(str(todo_id))
     moved_doc = _get(moved_ref)
     if not moved_doc.exists:
-        raise Exception("Todo not found")
+        raise MoveError("missing", "Todo not found")
 
     moved_data = moved_doc.to_dict()
     siblings = _sorted_by_order(_child_docs(moved_data.get("parent_id")))
     if len(siblings) < 2:
-        raise Exception("Cannot move: no siblings to swap with")
+        raise MoveError("blocked", "no siblings to swap with")
 
     current_pos = next((i for i, d in enumerate(siblings) if d["todo_id"] == str(todo_id)), None)
     if current_pos is None:
-        raise Exception("Todo not in sibling list")
+        raise MoveError("blocked", "Todo not in sibling list")
 
     new_pos = current_pos - 1 if direction == "up" else current_pos + 1
     if new_pos < 0:
-        raise Exception("Already at top")
+        raise MoveError("blocked", "Already at top")
     if new_pos >= len(siblings):
-        raise Exception("Already at bottom")
+        raise MoveError("blocked", "Already at bottom")
 
     moved = db_firestore_helpers.doc_to_todo(moved_data)
     moved.child_ids = _child_ids(str(todo_id))
@@ -376,28 +372,6 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
         todo.deleted_at = _now_utc()
     doc_data = db_firestore_helpers.todo_to_doc(todo)
     _update(_todos_collection.document(str(todo.todo_id)), doc_data)
-
-def update_parent_id(todo: models.Todo, parent_id: models.TodoId | None) -> models.Todo | None:
-    """Move a todo to a different parent"""
-    global _todos_collection
-
-    if parent_id is not None and not _get(_todos_collection.document(str(parent_id))).exists:
-        return None
-
-    order_idx = todo.order_idx
-    if parent_id and order_idx is None:
-        order_idx = _next_order_idx(str(parent_id))
-
-    todo.version += 1
-    _update(_todos_collection.document(str(todo.todo_id)), {
-        "parent_id": None if parent_id is None else str(parent_id),
-        "order_idx": order_idx,
-        "version": todo.version,
-    })
-
-    todo.parent_id = parent_id
-    todo.order_idx = order_idx
-    return todo
 
 def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Todo:
     """Create the next occurrence of a repeating todo and mark the original as spawned.
@@ -697,6 +671,11 @@ def blocked_by_would_cycle(todo_id: str, new_blockers: list[str]) -> bool:
     return False
 
 
+def _aware(dt: datetime.datetime) -> datetime.datetime:
+    """Stored timestamps should carry an offset; a naive one is taken as UTC."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
+
+
 def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AFTER_DAYS) -> int:
     """Move todos deleted at least `days` ago, with everything beneath them, from
     "todos" to the archive collection. Returns how many documents moved.
@@ -704,8 +683,11 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
     Deleting only flags the top of a subtree, so the descendants go with it or
     they would sit in "todos" unreachable and still be read on every tree load.
     Todos deleted before deleted_at existed have no date: they get one now, so
-    their 30 days start today. Each batch copies first and deletes second, so a
-    crash leaves a duplicate that the next run overwrites, never a lost todo.
+    their 30 days start today. The candidates are found with plain reads, then
+    each chunk moves in a transaction that re-reads its documents: one changed
+    since (undeleted, edited, reparented) stays put, and so does everything
+    beneath it, until the next run. The archive copy and the delete commit
+    together with the revision bump.
     """
     now = now or _now_utc()
     cutoff = now - datetime.timedelta(days=days)
@@ -715,44 +697,95 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
         stamp = data.get("deleted_at")
         if stamp is None:
             doc.reference.update({"deleted_at": now.isoformat()})
-        elif datetime.datetime.fromisoformat(stamp) <= cutoff and data["todo_id"] not in moving:
+        elif _aware(datetime.datetime.fromisoformat(stamp)) <= cutoff and data["todo_id"] not in moving:
             moving[data["todo_id"]] = data
             for below in db_firestore_helpers.get_subtree_docs(_todos_collection, data["todo_id"]):
                 moving.setdefault(below["todo_id"], below)
 
-    docs = list(moving.values())
+    docs = list(moving.values())  # parents come before their children
     client = get_conn()
     archive = client.collection(ARCHIVE_COLLECTION)
+    rev_ref = client.collection(REV_COLLECTION).document(REV_DOC)
+    skipped: set[str] = set()
+    moved: list[dict] = []
+
+    @firestore.transactional
+    def move_chunk(tx, chunk: list[dict]) -> list[dict]:
+        # All reads first: Firestore rejects a read after a write.
+        fresh = {d["todo_id"]: _todos_collection.document(d["todo_id"]).get(transaction=tx).to_dict()
+                 for d in chunk}
+        rev_snap = rev_ref.get(transaction=tx)
+        going = []
+        for data in chunk:
+            unchanged = fresh[data["todo_id"]] == data
+            if unchanged and data.get("parent_id") not in skipped:
+                going.append(data)
+            else:
+                skipped.add(data["todo_id"])
+        for data in going:
+            tx.set(archive.document(data["todo_id"]), {**data, "archived_at": now.isoformat()})
+            tx.delete(_todos_collection.document(data["todo_id"]))
+        if going:
+            prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
+            tx.set(rev_ref, {"value": prev + 1})
+        return going
+
     for start in range(0, len(docs), 200):
-        chunk = docs[start:start + 200]
-        batch = client.batch()
-        for data in chunk:
-            batch.set(archive.document(data["todo_id"]), {**data, "archived_at": now.isoformat()})
-        batch.commit()
-        batch = client.batch()
-        for data in chunk:
-            batch.delete(_todos_collection.document(data["todo_id"]))
-        batch.commit()
-    # Images go last: a crash before this leaves orphan blobs, never a todo
-    # pointing at a missing image.
-    for data in docs:
+        moved.extend(move_chunk(client.transaction(), docs[start:start + 200]))
+    # Images go last: a crash before this leaves orphan blobs (the orphan sweep
+    # collects them), never a todo pointing at a missing image.
+    for data in moved:
         if data.get("attachments"):
             blobstore.get_store().delete_prefix(blobstore.todo_prefix(data["todo_id"]))
-    return len(docs)
+    return len(moved)
+
+def sweep_orphan_blobs(min_age: datetime.timedelta = datetime.timedelta(hours=1)) -> int:
+    """Delete attachment blobs no todo references (a crash between a todo write
+    and its blob delete, or an upload whose commit never happened). Blobs younger
+    than min_age are left alone: an upload puts its blob before the todo commit.
+    Returns how many were deleted. Safe to repeat."""
+    store = blobstore.get_store()
+    cutoff = _now_utc() - min_age
+    known: dict[str, set[str]] = {}
+    removed = 0
+    for key, created in store.list_blobs("todos/"):
+        parts = key.split("/")
+        if len(parts) != 3 or _aware(created) > cutoff:
+            continue
+        todo_id, attachment_id = parts[1], parts[2]
+        if todo_id not in known:
+            snap = _todos_collection.document(todo_id).get()
+            known[todo_id] = {a["id"] for a in (snap.to_dict() or {}).get("attachments") or []}
+        if attachment_id not in known[todo_id]:
+            store.delete(key)
+            removed += 1
+    return removed
+
+def _claim_archive_run(now: datetime.datetime) -> bool:
+    """Atomically take today's archive run: True for exactly one instance."""
+    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
+
+    @firestore.transactional
+    def claim(tx) -> bool:
+        snap = ref.get(transaction=tx)
+        last = snap.to_dict().get("last_run") if snap.exists else None
+        if last and now - _aware(datetime.datetime.fromisoformat(last)) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
+            return False
+        tx.set(ref, {"last_run": now.isoformat()})
+        return True
+
+    return claim(get_conn().transaction())
 
 def maybe_archive_expired() -> int:
     """archive_expired at most once a day across all instances (in-process timer
-    first, then a stored last-run time), so calling it on every read is cheap."""
+    first, then a stored last-run time claimed in a transaction), so calling it
+    on every read is cheap."""
     global _archive_checked
     if _archive_checked is not None and time.monotonic() - _archive_checked < _ARCHIVE_CHECK_SECONDS:
         return 0
     _archive_checked = time.monotonic()
-    now = _now_utc()
-    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
-    snap = ref.get()
-    last = snap.to_dict().get("last_run") if snap.exists else None
-    if last and now - datetime.datetime.fromisoformat(last) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
+    if not _claim_archive_run(_now_utc()):
         return 0
-    moved = archive_expired(now)
-    ref.set({"last_run": now.isoformat()})
+    moved = archive_expired(_now_utc())
+    sweep_orphan_blobs()
     return moved

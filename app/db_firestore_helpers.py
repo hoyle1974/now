@@ -63,13 +63,3 @@ def get_subtree_docs(todos_collection, parent_id: str, getter=None) -> list[dict
         docs.append(data)
         docs.extend(get_subtree_docs(todos_collection, data["todo_id"], getter))
     return docs
-
-def get_subtree_ids(todos_collection, parent_id: str) -> list[str]:
-    """Recursively get all descendant IDs for a todo"""
-    ids = []
-    children = todos_collection.where("parent_id", "==", parent_id).get()
-    for child_doc in children:
-        child_id = child_doc.to_dict()["todo_id"]
-        ids.append(child_id)
-        ids.extend(get_subtree_ids(todos_collection, child_id))
-    return ids

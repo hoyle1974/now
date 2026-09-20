@@ -87,9 +87,6 @@ class TodoUpdate(BaseModel):
             raise ValueError(f"at most {MAX_REFS} ids")
         return [TodoId(uuid.UUID(i)) for i in out]
 
-class TodoUpdateParent(BaseModel):
-    parent_id: TodoId | None = Field(None)
-
 class TodoReparent(BaseModel):
     parent_id: TodoId | None = Field(None)  # null moves to the top level
     index: int | None = Field(None)         # position among the new siblings; null = last

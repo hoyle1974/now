@@ -4,25 +4,32 @@ in-memory dict in tests and local dev (when ATTACHMENTS_BUCKET is unset).
 Keys look like todos/{todo_id}/{attachment_id}. Metadata is kept on the todo,
 so this layer only moves bytes."""
 from __future__ import annotations
+import datetime
 import os
 
 
 class MemoryStore:
     def __init__(self):
         self._objects: dict[str, tuple[bytes, str]] = {}
+        self._times: dict[str, datetime.datetime] = {}
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         self._objects[key] = (data, content_type)
+        self._times[key] = datetime.datetime.now(datetime.timezone.utc)
 
     def get(self, key: str) -> tuple[bytes, str] | None:
         return self._objects.get(key)
 
     def delete(self, key: str) -> None:
         self._objects.pop(key, None)
+        self._times.pop(key, None)
 
     def delete_prefix(self, prefix: str) -> None:
         for key in [k for k in self._objects if k.startswith(prefix)]:
-            del self._objects[key]
+            self.delete(key)
+
+    def list_blobs(self, prefix: str) -> list[tuple[str, datetime.datetime]]:
+        return [(k, self._times[k]) for k in sorted(self._objects) if k.startswith(prefix)]
 
     def keys(self) -> list[str]:
         return sorted(self._objects)
@@ -55,6 +62,9 @@ class GcsStore:
     def delete_prefix(self, prefix: str) -> None:
         for blob in self._bucket.list_blobs(prefix=prefix):
             blob.delete()
+
+    def list_blobs(self, prefix: str) -> list[tuple[str, datetime.datetime]]:
+        return [(b.name, b.time_created) for b in self._bucket.list_blobs(prefix=prefix)]
 
 
 _store = None

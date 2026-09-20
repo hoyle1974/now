@@ -36,7 +36,10 @@ def _due(todo: models.Todo) -> datetime.datetime | None:
     if due is None:
         return None
     if due.time() == datetime.time(0, 0):
-        return due.replace(hour=23, minute=59, second=59)
+        due = due.replace(hour=23, minute=59, second=59)
+    # _NO_DATE is naive, so an offset-aware due is compared as UTC wall time.
+    if due.tzinfo is not None:
+        due = due.astimezone(datetime.timezone.utc).replace(tzinfo=None)
     return due
 
 
