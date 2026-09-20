@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-19T12:00:00Z
+timestamp: 2026-09-19T14:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -15,7 +15,7 @@ timestamp: 2026-09-19T12:00:00Z
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).
 
 **Client (`web/`)**
-- `app.js` — main UI; holds `APP_VERSION` ([sync model](../features/sync-model.md)).
+- `app.js` — main UI (incl. the todo viewer and edit sheets, see [fields](../features/fields.md)); holds `APP_VERSION` ([sync model](../features/sync-model.md)).
 - `sync.js`, `idb-store.js` — outbox and IndexedDB persistence.
 - `freshness.js` — remote-change checks. `eventlog.js` — [event log](../features/event-log.md).
 - `reorder.js` — drag-drop → reparent ([ordering](../features/ordering-nesting.md)). `outline.js`.

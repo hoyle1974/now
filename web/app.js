@@ -198,7 +198,7 @@ AttachmentsUI.init({
 // rename box)? A refresh re-renders the list and would wipe that text. The
 // composer at the bottom sits outside the list, so it doesn't count.
 function editingInTree() {
-  if (activePanel && activePanel.mode !== "menu") return true;
+  if (activePanel && activePanel.mode !== "menu" && activePanel.mode !== "view") return true;
   const el = document.activeElement;
   return !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA") && !!el.closest("#todo-tree");
 }
@@ -358,7 +358,7 @@ function spotlight(todoId) {
 // At most one per-row panel (the "more actions" menu, or one of its inline
 // editors) is open at a time, so it's a single { todoId, mode } slot rather
 // than a separate boolean/id per mode — opening one always means closing
-// whatever else was open. mode is "menu" | "edit" | "add" | "split".
+// whatever else was open. mode is "menu" | "edit" | "add" | "split" | "view".
 let activePanel = null;
 
 function setActivePanel(mode, todoId) {
@@ -997,14 +997,11 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   // Color accent, and a folded detail panel that a tap on the row body opens.
   FieldsUI.decorateRow(row, todo);
-  const detailOpen = FieldsUI.isExpanded(todo.todo_id);
-  row.classList.toggle("has-detail-open", detailOpen);
   row.addEventListener("click", (e) => {
     if (!FieldsUI.isRowTap(e.target) || row.classList.contains("dragging")) return;
-    FieldsUI.toggleExpanded(todo.todo_id);
+    setActivePanel("view", todo.todo_id);
     renderTree();
   });
-  if (detailOpen) li.appendChild(FieldsUI.renderDetail(todo));
 
   // Attach swipe/tap interactions
   attachRowInteractions(row, todo);
@@ -1019,6 +1016,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   if (isActivePanel("edit", todo.todo_id)) {
     li.appendChild(renderEditEditor(todo));
+  }
+
+  if (isActivePanel("view", todo.todo_id)) {
+    li.appendChild(renderViewer(todo, descendantCounts.get(todo.todo_id)));
   }
 
   if (hasChildren && !isCollapsed) {
@@ -1260,7 +1261,14 @@ function renderEditEditor(todo) {
       repeatControls.value(), result.fields));
   });
 
-  return renderSheet(
+  const heading = document.createElement("h2");
+  heading.className = "sheet-title";
+  heading.textContent = "Edit todo";
+
+  const body = document.createElement("div");
+  body.className = "sheet-body";
+  body.append(
+    heading,
     sheetLabel("Title", titleInput),
     titleInput,
     sheetLabel("Due date", dueDateInput),
@@ -1270,9 +1278,65 @@ function renderEditEditor(todo) {
     dueTimeInput,
     sheetLabel("Repeat every", repeatControls.unit),
     repeatControls.row,
-    ...extra.nodes,
-    buttons
+    ...extra.nodes
   );
+  const screen = renderSheet(body, buttons);
+  screen.classList.add("sheet-full");
+  return screen;
+}
+
+// Full-screen read-only look at one todo; Edit hands off to the edit sheet.
+function renderViewer(todo, counts) {
+  const add = (parent, tag, className, text) => {
+    const node = document.createElement(tag);
+    node.className = className;
+    node.textContent = text;
+    parent.appendChild(node);
+    return node;
+  };
+  const close = () => {
+    setActivePanel(null);
+    renderTree();
+  };
+
+  const body = document.createElement("div");
+  body.className = "sheet-body";
+  add(body, "h2", "sheet-title" + (todo.done ? " is-done" : ""), todo.title);
+
+  const facts = document.createElement("dl");
+  facts.className = "view-facts";
+  const fact = (name, value) => {
+    add(facts, "dt", "sheet-label", name);
+    add(facts, "dd", "view-value", value);
+  };
+  fact("Status", todo.done ? "Done" : "Open");
+  fact("Due", todo.due_date ? formatDue(todo.due_date) : "No due date");
+  if (todo.repeat) fact("Repeats", Due.formatRepeat(todo.repeat));
+  if (counts && counts.total) fact("Subtasks", `${counts.done} of ${counts.total} done`);
+  if (Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
+  body.appendChild(facts);
+  body.appendChild(FieldsUI.renderDetail(todo));
+
+  const buttons = document.createElement("div");
+  buttons.className = "sheet-actions";
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "btn btn-plain";
+  closeBtn.textContent = "Close";
+  closeBtn.addEventListener("click", close);
+  const editBtn = document.createElement("button");
+  editBtn.type = "button";
+  editBtn.className = "btn btn-primary";
+  editBtn.textContent = "Edit";
+  editBtn.addEventListener("click", () => {
+    setActivePanel("edit", todo.todo_id);
+    renderTree();
+  });
+  buttons.append(closeBtn, editBtn);
+
+  const screen = renderSheet(body, buttons);
+  screen.classList.add("sheet-full");
+  return screen;
 }
 
 function renderEmptyState(heading = "All clear", message = "Add your first todo below.") {
