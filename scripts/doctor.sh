@@ -58,7 +58,7 @@ if [ -f web/config.js ]; then
 else
   fail "web/config.js missing (scripts/init.sh, or copy web/config.example.js)"
 fi
-grep -q "\"$PROJECT\"" .firebaserc 2>/dev/null && ok ".firebaserc" || warn ".firebaserc does not point at $PROJECT"
+grep -q "\"$PROJECT\"" .firebaserc 2>/dev/null && ok ".firebaserc" || warn ".firebaserc missing or not pointing at $PROJECT (cp .firebaserc.example .firebaserc, or scripts/init.sh)"
 grep -q "\"serviceId\": \"$SERVICE\"" firebase.json && ok "firebase.json rewrites to $SERVICE" \
   || warn "firebase.json hosting rewrite does not point at service $SERVICE"
 

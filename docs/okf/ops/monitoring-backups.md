@@ -3,9 +3,9 @@ type: Runbook
 title: Monitoring and backups
 description: Uptime check, alert policies, sync-conflict metric, and Firestore backups (all GCP config, not in code).
 tags: [ops, monitoring, backups, gcp]
-timestamp: 2026-09-20T09:00:00Z
+timestamp: 2026-09-20T14:00:00Z
 ---
-Configured in project `your-gcp-project-id` with gcloud; nothing here is in the repo's code.
+Configured in project `<project-id>` with gcloud; nothing here is in the repo's code.
 
 - **Managed by zilch Terraform** (`cloud_monitoring.tf`, [zilch-gcp](../architecture/zilch-gcp.md)): uptime check `now-app-health` (HTTPS GET `/health` every 5 min, [public route](../api/routes.md)), alert policies `now-app - health check failing` and `now-app - 5xx responses` (>3 5xx in 5 min), notification channel `now-app Error Alerts` (Pub/Sub, so no email yet: set `alert_email` in `.zilch.config` for email). Change them in zilch, not the console.
 - The hand-made `now-health` check and `now - ...` policies for the old service were deleted on 2026-09-20 after the move to `now-app`.

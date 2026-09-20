@@ -4,7 +4,7 @@ title: Forking and per-deployment config
 description: How a fork is set up (zilch for infrastructure, init.sh for the app), and where per-deployment settings live.
 resource: scripts/init.sh
 tags: [fork, config, zilch, deploy]
-timestamp: 2026-09-20T12:00:00Z
+timestamp: 2026-09-20T14:00:00Z
 ---
 Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (sibling repo `../zilch-gcp`, Terraform): project APIs, Cloud Run, Firestore, Scheduler, monitoring; it writes `.zilch.config`. **The app** is set up by `scripts/init.sh` (`--dry-run` to preview, `--push` to add reminders, `--widget` to create the lock screen widget token secret) and verified by the read-only `scripts/doctor.sh` (names only, never env values). `init.sh` has only been run as `--dry-run` and against the author's own project.
 
@@ -12,7 +12,7 @@ Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle19
 - `scripts/lib/config.sh` resolves `PROJECT`, `REGION`, `SERVICE` for every script: environment > `.now.env` > `.zilch.config` (`gcp_project_id`, `gcp_region`, `app_name`) > `gcloud config`. Files are parsed, not sourced. No defaults name the author's project.
 - `.now.env` (git-ignored; `.now.env.example`): app-side overrides `SERVICE`, `HOSTING_SITE`, `ALLOWED_EMAIL`, `PROJECT`, `REGION`. Since the migration the service is `now-app`, which is also zilch's `app_name`, so `SERVICE` no longer needs pinning; `HOSTING_SITE` (`now-app`) still does not need it either. Keep the file only for genuine overrides.
 - `web/config.js` (git-ignored; `web/config.example.js`): `window.NOW_CONFIG` = Firebase web config + optional `hostingDomain`. Read by `web/auth.js`; without it the sign-in overlay says so. `deploy.sh` refuses to run without it. The Firebase web config is public by design.
-- `.firebaserc` / `firebase.json` (tracked): `init.sh` rewrites the project, Hosting site and Cloud Run rewrite (`serviceId`, region).
+- `.firebaserc` (git-ignored, `.firebaserc.example`) and `firebase.json` (tracked): `init.sh` writes the project, Hosting site and Cloud Run rewrite (`serviceId`, region). Real project ids live only in git-ignored files (`.zilch.config`, `.now.env`, `.firebaserc`, `web/config.js`); docs use `<project-id>` placeholders.
 - `ALLOWED_EMAIL` is required ([stack](../architecture/stack.md)); `scripts/scriptable-next-up.js` has a `BASE` placeholder.
 
 **Not scriptable:** enabling Google sign-in and the authorized domain in the Firebase console.

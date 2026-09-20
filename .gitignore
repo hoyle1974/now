@@ -13,3 +13,4 @@ graphify-out/
 firebase-debug.log
 .now.env
 web/config.js
+.firebaserc

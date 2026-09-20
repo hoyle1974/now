@@ -11,7 +11,7 @@ resize, server-side re-encode, HEIC, SVG.
 
 ## Bucket
 
-- Name `your-gcp-project-id-attachments`, `us-central1`, Standard class.
+- Name `<project-id>-attachments`, `us-central1`, Standard class.
 - Uniform bucket-level access on; public access prevention enforced; no CORS
   (the browser never talks to GCS).
 - Versioning off; GCS default 7-day soft delete left on as an undo.

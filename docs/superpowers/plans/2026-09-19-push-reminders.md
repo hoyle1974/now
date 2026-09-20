@@ -161,7 +161,7 @@ def plan_device(dev_id: str, tz: str, now_utc: datetime.datetime,
 
 ### Task 4: Client, More panel and shake fix
 
-**Files:** Create `web/sw.js`, `web/push.js`, `tests_js/push.test.js`, `tests_js/shake.test.js`; Modify `web/auth.js` (add `messagingSenderId: "000000000000"`, and make sure its fetch wrapper also covers `/push` requests), `web/index.html`, `web/app.js`, `web/style.css`, `web/mascot.js`
+**Files:** Create `web/sw.js`, `web/push.js`, `tests_js/push.test.js`, `tests_js/shake.test.js`; Modify `web/auth.js` (add `messagingSenderId: "<project-number>"`, and make sure its fetch wrapper also covers `/push` requests), `web/index.html`, `web/app.js`, `web/style.css`, `web/mascot.js`
 
 **Interfaces:**
 - Produces: `Push.status(env)` returns `"unsupported" | "blocked" | "off" | "on"`; `Push.registerBody(token, tz, platform)`; `Push.parse(eventJson)` returns `{title, body, url}` (used by `sw.js` logic; duplicated inline there); `Mascot.armOnFirstTap(doc, storage, request)`.
