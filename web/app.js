@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "39";
+const APP_VERSION = "40";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -2019,6 +2019,27 @@ if (window.Mascot) {
     window.Mascot.setEnabled(!window.Mascot.enabled());
     paint();
     if (window.Mascot.enabled()) window.Mascot.peek({ text: "Hi! I'm Nudge \ud83d\udc4b" });
+  });
+  paint();
+})();
+
+// "Shake to summon" the mascot. Android/desktop listen automatically; iOS needs
+// this tap to grant motion access (and asks again after a reload).
+(() => {
+  const btn = document.getElementById("shake-toggle");
+  if (!btn || !window.Mascot || !window.Mascot.shake.supported()) return;
+  const paint = () => {
+    btn.hidden = false;
+    btn.textContent = window.Mascot.shake.active() ? "Shake on" : "Shake to summon";
+    btn.setAttribute("aria-pressed", String(window.Mascot.shake.active()));
+  };
+  btn.addEventListener("click", async () => {
+    if (!window.Mascot.shake.active()) {
+      const result = await window.Mascot.shake.request();
+      btn.textContent = result === "denied" ? "Shake blocked" : btn.textContent;
+      if (result === "granted") window.Mascot.peek({ text: "Shake me anytime! \ud83d\udc4b" });
+    }
+    if (btn.textContent !== "Shake blocked") paint();
   });
   paint();
 })();

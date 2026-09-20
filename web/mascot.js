@@ -122,7 +122,50 @@
     schedule();
   }
 
+  // ---- shake to summon ----
+  // A shake is three hard swings of the accelerometer within a second. iOS only
+  // delivers motion events after a permission prompt that must come from a tap
+  // (see request, wired to the More panel's Shake button).
+  let shakeOn = false, lastMag = 0, spikes = [], lastShake = 0;
+  function onMotion(e) {
+    const a = e.accelerationIncludingGravity;
+    if (!a || a.x == null) return;
+    const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
+    const jolt = Math.abs(mag - lastMag);
+    lastMag = mag;
+    const now = Date.now();
+    if (jolt < 14) return; // ordinary movement
+    spikes = spikes.filter((t) => now - t < 900);
+    spikes.push(now);
+    if (spikes.length >= 3 && now - lastShake > 3000) {
+      spikes = [];
+      lastShake = now;
+      summon();
+    }
+  }
+  function summon() {
+    if (!enabled() || up) return;
+    if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(15);
+    show({ text: message() });
+  }
+  const shakeSupported = () => typeof root.DeviceMotionEvent !== "undefined";
+  const needsPermission = () =>
+    shakeSupported() && typeof root.DeviceMotionEvent.requestPermission === "function";
+  async function requestShake() {
+    if (!shakeSupported()) return "unsupported";
+    if (needsPermission()) {
+      try {
+        if ((await root.DeviceMotionEvent.requestPermission()) !== "granted") return "denied";
+      } catch (_) { return "denied"; }
+    }
+    if (!shakeOn) { root.addEventListener("devicemotion", onMotion); shakeOn = true; }
+    return "granted";
+  }
+  // Android and desktop need no permission: listen right away.
+  if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();
+
   root.Mascot = {
+    shake: { supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
     enabled,
     setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); },
     peek: (opts) => show(opts),
