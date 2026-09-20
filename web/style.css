@@ -85,7 +85,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Room for the fixed composer so the last card is never trapped under it. */
-  padding-bottom: calc(var(--composer-h, 84px) + 16px);
+  padding-bottom: calc(max(var(--composer-h, 84px), 84px + env(safe-area-inset-bottom, 0px)) + 32px);
 }
 
 button,
@@ -1763,14 +1763,16 @@ li.search-hit { cursor: default; }
 .mascot {
   position: fixed;
   left: var(--x, 82%);
-  bottom: calc(var(--composer-h, 84px) - 2px);
-  z-index: 25; /* under the composer (30), so he rises from behind it */
+  bottom: calc(var(--composer-h, 84px) - 1px);
+  z-index: 35; /* above the composer, so nothing can hide him */
   width: 80px;
   height: 64px;
   margin-left: -40px;
   color: var(--accent);
   pointer-events: none;
-  transition: left 0s;
+  /* Clip everything below the mascot's box, so he rises from "behind" the bar
+     even though he sits above it in the stacking order. */
+  clip-path: inset(-120px -120px 0 -120px);
 }
 
 .mascot-body {
@@ -1782,9 +1784,6 @@ li.search-hit { cursor: default; }
 
 .mascot.is-up { pointer-events: auto; }
 .mascot.is-up .mascot-body { transform: translateY(0); }
-
-/* Clip below the composer's top edge so he only ever shows what's above it. */
-.mascot { overflow: visible; }
 
 .mascot svg { display: block; overflow: visible; }
 
@@ -1850,3 +1849,5 @@ li.search-hit { cursor: default; }
 @media (prefers-reduced-motion: reduce) {
   .mascot { display: none; }
 }
+
+.list-footer { margin-bottom: 24px; }

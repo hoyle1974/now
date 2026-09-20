@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "41";
+const APP_VERSION = "43";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -1623,9 +1623,19 @@ document.getElementById("add-pick").addEventListener("click", () => {
 addDue.addEventListener("input", renderComposerDue);
 
 // Tell the CSS how tall the composer is, so padding and popups clear it.
-new ResizeObserver(() => {
-  document.documentElement.style.setProperty("--composer-h", `${addForm.offsetHeight}px`);
-}).observe(addForm);
+// Measured from the rendered box (incl. the home-indicator padding), and
+// re-measured on viewport changes, since iOS resizes the visual viewport when
+// the toolbar or keyboard moves.
+function measureComposer() {
+  const h = Math.ceil(Math.max(addForm.offsetHeight, addForm.getBoundingClientRect().height));
+  document.documentElement.style.setProperty("--composer-h", `${h}px`);
+}
+new ResizeObserver(measureComposer).observe(addForm);
+window.addEventListener("resize", measureComposer);
+window.addEventListener("orientationchange", measureComposer);
+if (window.visualViewport) window.visualViewport.addEventListener("resize", measureComposer);
+window.addEventListener("load", measureComposer);
+measureComposer();
 
 addForm.addEventListener("submit", (event) => {
   event.preventDefault();

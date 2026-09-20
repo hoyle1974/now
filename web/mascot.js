@@ -29,6 +29,7 @@
   <path class="m-mouth" d="M33 49 Q40 56 47 49" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
 </svg>`;
 
+  const sfx = (name) => { if (root.Sound && root.Sound.sfx) root.Sound.sfx(name); };
   let el, bubble, idleTimer, hideTimer, up = false, source = null, lastMsg = -1;
 
   function build() {
@@ -41,6 +42,7 @@
     el.addEventListener("click", () => {
       if (!up) return;
       el.classList.add("is-giggle");
+      sfx("giggle");
       if (root.Sparkle) {
         const r = el.getBoundingClientRect();
         root.Sparkle.burst(r.left + r.width / 2, r.top + 20, 10);
@@ -69,6 +71,7 @@
     const tick = () => {
       if (!up || n >= times * 2) return;
       el.classList.toggle("is-blink", n % 2 === 0);
+      if (n % 2 === 0) sfx("blink");
       n++;
       setTimeout(tick, n % 2 ? 130 : 260);
     };
@@ -86,6 +89,8 @@
     bubble.hidden = !msg;
     bubble.textContent = msg;
     el.classList.add("is-up");
+    sfx(cheer ? "cheer" : "peek");
+    if (msg && !cheer) setTimeout(() => up && sfx("beep"), 700);
     blink(2);
     clearTimeout(hideTimer);
     hideTimer = setTimeout(hide, cheer ? STAY + 1400 : STAY + (msg ? 900 : 0));
@@ -95,6 +100,7 @@
     if (!up) return;
     up = false;
     clearTimeout(hideTimer);
+    sfx("hide");
     el.classList.remove("is-up");
     schedule();
   }

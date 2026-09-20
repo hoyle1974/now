@@ -71,10 +71,58 @@
     } catch (_) { /* audio is decoration; never break a tap */ }
   }
 
+  // Frequency sweep: the building block of chirps and boops.
+  function sweep(f0, f1, start, length, type = "sine", gain = 0.07) {
+    const osc = ctx.createOscillator();
+    const amp = ctx.createGain();
+    const t0 = ctx.currentTime + start;
+    osc.type = type;
+    osc.frequency.setValueAtTime(f0, t0);
+    osc.frequency.exponentialRampToValueAtTime(f1, t0 + length);
+    amp.gain.setValueAtTime(0, t0);
+    amp.gain.linearRampToValueAtTime(gain, t0 + 0.012);
+    amp.gain.exponentialRampToValueAtTime(0.0001, t0 + length);
+    osc.connect(amp).connect(ctx.destination);
+    osc.start(t0);
+    osc.stop(t0 + length + 0.05);
+  }
+
+  // The mascot's voice: chirps, boops and robot beeps (only when sound is on).
+  const SFX = {
+    peek: () => { sweep(500, 1500, 0, 0.13, "triangle"); sweep(900, 2000, 0.16, 0.11, "triangle"); },
+    beep: () => { sweep(880, 880, 0, 0.09, "square", 0.03); sweep(660, 660, 0.12, 0.09, "square", 0.03); sweep(990, 990, 0.24, 0.14, "square", 0.03); },
+    blink: () => sweep(2200, 1800, 0, 0.04, "sine", 0.04),
+    hide: () => { sweep(900, 260, 0, 0.2, "triangle"); },
+    giggle: () => { [0, 0.11, 0.22].forEach((s, i) => sweep(900 + i * 220, 1500 + i * 260, s, 0.09, "triangle")); },
+    cheer: () => {
+      sweep(600, 1800, 0, 0.16, "triangle");
+      [880, 1109, 1319, 1760].forEach((f, i) => sweep(f, f * 1.02, 0.2 + i * 0.09, 0.14, "triangle"));
+      sweep(1200, 2400, 0.62, 0.12, "triangle");
+    },
+  };
+  function sfx(name) {
+    if (!SFX[name]) return;
+    play([]); // sets up / resumes the audio context (no-op when sound is off)
+    if (ctx && soundOn()) { try { SFX[name](); } catch (_) { /* decoration */ } }
+  }
+
+  // iOS keeps audio locked until a tap: unlock on any touch so the mascot's
+  // self-started chirps can play later.
+  function unlock() {
+    if (!soundOn()) return;
+    try {
+      const AC = root.AudioContext || root.webkitAudioContext;
+      if (!AC) return;
+      ctx = ctx || new AC();
+      if (ctx.state === "suspended") ctx.resume();
+    } catch (_) { /* ignore */ }
+  }
+  if (root.addEventListener) root.addEventListener("pointerdown", unlock, { capture: true, passive: true });
+
   const pop = () => play([[784, 0, 0.18], [1175, 0.07, 0.24]]);
   const fanfare = () => play([[523, 0, 0.2], [659, 0.09, 0.2], [784, 0.18, 0.2], [1047, 0.27, 0.45]]);
 
   root.Themes = { THEMES, current, set, apply };
-  root.Sound = { on: soundOn, set: setSound, pop, fanfare };
+  root.Sound = { on: soundOn, set: setSound, pop, fanfare, sfx };
   if (root.document) apply();
 })(typeof window !== "undefined" ? window : globalThis);
