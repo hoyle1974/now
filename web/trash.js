@@ -26,7 +26,8 @@
   function updateFooter() {
     const n = Sync.clearableIds(model).length;
     clearBtn.hidden = n === 0;
-    clearBtn.textContent = `Clear completed (${n})`;
+    clearBtn.textContent = `Clear ${n} completed`;
+    clearBtn.title = "Removes done todos (and done subtasks) to Trash";
   }
   // Every render rebuilds the list, so refresh the count when it changes.
   new MutationObserver(updateFooter).observe(treeEl, { childList: true });

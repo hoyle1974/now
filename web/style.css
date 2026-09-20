@@ -16,7 +16,7 @@
   --separator: rgba(60, 60, 67, 0.18);
   --label: #000000;
   --label-2: rgba(60, 60, 67, 0.6);
-  --label-3: rgba(60, 60, 67, 0.3);
+  --label-3: rgba(60, 60, 67, 0.45);
   --material: rgba(249, 249, 249, 0.8);
   --popover: rgba(250, 250, 250, 0.97);
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -27,7 +27,7 @@
   --row-min: 52px;
   --indent: 20px;
   /* Subtask guide lines: hang from the parent's checkbox (centre 28px in). */
-  --guide: var(--label-3);
+  --guide: rgba(60, 60, 67, 0.3);
   --guide-w: 1.5px;
   --guide-x: calc(28px - var(--indent) - var(--guide-w) / 2);
   --ease: cubic-bezier(0.32, 0.72, 0, 1);
@@ -54,7 +54,7 @@
     --separator: rgba(84, 84, 88, 0.6);
     --label: #ffffff;
     --label-2: rgba(235, 235, 245, 0.6);
-    --label-3: rgba(235, 235, 245, 0.3);
+    --label-3: rgba(235, 235, 245, 0.45);
     --material: rgba(22, 22, 24, 0.78);
     --popover: rgba(44, 44, 46, 0.97);
     --shadow-card: none;
@@ -185,6 +185,19 @@ svg {
 }
 
 /* ---------- Event log (diagnostics) ---------- */
+
+.dev-toggle {
+  margin: 0 0 0 2px;
+  padding: 12px 8px;
+  border: none;
+  background: none;
+  color: var(--label-2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dev-toggle[aria-expanded="true"] { color: var(--accent); }
 
 .log-toggle {
   margin: 0 0 0 2px;
@@ -926,7 +939,7 @@ body.menu-room {
 }
 
 #add-title:placeholder-shown ~ .composer-send {
-  opacity: 0.3;
+  opacity: 0.45;
   transform: scale(0.9);
 }
 
@@ -935,6 +948,11 @@ body.menu-room {
 }
 
 /* ---------- Error toast ---------- */
+
+/* While a toast is up, leave room under the list so it never covers the footer. */
+body:has(#error:not([hidden])) {
+  padding-bottom: calc(var(--composer-h, 84px) + 72px);
+}
 
 .toast {
   position: fixed;

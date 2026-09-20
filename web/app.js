@@ -339,10 +339,11 @@ function celebrate(todoId) {
   clearTimeout(justCompleted.get(todoId));
   justCompleted.set(todoId, setTimeout(() => {
     justCompleted.delete(todoId);
-    // The row now drops below the open ones. Don't re-render under typed text;
-    // it will sink on the next render instead.
-    if (!editingInTree()) renderTree();
-  }, 1000));
+    // The rows now drop below the open ones. Wait until the last quick tap has
+    // settled so the list never reshuffles between two taps, and don't
+    // re-render under typed text; it will sink on the next render instead.
+    if (!justCompleted.size && !editingInTree()) renderTree();
+  }, 1400));
   if (navigator.vibrate) navigator.vibrate(12); // Android only; iOS ignores it
 }
 
@@ -1890,3 +1891,14 @@ document.getElementById("event-log-copy").addEventListener("click", async (event
   button.textContent = ok ? "Copied" : "Copy failed";
   setTimeout(() => { button.textContent = "Copy"; }, 1500);
 });
+
+// Diagnostics links live behind a quiet "More" toggle in the header.
+(() => {
+  const toggle = document.getElementById("dev-toggle");
+  const tools = document.getElementById("dev-tools");
+  if (!toggle || !tools) return;
+  toggle.addEventListener("click", () => {
+    tools.hidden = !tools.hidden;
+    toggle.setAttribute("aria-expanded", String(!tools.hidden));
+  });
+})();

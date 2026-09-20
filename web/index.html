@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=28">
-  <link rel="stylesheet" href="/fields.css?v=28">
+  <link rel="stylesheet" href="/style.css?v=30">
+  <link rel="stylesheet" href="/fields.css?v=30">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -23,9 +23,13 @@
     <p class="app-summary" id="summary" aria-live="polite"></p>
     <button type="button" id="sync-status" class="sync-status" data-state="synced"
             aria-live="polite" title="Tap to sync now"></button>
-    <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
-    <button type="button" id="badge-enable" class="log-toggle" hidden
-            title="Show the number of todos due today on the app icon">icon badge</button>
+    <button type="button" id="dev-toggle" class="dev-toggle" aria-expanded="false"
+            aria-controls="dev-tools">More</button>
+    <span id="dev-tools" class="dev-tools" hidden>
+      <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
+      <button type="button" id="badge-enable" class="log-toggle" hidden
+              title="Show the number of todos due today on the app icon">icon badge</button>
+    </span>
   </header>
 
   <div class="tabs-wrap">
@@ -97,23 +101,23 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="/auth.js?v=28"></script>
-<script src="/eventlog.js?v=28"></script>
-  <script src="/sync.js?v=28"></script>
-  <script src="/fields.js?v=28"></script>
-  <script src="/attachments.js?v=28"></script>
-  <script src="/fields-ui.js?v=28"></script>
-  <script src="/attachments-ui.js?v=28"></script>
-  <script src="/idb-store.js?v=28"></script>
-  <script src="/freshness.js?v=28"></script>
-  <script src="/badge.js?v=28"></script>
-  <script src="/due.js?v=28"></script>
-  <script src="/autodone.js?v=28"></script>
-<script src="/outline.js?v=28"></script>
-  <script src="/reorder.js?v=28"></script>
-  <script src="/search.js?v=28"></script>
-  <script src="/app.js?v=28"></script>
-  <script src="/trash.js?v=28"></script>
-  <script src="/search-ui.js?v=28"></script>
+<script src="/auth.js?v=30"></script>
+<script src="/eventlog.js?v=30"></script>
+  <script src="/sync.js?v=30"></script>
+  <script src="/fields.js?v=30"></script>
+  <script src="/attachments.js?v=30"></script>
+  <script src="/fields-ui.js?v=30"></script>
+  <script src="/attachments-ui.js?v=30"></script>
+  <script src="/idb-store.js?v=30"></script>
+  <script src="/freshness.js?v=30"></script>
+  <script src="/badge.js?v=30"></script>
+  <script src="/due.js?v=30"></script>
+  <script src="/autodone.js?v=30"></script>
+<script src="/outline.js?v=30"></script>
+  <script src="/reorder.js?v=30"></script>
+  <script src="/search.js?v=30"></script>
+  <script src="/app.js?v=30"></script>
+  <script src="/trash.js?v=30"></script>
+  <script src="/search-ui.js?v=30"></script>
 </body>
 </html>
