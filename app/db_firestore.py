@@ -830,3 +830,41 @@ def maybe_archive_expired() -> int:
         return moved
     finally:
         _archive_lock.release()
+
+
+# ---- push reminders (see app/push.py) ----
+PUSH_DEVICES = "push_devices"
+PUSH_SENT = "push_sent"
+
+
+def upsert_push_device(dev_id: str, token: str, tz: str, platform: str) -> None:
+    get_conn().collection(PUSH_DEVICES).document(dev_id).set(
+        {"token": token, "tz": tz, "platform": platform, "updated_at": _now_utc()})
+
+
+def delete_push_device(dev_id: str) -> None:
+    get_conn().collection(PUSH_DEVICES).document(dev_id).delete()
+
+
+def list_push_devices() -> list[dict]:
+    return [{"id": d.id, **d.to_dict()} for d in get_conn().collection(PUSH_DEVICES).stream()]
+
+
+def get_push_marker(key: str) -> list[str] | None:
+    """The todo ids stored with a sent-marker, or None when nothing was sent."""
+    snap = get_conn().collection(PUSH_SENT).document(key).get()
+    return list(snap.to_dict().get("todo_ids") or []) if snap.exists else None
+
+
+def put_push_marker(key: str, todo_ids: list[str], expires_at: datetime.datetime) -> None:
+    # expires_at feeds a Firestore TTL policy on this collection.
+    get_conn().collection(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
+
+
+def get_due_todos(before: datetime.datetime) -> list[models.Todo]:
+    """Open, live todos whose due date sorts before `before` (naive ISO strings, so
+    a string range query). Only these documents are read, never the whole collection."""
+    query = (get_conn().collection("todos")
+             .where("done", "==", False).where("deleted", "==", False)
+             .where("due_date", "<", before.isoformat()))
+    return [db_firestore_helpers.doc_to_todo(d.to_dict()) for d in query.stream()]

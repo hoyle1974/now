@@ -14,6 +14,7 @@ from app import blobstore
 from app import db
 from app import models
 from app import next_up
+from app import push
 from app.auth import require_user
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -101,6 +102,24 @@ def _affected(pairs: list[tuple[str, int]]) -> list[dict]:
 def health_check():
     """Health check endpoint for Cloud Run"""
     return {"status": "ok"}
+
+@app.post("/push/devices")
+def register_push_device(body: push.DeviceRegistration) -> dict:
+    """The installed app reports its FCM token and timezone at every launch."""
+    if not push.valid_tz(body.tz):
+        raise HTTPException(400, "unknown timezone")
+    db.upsert_push_device(push.device_id(body.token), body.token, body.tz, body.platform)
+    return {"ok": True}
+
+@app.post("/push/devices/unregister")
+def unregister_push_device(body: push.TokenOnly) -> dict:
+    db.delete_push_device(push.device_id(body.token))
+    return {"ok": True}
+
+@app.post("/internal/notify")
+def notify() -> dict:
+    """Cloud Scheduler tick (OIDC-verified in require_user): send due reminders."""
+    return push.run_notify(datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
 
 @app.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) -> Response:

@@ -100,3 +100,48 @@ def plan_device(dev_id: str, tz: str, now_utc: datetime.datetime,
             continue  # its window opened overnight: the digest already covers it
         out.append(Push(key, t.title, f"Due at {d.strftime('%-I:%M %p')}, in about an hour"))
     return out
+
+
+def send_fcm(token: str, p: Push) -> None:
+    """One data-only web push. The service worker always shows it (iOS revokes
+    permission from a page that receives pushes it does not display)."""
+    import firebase_admin
+    from firebase_admin import messaging
+    if not firebase_admin._apps:
+        firebase_admin.initialize_app()
+    message = messaging.Message(
+        token=token,
+        data={"title": p.title, "body": p.body, "url": "/"},
+        webpush=messaging.WebpushConfig(headers={"Urgency": "high", "TTL": "3600"}))
+    try:
+        messaging.send(message)
+    except (messaging.UnregisteredError, messaging.SenderIdMismatchError) as e:
+        raise DeadToken() from e
+
+
+def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | None = None) -> dict:
+    """One scheduler tick. Reads only todos due within two days (or overdue), and
+    nothing at all when no device is registered. The marker is written before the
+    send, so a failure loses one push rather than repeating it."""
+    from app import db
+    send = send or send_fcm
+    devices = db.list_push_devices()
+    if not devices:
+        return {"devices": 0, "sent": 0}
+    # Two days ahead covers "end of today" in any timezone; each device filters precisely.
+    todos = db.get_due_todos((now_utc + datetime.timedelta(days=2)).replace(tzinfo=None))
+    sent = 0
+    for dev in devices:
+        for p in plan_device(dev["id"], dev.get("tz", "UTC"), now_utc, todos, db.get_push_marker):
+            db.put_push_marker(p.key, list(p.todo_ids), now_utc + MARKER_TTL)
+            if p.silent:
+                continue
+            try:
+                send(dev["token"], p)
+                sent += 1
+            except DeadToken:
+                db.delete_push_device(dev["id"])
+                break
+            except Exception:
+                logging.exception("push send failed for device %s", dev["id"])
+    return {"devices": len(devices), "sent": sent}

@@ -23,8 +23,35 @@ def _widget_token_ok(request: Request) -> bool:
                 and request.url.path == _WIDGET_PATH
                 and hmac.compare_digest(supplied.encode(), WIDGET_TOKEN.encode()))
 
+# Cloud Scheduler calls these with a Google-signed OIDC token. Read at call time
+# so the deployed env vars (and tests) decide; either unset turns the route off.
+_SCHEDULER_PATHS = {"/internal/notify"}
+
+def _verify_oidc(token: str, audience: str) -> dict:
+    from google.auth.transport import requests as google_requests
+    from google.oauth2 import id_token
+    return id_token.verify_oauth2_token(token, google_requests.Request(), audience)
+
+def verify_scheduler(request: Request) -> None:
+    audience = os.environ.get("NOTIFY_AUDIENCE", "")
+    caller = os.environ.get("NOTIFY_CALLER", "").lower()
+    if not audience or not caller:
+        raise HTTPException(403, "Notifications are not enabled")
+    header = request.headers.get("authorization", "")
+    if not header.lower().startswith("bearer "):
+        raise HTTPException(401, "Scheduler token required")
+    try:
+        claims = _verify_oidc(header[7:].strip(), audience)
+    except Exception:
+        raise HTTPException(401, "Invalid scheduler token")
+    if not claims.get("email_verified") or (claims.get("email") or "").lower() != caller:
+        raise HTTPException(403, "Not the scheduler")
+
 def require_user(request: Request) -> None:
     if request.url.path in _PUBLIC_PATHS:
+        return
+    if request.url.path in _SCHEDULER_PATHS:
+        verify_scheduler(request)
         return
     if _widget_token_ok(request):
         return
