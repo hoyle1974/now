@@ -123,19 +123,24 @@
   }
 
   // ---- shake to summon ----
-  // A shake is three hard swings of the accelerometer within a second. iOS only
+  // A shake is three hard swings of the accelerometer within 1.4 seconds. iOS only
   // delivers motion events after a permission prompt that must come from a tap
   // (see request, wired to the More panel's Shake button).
-  let shakeOn = false, lastMag = 0, spikes = [], lastShake = 0;
+  let shakeOn = false, spikes = [], lastShake = 0, lastSpike = 0, peakListener = null;
+  const GRAVITY = 9.81;
+  // Distance of each reading from resting gravity: still is ~0, a hard shake
+  // swings it by 10+ m/s2. Works even at 60 readings a second, where the change
+  // between two consecutive readings stays small.
   function onMotion(e) {
     const a = e.accelerationIncludingGravity;
     if (!a || a.x == null) return;
-    const mag = Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z);
-    const jolt = Math.abs(mag - lastMag);
-    lastMag = mag;
+    const dev = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - GRAVITY);
+    if (peakListener) peakListener(dev);
+    if (dev < 7) return; // ordinary movement
     const now = Date.now();
-    if (jolt < 14) return; // ordinary movement
-    spikes = spikes.filter((t) => now - t < 900);
+    if (now - lastSpike < 100) return; // one swing counts once
+    lastSpike = now;
+    spikes = spikes.filter((t) => now - t < 1400);
     spikes.push(now);
     if (spikes.length >= 3 && now - lastShake > 3000) {
       spikes = [];
@@ -165,7 +170,7 @@
   if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();
 
   root.Mascot = {
-    shake: { supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
+    shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
     enabled,
     setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); },
     peek: (opts) => show(opts),

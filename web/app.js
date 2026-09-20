@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "40";
+const APP_VERSION = "41";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -2042,4 +2042,32 @@ if (window.Mascot) {
     if (btn.textContent !== "Shake blocked") paint();
   });
   paint();
+})();
+
+// Shake feedback: while the More panel is open, the Shake button shows how hard
+// the phone is moving, so a too-gentle shake (or missing permission) is visible.
+(() => {
+  const btn = document.getElementById("shake-toggle");
+  if (!btn || !window.Mascot || !window.Mascot.shake.supported()) return;
+  let peak = 0, timer = null;
+  window.Mascot.shake.onPeak((dev) => {
+    if (dev <= peak) return;
+    peak = dev;
+    if (btn.hidden || btn.offsetParent === null) return;
+    btn.textContent = `Shake on \u00b7 ${dev.toFixed(0)}`;
+    clearTimeout(timer);
+    timer = setTimeout(() => { peak = 0; btn.textContent = "Shake on"; }, 1500);
+  });
+})();
+
+// Backup summon: tap the "Todos" title three times.
+(() => {
+  const title = document.querySelector(".app-title");
+  if (!title || !window.Mascot) return;
+  let taps = [];
+  title.addEventListener("click", () => {
+    const now = Date.now();
+    taps = taps.filter((t) => now - t < 900).concat(now);
+    if (taps.length >= 3) { taps = []; window.Mascot.peek({}); }
+  });
 })();
