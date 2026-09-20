@@ -3,7 +3,7 @@ type: Backlog
 title: Roadmap and open items
 description: What is left to do for fork-friendliness and the zilch-gcp connection, and known loose ends.
 tags: [roadmap, fork, zilch, todo]
-timestamp: 2026-09-20T14:00:00Z
+timestamp: 2026-09-20T16:00:00Z
 ---
 Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Ordered roughly by value.
 
@@ -13,7 +13,7 @@ Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Order
 3. **Watch the first days of `now-app - health check failing`** (new uptime check). Done 2026-09-20: migration, monitoring apply, old alerts removed, widget switched to `https://now-app.web.app`, old service `now` deleted.
 4. **Reconcile `.zilch.config` with reality** (see drift in [zilch-gcp](../architecture/zilch-gcp.md)) and decide whether `now` should adopt zilch's storage bucket or keep its own (recommended: keep; zilch's has `force_destroy = true`).
 5. **Mention** `now` as a reference app in the zilch README (its commit `4d2eae8` is pushed).
-6. **Git history still contains the old project id, number and Firebase web config** (early `web/auth.js`, docs, `.firebaserc`) and the owner's email (old `app/auth.py`). None are credentials (auth is enforced server-side and `ALLOWED_EMAIL`); rewriting public history needs a force push and breaks clones/forks, so it was left. Working tree scrubbed 2026-09-20.
+6. **History was rewritten on 2026-09-20** (git filter-repo; both `main` and `optimistic-sync`, all 154 commits re-hashed) to replace the project id/number, Firebase web config, old Cloud Run URL and the owner's email in file contents with placeholders. Still true: every commit's author/committer email is the owner's git identity; GitHub may keep the old commit SHAs reachable by direct URL until it garbage-collects (support can purge); local-only branches (`track-*`, `worktree-agent-*`) still hold the old history. No credential was ever committed (scanned all blobs).
 
 **Loose ends found during the review**
 - `db.init(memory=...)` parameter is vestigial. `requirements.txt` pins direct dependencies only (no lockfile).
