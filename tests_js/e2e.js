@@ -1,5 +1,5 @@
 // End-to-end check of the sync engine against a running server:
-//   uvicorn app.main:app --port 8000 &   then   node tests_js/e2e.js
+// Run it with scripts/e2e.sh (emulator + tests_js/e2e_server.py, which turns the sign-in gate off).
 "use strict";
 const assert = require("node:assert/strict");
 const Sync = require("../web/sync.js");

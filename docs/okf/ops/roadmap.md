@@ -3,7 +3,7 @@ type: Backlog
 title: Roadmap and open items
 description: What is left to do for fork-friendliness and the zilch-gcp connection, and known loose ends.
 tags: [roadmap, fork, zilch, todo]
-timestamp: 2026-09-20T23:00:00Z
+timestamp: 2026-09-20T23:30:00Z
 ---
 Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Ordered roughly by value.
 
@@ -18,7 +18,6 @@ Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Order
 8. **Scrub the author's project id / URLs** from README history and this OKF bundle if the repo goes public (README is already clean; `.firebaserc`, `firebase.json` and OKF still name the project).
 
 **Loose ends found during the review**
-- `scripts/e2e.sh` fails with 401 (predates the auth gate; needs a token or an auth override). `tests_js/e2e.js` is otherwise untested.
 - `db.init(memory=...)` parameter is vestigial. `requirements.txt` pins direct dependencies only (no lockfile).
 - Every tree read after a write scans the whole `todos` collection (cached per revision); revisit past a few thousand todos.
 - zilch `tfplan` file is an untracked leftover in `../zilch-gcp`.
