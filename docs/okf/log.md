@@ -23,3 +23,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-19: sync client review fixes (delete If-Match, auth retry, 404 narrowing, undelete parent, rebuild moves, freshness retry, viewer fixes); version 47.
 - 2026-09-19: Backend review fixes: move up/down maps only deliberate refusals (MoveError) to 4xx; attachment upload deletes its blob unless the stored todo lists it, orphan-blob sweep added to the daily archive run; archive moves in transactions with a re-read and rev bump, atomic last_run claim, naive timestamps read as UTC; next-up normalizes aware dues; 413 from Content-Length before reading uploads; removed legacy /parent/{id} route and dead code.
 - 2026-09-19: API 404s carry explicit detail text (todo not found / attachment not found / parent not found) so the client can tell an item gone from a missing route.
+- 2026-09-19: Edit sheet gets a "Pick date" chip and a tappable date field (due-time.md); app v48.

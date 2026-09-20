@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "47";
+const APP_VERSION = "48";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -1309,14 +1309,25 @@ function renderEditEditor(todo) {
   const shortcuts = [
     { label: "Today", value: getTodayString() },
     { label: "Tomorrow", value: getTomorrowString() },
+    { label: "Pick date", pick: true },
     { label: "Clear", value: "", plain: true },
   ];
+  // An empty date field looks like blank space (iOS shows no hint), so the row
+  // has an explicit "Pick date" chip, and tapping the field opens the picker too.
+  const openPicker = () => {
+    try { dueDateInput.showPicker(); } catch (e) { dueDateInput.focus(); }
+  };
+  dueDateInput.addEventListener("click", openPicker);
   const chipButtons = shortcuts.map((shortcut) => {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chip" + (shortcut.plain ? " chip-plain" : "");
     btn.textContent = shortcut.label;
     btn.addEventListener("click", () => {
+      if (shortcut.pick) {
+        openPicker();
+        return;
+      }
       dueDateInput.value = shortcut.value;
       dueDateInput.dispatchEvent(new Event("input")); // keeps the time field in step
       markChips();
@@ -1325,8 +1336,16 @@ function renderEditEditor(todo) {
     return btn;
   });
   function markChips() {
+    const value = dueDateInput.value;
+    const custom = !!value && value !== getTodayString() && value !== getTomorrowString();
     shortcuts.forEach((shortcut, i) => {
-      chipButtons[i].classList.toggle("is-active", !shortcut.plain && dueDateInput.value === shortcut.value);
+      if (shortcut.pick) {
+        // Shows the chosen date once it is neither Today nor Tomorrow.
+        chipButtons[i].classList.toggle("is-active", custom);
+        chipButtons[i].textContent = custom ? formatDue(`${value}T00:00:00`) : shortcut.label;
+        return;
+      }
+      chipButtons[i].classList.toggle("is-active", !shortcut.plain && value === shortcut.value);
     });
   }
   dueDateInput.addEventListener("input", markChips);

@@ -753,6 +753,11 @@ body.menu-room {
   transition: border-color 0.15s, box-shadow 0.15s;
 }
 
+.sheet input[type="date"] {
+  min-height: 46px; /* an empty date field is blank on iOS: keep it a tappable target */
+  cursor: pointer;
+}
+
 .sheet textarea {
   resize: vertical;
   min-height: 96px;
