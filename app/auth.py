@@ -1,6 +1,7 @@
 """Single-user gate: every API request must carry a Firebase ID token for
 ALLOWED_EMAIL. Static files stay public (they hold no data)."""
 from __future__ import annotations
+import hmac
 import os
 from fastapi import HTTPException, Request
 import firebase_admin
@@ -10,8 +11,21 @@ ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "you@example.com").lower()
 
 _PUBLIC_PATHS = {"/health"}
 
+# Long-lived read-only token for the iOS Scriptable lock screen widget, which
+# can't refresh Firebase ID tokens. Unlocks only GET /todos/next; unset = off.
+WIDGET_TOKEN = os.environ.get("WIDGET_TOKEN", "")
+_WIDGET_PATH = "/todos/next"
+
+def _widget_token_ok(request: Request) -> bool:
+    supplied = request.headers.get("x-widget-token", "")
+    return bool(WIDGET_TOKEN and supplied and request.method == "GET"
+                and request.url.path == _WIDGET_PATH
+                and hmac.compare_digest(supplied, WIDGET_TOKEN))
+
 def require_user(request: Request) -> None:
     if request.url.path in _PUBLIC_PATHS:
+        return
+    if _widget_token_ok(request):
         return
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
