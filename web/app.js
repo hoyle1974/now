@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "52";
+const APP_VERSION = "53";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -2078,6 +2078,43 @@ async function copyText(text) {
   return ok;
 }
 
+// Reminders (push): a morning digest and a heads-up an hour before timed todos.
+// See push.js; every failure is logged and swallowed, never shown as a break.
+(() => {
+  const btn = document.getElementById("push-toggle");
+  if (!btn || !window.Push) return;
+  const env = () => ({
+    hasSW: "serviceWorker" in navigator,
+    hasPush: "PushManager" in window,
+    hasNotification: typeof Notification !== "undefined",
+    permission: typeof Notification === "undefined" ? "default" : Notification.permission,
+    enabled: window.Push.enabled(),
+  });
+  const LABELS = { unsupported: "Reminders n/a", blocked: "Reminders blocked", off: "Reminders off", on: "Reminders on" };
+  const paint = () => {
+    const state = window.Push.status(env());
+    btn.hidden = state === "unsupported";
+    btn.textContent = LABELS[state];
+    btn.setAttribute("aria-pressed", String(state === "on"));
+    btn.title = state === "blocked" ? "Allow notifications for this app in iOS Settings" : btn.title;
+  };
+  btn.addEventListener("click", async () => {
+    const state = window.Push.status(env());
+    try {
+      if (state === "on") await window.Push.disable();
+      else if (state === "off") logEvent("push", "enable: " + await window.Push.enable());
+    } catch (e) {
+      logEvent("push", "toggle failed: " + (e && e.message));
+    }
+    paint();
+  });
+  paint();
+  // Already allowed: quietly keep the token and timezone fresh (travel, token rotation).
+  if (window.Push.status(env()) === "on") {
+    window.Push.refresh().catch((e) => logEvent("push", "refresh failed: " + (e && e.message)));
+  }
+})();
+
 document.getElementById("badge-enable").addEventListener("click", async () => {
   try { await Notification.requestPermission(); } catch (e) { /* older signature or blocked */ }
   syncBadgeButton();
@@ -2200,7 +2237,7 @@ if (window.Mascot) {
 })();
 
 // "Shake to summon" the mascot. Android/desktop listen automatically; iOS needs
-// this tap to grant motion access (and asks again after a reload).
+// this tap to grant motion access; after a relaunch Mascot re-asks on the first tap.
 (() => {
   const btn = document.getElementById("shake-toggle");
   if (!btn || !window.Mascot || !window.Mascot.shake.supported()) return;
@@ -2209,6 +2246,11 @@ if (window.Mascot) {
     btn.textContent = window.Mascot.shake.active() ? "Shake on" : "Shake to summon";
     btn.setAttribute("aria-pressed", String(window.Mascot.shake.active()));
   };
+  // After a relaunch, Mascot re-requests motion access on the first tap.
+  window.addEventListener("shake-rearm", (e) => {
+    logEvent("shake", "re-armed on first tap: " + (e && e.detail));
+    paint();
+  });
   btn.addEventListener("click", async () => {
     if (!window.Mascot.shake.active()) {
       const result = await window.Mascot.shake.request();

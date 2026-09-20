@@ -22,6 +22,8 @@ timestamp: 2026-09-19T00:00:00Z
 | `POST /todos/{id}/repeat` | Spawn next occurrence ([repeating](../features/repeating-todos.md)). |
 | `POST /todos/{id}/split` | Split into several todos. |
 | `POST /todos/{id}/attachments` (multipart `file`), `GET`/`DELETE /todos/{id}/attachments/{aid}` | Images on a todo; upload/delete return the updated todo; a `Content-Length` over 10 MB + 1 MB is refused with 413 before the body is read ([attachments](../features/attachments.md)). |
+| `POST /push/devices` `{token, tz, platform}`, `POST /push/devices/unregister` `{token}` | Register or drop a device for [push reminders](../features/push-reminders.md); 400 on an unknown timezone. |
+| `POST /internal/notify` | Cloud Scheduler only (OIDC); sends due reminders, returns `{devices, sent}`. |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
 Writes carry `X-Txn-Id` for idempotency; write responses reveal remote changes via `X-Rev-Prev`.

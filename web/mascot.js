@@ -203,8 +203,28 @@
       } catch (_) { return "denied"; }
     }
     shakeOn = true;
+    if (needsPermission()) shakeMemo(true);
     syncMotion();
     return "granted";
+  }
+  // iOS forgets the motion grant on a full relaunch (a new version usually means
+  // one). Remember the user turned shake on and re-request on their first tap in
+  // the next session: requestPermission needs a gesture, and if iOS still holds
+  // the grant this is silent.
+  const SHAKE_KEY = "now.shakeOn";
+  function shakeMemo(on) {
+    try { on ? root.localStorage.setItem(SHAKE_KEY, "1") : root.localStorage.removeItem(SHAKE_KEY); } catch (_) { /* unavailable */ }
+  }
+  function armOnFirstTap(doc, storage, request) {
+    let remembered = null;
+    try { remembered = storage.getItem(SHAKE_KEY); } catch (_) { return false; }
+    if (remembered !== "1") return false;
+    doc.addEventListener("pointerup", async () => {
+      const result = await request();
+      if (result === "denied") shakeMemo(false); // don't prompt on every launch
+      try { root.dispatchEvent(new root.CustomEvent("shake-rearm", { detail: result })); } catch (_) { /* no events here */ }
+    }, { once: true, capture: true });
+    return true;
   }
   // The motion stream is ~60 readings a second, so only listen while the shake
   // feature is armed, the page is visible and the mascot is enabled.
@@ -215,6 +235,7 @@
   }
   // Android and desktop need no permission: arm right away.
   if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();
+  if (typeof document !== "undefined" && needsPermission()) armOnFirstTap(document, root.localStorage, requestShake);
 
   // A reaction to something that just happened. Polite by design: a global
   // 10s gap between reactions, a per-topic cooldown, and never while you're
@@ -233,7 +254,7 @@
 
   root.Mascot = {
     react,
-    shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
+    shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, armOnFirstTap, active: () => shakeOn, _onMotion: onMotion },
     enabled,
     setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); syncMotion(); },
     peek: (opts) => show(opts),

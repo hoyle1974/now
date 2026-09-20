@@ -9,6 +9,7 @@
     authDomain: window.location.host === "now-app.web.app"
       ? "now-app.web.app" : "your-gcp-project-id.firebaseapp.com",
     projectId: "your-gcp-project-id",
+    messagingSenderId: "000000000000", // the project number; FCM push needs it
     appId: "YOUR_FIREBASE_APP_ID",
   };
 
@@ -67,7 +68,7 @@
   function isApiRequest(input) {
     const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
     return url.origin === window.location.origin &&
-      (url.pathname === "/todos" || url.pathname.startsWith("/todos/"));
+      (url.pathname === "/todos" || url.pathname.startsWith("/todos/") || url.pathname.startsWith("/push/"));
   }
 
   async function withToken(input, init, forceRefresh) {

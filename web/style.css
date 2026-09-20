@@ -1779,17 +1779,39 @@ li.search-hit { cursor: default; }
 
 .theme-swatch:active { transform: scale(0.9); }
 
-/* The opened More panel sits on its own row under the pills. */
+/* The opened More panel: a short settings list, one labelled row per group. */
 .dev-tools:not([hidden]) {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px 0;
-  margin-top: 6px;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 0 2px;
+  border-top: 0.5px solid var(--separator, rgba(60, 60, 67, 0.18));
 }
 
-.dev-tools .look-tools { flex-basis: 100%; }
-.dev-tools .log-toggle { margin-left: 0; margin-right: 6px; }
+.more-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.more-label {
+  flex: 0 0 60px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--label-2);
+}
+
+.more-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.more-row .log-toggle { margin: 0; }
+.more-row .theme-swatches { margin-left: 0; }
+.more-row .log-toggle[aria-pressed="true"] { color: var(--accent); }
 
 /* ---------- Mascot: Nudge peeks up from behind the add bar ---------- */
 

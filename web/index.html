@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=52">
-  <link rel="stylesheet" href="/fields.css?v=52">
+  <link rel="stylesheet" href="/style.css?v=53">
+  <link rel="stylesheet" href="/fields.css?v=53">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -25,17 +25,35 @@
             aria-live="polite" title="Tap to sync now"></button>
     <button type="button" id="dev-toggle" class="dev-toggle" aria-expanded="false"
             aria-controls="dev-tools">More</button>
-    <span id="dev-tools" class="dev-tools" hidden>
-      <span class="look-tools">
-        <button type="button" id="sound-toggle" class="log-toggle" aria-pressed="false">Sound off</button>
-        <button type="button" id="mascot-toggle" class="log-toggle" aria-pressed="true">Mascot on</button>
-        <button type="button" id="shake-toggle" class="log-toggle" hidden>Shake to summon</button>
+    <div id="dev-tools" class="dev-tools" hidden>
+      <div class="more-row">
+        <span class="more-label">Look</span>
         <span id="theme-swatches" class="theme-swatches" role="group" aria-label="Accent color"></span>
-      </span>
-      <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
-      <button type="button" id="badge-enable" class="log-toggle" hidden
-              title="Show the number of todos due today on the app icon">icon badge</button>
-    </span>
+      </div>
+      <div class="more-row">
+        <span class="more-label">Mascot</span>
+        <span class="more-items">
+          <button type="button" id="sound-toggle" class="log-toggle" aria-pressed="false">Sound off</button>
+          <button type="button" id="mascot-toggle" class="log-toggle" aria-pressed="true">Mascot on</button>
+          <button type="button" id="shake-toggle" class="log-toggle" hidden>Shake to summon</button>
+        </span>
+      </div>
+      <div class="more-row">
+        <span class="more-label">Alerts</span>
+        <span class="more-items">
+          <button type="button" id="push-toggle" class="log-toggle" aria-pressed="false" hidden
+                  title="Get a morning digest and a heads-up an hour before timed todos">Reminders off</button>
+          <button type="button" id="badge-enable" class="log-toggle" hidden
+                  title="Show the number of todos due today on the app icon">icon badge</button>
+        </span>
+      </div>
+      <div class="more-row">
+        <span class="more-label">Support</span>
+        <span class="more-items">
+          <button type="button" id="log-toggle" class="log-toggle" title="Show the event log">log</button>
+        </span>
+      </div>
+    </div>
   </header>
 
   <div class="tabs-wrap">
@@ -107,26 +125,28 @@
 
   <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="/auth.js?v=52"></script>
-<script src="/eventlog.js?v=52"></script>
-  <script src="/sync.js?v=52"></script>
-  <script src="/fields.js?v=52"></script>
-  <script src="/attachments.js?v=52"></script>
-  <script src="/fields-ui.js?v=52"></script>
-  <script src="/attachments-ui.js?v=52"></script>
-  <script src="/idb-store.js?v=52"></script>
-  <script src="/freshness.js?v=52"></script>
-  <script src="/badge.js?v=52"></script>
-  <script src="/due.js?v=52"></script>
-  <script src="/autodone.js?v=52"></script>
-<script src="/outline.js?v=52"></script>
-  <script src="/reorder.js?v=52"></script>
-  <script src="/search.js?v=52"></script>
-  <script src="/themes.js?v=52"></script>
-<script src="/mascot.js?v=52"></script>
-<script src="/sparkle.js?v=52"></script>
-<script src="/app.js?v=52"></script>
-  <script src="/trash.js?v=52"></script>
-  <script src="/search-ui.js?v=52"></script>
+<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
+<script src="/auth.js?v=53"></script>
+<script src="/eventlog.js?v=53"></script>
+  <script src="/sync.js?v=53"></script>
+  <script src="/fields.js?v=53"></script>
+  <script src="/attachments.js?v=53"></script>
+  <script src="/fields-ui.js?v=53"></script>
+  <script src="/attachments-ui.js?v=53"></script>
+  <script src="/idb-store.js?v=53"></script>
+  <script src="/freshness.js?v=53"></script>
+  <script src="/badge.js?v=53"></script>
+  <script src="/push.js?v=53"></script>
+  <script src="/due.js?v=53"></script>
+  <script src="/autodone.js?v=53"></script>
+<script src="/outline.js?v=53"></script>
+  <script src="/reorder.js?v=53"></script>
+  <script src="/search.js?v=53"></script>
+  <script src="/themes.js?v=53"></script>
+<script src="/mascot.js?v=53"></script>
+<script src="/sparkle.js?v=53"></script>
+<script src="/app.js?v=53"></script>
+  <script src="/trash.js?v=53"></script>
+  <script src="/search-ui.js?v=53"></script>
 </body>
 </html>
