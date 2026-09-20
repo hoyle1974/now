@@ -1024,6 +1024,18 @@ test("a same-titled todo created BEFORE the op was queued does not drop it", asy
   assert.equal(h.engine.pending(), 1);
 });
 
+test("a bare-UTC create_date (old cached tree) is read as UTC, whatever the browser's timezone", async () => {
+  const prev = process.env.TZ;
+  process.env.TZ = "America/Los_Angeles";  // read as local, this 5h-old todo would look 2h newer than the op
+  try {
+    const bare = new Date(Date.UTC(2026, 8, 19) - 40 * DAY - 5 * 3600 * 1000).toISOString().slice(0, -1);
+    const h = await staleHarness(oldCreate(), treeOf(todo("srv1", { title: "Buy milk", create_date: bare })));
+    assert.equal(h.engine.pending(), 1);
+  } finally {
+    if (prev === undefined) delete process.env.TZ; else process.env.TZ = prev;
+  }
+});
+
 test("a recent sent create is never treated as suspect", async () => {
   const dup = todo("srv1", { title: "Buy milk", create_date: new Date(Date.UTC(2026, 8, 19) - DAY).toISOString() });
   const h = await staleHarness(oldCreate({ queued_at: Date.UTC(2026, 8, 19) - 2 * DAY }), treeOf(dup));

@@ -24,10 +24,10 @@ def test_missing_token_is_401():
 
 
 @pytest.mark.parametrize("claims,status", [
-    ({"email": "you@example.com", "email_verified": True}, None),
-    ({"email": "Hoyle.Hoyle@gmail.com", "email_verified": True}, None),
+    ({"email": "me@example.com", "email_verified": True}, None),
+    ({"email": "Me@Example.com", "email_verified": True}, None),
     ({"email": "other@gmail.com", "email_verified": True}, 403),
-    ({"email": "you@example.com", "email_verified": False}, 403),
+    ({"email": "me@example.com", "email_verified": False}, 403),
 ])
 def test_email_allowlist(monkeypatch, claims, status):
     monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
@@ -70,3 +70,14 @@ def test_widget_token_non_ascii_header_is_401_not_500(monkeypatch):
     with pytest.raises(HTTPException) as e:
         auth.require_user(_request("/todos/next", widget="é"))
     assert e.value.status_code == 401
+
+
+def test_unset_allowed_email_denies_everyone_and_fails_startup(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOWED_EMAIL", "")
+    monkeypatch.setattr(auth.fb_auth, "verify_id_token", lambda t: {"email": "", "email_verified": True})
+    monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
+    with pytest.raises(HTTPException) as e:
+        auth.require_user(_request(authorization="Bearer t"))
+    assert e.value.status_code == 403
+    with pytest.raises(RuntimeError):
+        auth.check_config()

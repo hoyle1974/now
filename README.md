@@ -16,6 +16,7 @@ Designed as a learning project, but simple enough to actually use day-to-day.
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt   # requirements.txt alone is the runtime set
+export ALLOWED_EMAIL=you@example.com  # the one Google account that may sign in (required)
 uvicorn app.main:app --reload
 ```
 
@@ -224,7 +225,7 @@ queued offline, and a todo that hasn't synced yet can't take images.
 ## Deploy
 
 ```bash
-./deploy.sh    # gcloud run deploy now --source . --region us-central1
+ALLOWED_EMAIL=you@example.com ./deploy.sh   # first deploy; later ones keep it
 ```
 
 ## Next: GCP Migration

@@ -12,6 +12,8 @@ if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
         returncode=2,
     )
 
+os.environ["ALLOWED_EMAIL"] = "me@example.com"  # read by app.auth at import
+
 # A demo- project can only ever exist inside the emulator.
 os.environ["GOOGLE_CLOUD_PROJECT"] = "demo-now-test"
 os.environ["GCLOUD_PROJECT"] = "demo-now-test"

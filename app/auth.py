@@ -7,8 +7,14 @@ from fastapi import HTTPException, Request
 import firebase_admin
 from firebase_admin import auth as fb_auth
 
-# The env var wins; the literal is only the fallback for the deployed service.
-ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "you@example.com").lower()
+# The one Google account allowed in. No default: an unset value denies everyone
+# (require_user) and stops the server at startup (check_config).
+ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "").strip().lower()
+
+def check_config() -> None:
+    if not ALLOWED_EMAIL:
+        raise RuntimeError("ALLOWED_EMAIL is not set: export the Google account that may sign in "
+                           "(deploy: ALLOWED_EMAIL=you@example.com ./deploy.sh)")
 
 _PUBLIC_PATHS = {"/health"}
 
@@ -65,5 +71,5 @@ def require_user(request: Request) -> None:
     except Exception:
         raise HTTPException(401, "Invalid or expired token")
     email = (claims.get("email") or "").lower()
-    if not claims.get("email_verified") or email != ALLOWED_EMAIL:
+    if not ALLOWED_EMAIL or not claims.get("email_verified") or email != ALLOWED_EMAIL:
         raise HTTPException(403, "Not allowed")

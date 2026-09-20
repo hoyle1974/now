@@ -199,6 +199,19 @@ def test_oversized_title_is_rejected_with_422(db_setup):
     assert client.post(f"/todos/{todo['todo_id']}/split", json={"descriptions": too_many}).status_code == 422
 
 
+def test_create_date_is_sent_as_an_explicit_utc_instant(db_setup):
+    created = client.post("/todos", json={"title": "t"}).json()
+    assert created["create_date"].endswith("Z")
+    tree = client.get("/todos/tree").json()
+    assert tree["todosById"][created["todo_id"]]["create_date"].endswith("Z")
+    assert client.get(f"/todos/{created['todo_id']}").json()["create_date"].endswith("Z")
+
+
+def test_due_date_stays_a_bare_wall_clock_time(db_setup):
+    todo = client.post("/todos", json={"title": "t", "due_date": "2026-09-20T09:30:00"}).json()
+    assert todo["due_date"] == "2026-09-20T09:30:00"
+
+
 def test_create_date_defaults_to_naive_utc():
     import datetime
     before = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)

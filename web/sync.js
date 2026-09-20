@@ -799,11 +799,15 @@
       op.sent && (op.kind === "create" || op.kind === "split") &&
       typeof op.queued_at === "number" && now() - op.queued_at > SUSPECT_AGE_MS;
 
+    // The server sends instants with a "Z"; trees cached before that have bare
+    // UTC strings, which Date.parse would read as local time.
+    const parseServerInstant = (s) => Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(s) ? s : `${s}Z`);
+
     // True when the server tree already holds what a suspect (old, sent) op
     // would create, made after the op was queued.
     function alreadyCommitted(op, todosById) {
       const since = op.queued_at - 60000;
-      const fresh = (t) => !t.deleted && Date.parse(t.create_date) >= since;
+      const fresh = (t) => !t.deleted && parseServerInstant(t.create_date) >= since;
       if (op.kind === "create") {
         for (const t of todosById.values()) {
           if (!t.parent_id && t.title === op.payload.title && fresh(t)) return true;

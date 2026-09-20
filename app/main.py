@@ -16,6 +16,7 @@ from app import db
 from app import models
 from app import next_up
 from app import push
+from app import auth
 from app.auth import require_user
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -35,6 +36,7 @@ log = logging.getLogger(__name__)
 async def lifespan(_app: FastAPI):
     # Connect at startup, not import, so importing app.main needs no Firestore
     # (tests drive db.init()/teardown() themselves and never run the lifespan).
+    auth.check_config()
     db.init()
     try:
         # Idempotency records only need to outlive a client's retry window.

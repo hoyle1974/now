@@ -1,5 +1,5 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field, RootModel, field_validator
+from pydantic import BaseModel, Field, RootModel, field_serializer, field_validator
 from typing import Annotated, Literal, get_args
 from uuid import uuid4
 import uuid
@@ -131,3 +131,10 @@ class Todo(BaseModel):
     references: list[TodoId] = Field([])
     attachments: list[Attachment] = Field([])  # only changed via the attachment endpoints
     blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree
+
+    @field_serializer("create_date", when_used="json")
+    def _create_date_as_utc(self, v: datetime.datetime) -> str:
+        # Stored naive but always UTC: say so on the wire ("Z"), or a browser reads
+        # the bare string as its own local time. due_date stays bare on purpose: it
+        # is the user's wall-clock time, not an instant.
+        return v.isoformat() + "Z" if v.tzinfo is None else v.isoformat()
