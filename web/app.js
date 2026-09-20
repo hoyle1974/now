@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "35";
+const APP_VERSION = "36";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -228,7 +228,25 @@ const freshness = Freshness.create({
 });
 
 // These stay async so existing `reportedFailure(action(...))` call sites work.
+// How many todos were checked off on this device today: a small streak-style
+// reward in the header. Local only, since todos carry no completion time.
+const DONE_TODAY_KEY = "now.doneToday";
+function doneToday(delta = 0) {
+  const today = new Date().toDateString();
+  let state = { day: today, n: 0 };
+  try {
+    const saved = JSON.parse(localStorage.getItem(DONE_TODAY_KEY) || "null");
+    if (saved && saved.day === today) state = saved;
+    if (delta) {
+      state.n = Math.max(0, state.n + delta);
+      localStorage.setItem(DONE_TODAY_KEY, JSON.stringify(state));
+    }
+  } catch (_) { /* storage unavailable: no counter */ }
+  return state.n;
+}
+
 async function toggleDone(todoId, done) {
+  doneToday(done ? 1 : -1);
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
   if (!done) return; // one-way: un-doing a subtask never reopens its parent
   // Finishing the last open subtask finishes the parent (and so on upward).
@@ -1198,12 +1216,19 @@ function renderRepeatControls(dateInput, rule) {
   unit.value = rule ? rule.unit : "";
   every.value = rule ? String(rule.every || 1) : "1";
   const sync = () => {
+    // "every 1 day" reads better than "every 1 days".
+    const one = (parseInt(every.value, 10) || 1) === 1;
+    for (const option of unit.options) {
+      const base = { day: "day", week: "week", month: "month", year: "year" }[option.value];
+      if (base) option.textContent = one ? base : base + "s";
+    }
     if (!dateInput.value) unit.value = "";
     unit.disabled = !dateInput.value;
     every.hidden = !unit.value || unit.value === "weekday";
   };
   dateInput.addEventListener("input", sync);
   unit.addEventListener("change", sync);
+  every.addEventListener("input", sync);
   sync();
   row.append(every, unit);
   return {
@@ -1398,6 +1423,13 @@ function renderSummary() {
     const span = document.createElement("span");
     span.className = "is-overdue";
     span.textContent = `${overdue} overdue`;
+    summary.append(" · ", span);
+  }
+  const doneCount = doneToday();
+  if (doneCount > 0) {
+    const span = document.createElement("span");
+    span.className = "is-done-today";
+    span.textContent = `${doneCount} done today \u2728`;
     summary.append(" · ", span);
   }
 }

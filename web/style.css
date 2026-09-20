@@ -1699,3 +1699,8 @@ li.search-hit { cursor: default; }
   transform: scale(0.95);
   background: color-mix(in srgb, var(--accent) 22%, transparent);
 }
+
+.app-summary .is-done-today {
+  color: var(--accent);
+  font-weight: 500;
+}
