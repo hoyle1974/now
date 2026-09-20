@@ -4,13 +4,13 @@ title: How now relates to zilch-gcp
 description: What zilch-gcp provisions, what this repo owns, where they overlap or have drifted, and which files connect them.
 resource: .zilch.config
 tags: [zilch, terraform, infrastructure, config]
-timestamp: 2026-09-20T09:00:00Z
+timestamp: 2026-09-20T12:00:00Z
 ---
 `now` was built on infrastructure from **zilch-gcp**, the author's own Terraform framework (sibling checkout `../zilch-gcp`, github.com/hoyle1974/zilch-gcp, MIT). `now` is its only real user. Zilch owns *infrastructure*; `now` owns *the app and its wiring*.
 
 **Connection points**
 - `.zilch.config` (git-ignored, written by zilch's `cli.py`): `gcp_project_id`, `gcp_region`, `app_name` are read by `scripts/lib/config.sh` as fallbacks for `PROJECT`, `REGION`, `SERVICE`. Unknown keys are ignored by zilch, but the file is zilch-generated, so `now`'s own overrides live in `.now.env` instead ([forking](../ops/forking.md)).
-- Zilch names the Cloud Run service `app_name` (= `now-app`). Since 2026-09-20 the app runs **there**: `scripts/migrate-service.sh` deployed it to zilch's service (runtime identity: zilch's `now-app@` service account, re-granted bucket, FCM, widget-secret access). The old service `now` is still running only for an old widget URL; delete it once the Scriptable `BASE` is `https://now-app.web.app`.
+- Zilch names the Cloud Run service `app_name` (= `now-app`). Since 2026-09-20 the app runs **there**: `scripts/migrate-service.sh` deployed it to zilch's service (runtime identity: zilch's `now-app@` service account, re-granted bucket, FCM, widget-secret access). The old service `now` was deleted on 2026-09-20 after the iOS widget `BASE` moved to `https://now-app.web.app`.
 - Zilch's `main.tf` ignores changes to the Cloud Run image **and env** (`lifecycle.ignore_changes`, commit `4d2eae8` in zilch), so `terraform apply` cannot strip `ALLOWED_EMAIL`, `WIDGET_TOKEN`, `NOTIFY_*`, `ATTACHMENTS_BUCKET`. Cost: `ZILCH_*` env vars are only written at service creation. The `now` app reads none of them.
 - Zilch's optional storage bucket is now created private (public access prevention, uniform access). `now` does not use it: `scripts/create-bucket.sh` makes its own `<project>-attachments` bucket with a bucket-scoped grant and no `force_destroy`.
 

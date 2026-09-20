@@ -4,7 +4,7 @@ title: Forking and per-deployment config
 description: How a fork is set up (zilch for infrastructure, init.sh for the app), and where per-deployment settings live.
 resource: scripts/init.sh
 tags: [fork, config, zilch, deploy]
-timestamp: 2026-09-20T09:00:00Z
+timestamp: 2026-09-20T12:00:00Z
 ---
 Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (sibling repo `../zilch-gcp`, Terraform): project APIs, Cloud Run, Firestore, Scheduler, monitoring; it writes `.zilch.config`. **The app** is set up by `scripts/init.sh` (`--dry-run` to preview, `--push` to add reminders, `--widget` to create the lock screen widget token secret) and verified by the read-only `scripts/doctor.sh` (names only, never env values). `init.sh` has only been run as `--dry-run` and against the author's own project.
 
@@ -17,7 +17,7 @@ Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle19
 
 **Not scriptable:** enabling Google sign-in and the authorized domain in the Firebase console.
 
-**Migration done (2026-09-20)** with `scripts/migrate-service.sh` (kept as the runbook for any future service move: no data moves; it re-grants IAM for the new service account, re-points Hosting, the Scheduler job and `NOTIFY_AUDIENCE`, and leaves the old service up). The `now_sync_conflicts` log-metric filter and the widget `BASE` are manual afterwards.
+**Migration done (2026-09-20)** with `scripts/migrate-service.sh` (kept as the runbook for any future service move: no data moves; it re-grants IAM for the new service account, re-points Hosting, the Scheduler job and `NOTIFY_AUDIENCE`, and leaves the old service up; delete it yourself once nothing uses its URL). The `now_sync_conflicts` log-metric filter and the widget `BASE` are manual afterwards.
 
 Open items: [roadmap](roadmap.md); relationship to zilch: [zilch-gcp](../architecture/zilch-gcp.md).
 
