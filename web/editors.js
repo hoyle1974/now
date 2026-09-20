@@ -38,6 +38,19 @@ function renderSheet(...children) {
   return editor;
 }
 
+// Full-screen sheet: a heading and the fields scroll, the action bar stays put.
+function renderFullSheet(title, nodes, buttons) {
+  const heading = document.createElement("h2");
+  heading.className = "sheet-title";
+  heading.textContent = title;
+  const body = document.createElement("div");
+  body.className = "sheet-body";
+  body.append(heading, ...nodes);
+  const screen = renderSheet(body, buttons);
+  screen.classList.add("sheet-full");
+  return screen;
+}
+
 function sheetLabel(text, forEl) {
   const label = document.createElement("label");
   label.className = "sheet-label";
@@ -61,7 +74,8 @@ function renderSplitEditor(todo) {
     reportedFailure(saveSplit(todo.todo_id, descriptions));
   }, "Split");
 
-  return renderSheet(sheetLabel("Split into subtasks", textarea), textarea, buttons);
+  textarea.rows = 8;
+  return renderFullSheet("Split into subtasks", [textarea], buttons);
 }
 
 function renderAddChildEditor(todo) {
@@ -86,15 +100,14 @@ function renderAddChildEditor(todo) {
     }
   });
 
-  return renderSheet(
-    sheetLabel("New subtask", input),
+  return renderFullSheet("New subtask", [
+    sheetLabel("Title", input),
     input,
     sheetLabel("Due date (optional)", dueDateInput),
     dueDateInput,
     sheetLabel("Time (optional)", dueTimeInput),
     dueTimeInput,
-    renderEditorActions(submit, "Add")
-  );
+  ], renderEditorActions(submit, "Add"));
 }
 
 // The optional time-of-day next to a date input. It only means something with

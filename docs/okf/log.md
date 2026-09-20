@@ -53,3 +53,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-20: Edit/Split/Add sheets are full screen width (removed the 640px cap and inline indent). app v61.
 - 2026-09-20: Docs review against the code (docs only): code-map lists push.py, push.js, sw.js, auth/platform files and all scripts, and gains the client-behaviour notes moved out of push-reminders and elsewhere; ordering-nesting sheet note fixed (tree-view.js, full-screen sheets); next-up documents blocker pull-up; deploy (no stale `SERVICE=now`), forking, firestore, roadmap, routes and testing tidied. Graph rebuilt with `graphify update .`.
 - 2026-09-20: Inline Edit/Split/Add sheets bleed out of the nested-list indent (margin-left = -depth*indent) so they span the card at every depth. app v62.
+- 2026-09-20: Split and Add-subtask sheets are now full-screen sheets (position:fixed, edge to edge) like Edit, via renderFullSheet in editors.js. app v63.
