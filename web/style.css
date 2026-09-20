@@ -1712,8 +1712,10 @@ li.search-hit { cursor: default; }
   50% { transform: translateY(-6px) rotate(3deg); }
 }
 
-/* Springy press feedback on rows and pills. */
-.todo-row:active,
+/* Springy press feedback on rows and pills. A press inside the row's menu must
+   not shrink the row: the menu is a descendant, so it would slide out from
+   under the pointer and the click would never reach the menu item. */
+.todo-row:active:not(:has(.todo-menu:active)),
 .segmented-btn:active,
 .footer-btn:active,
 .sync-status:active {
