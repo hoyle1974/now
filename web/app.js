@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "54";
+const APP_VERSION = "55";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -1543,8 +1543,49 @@ function renderSummary() {
   }
 }
 
+// Every re-render (a sync ack, a subtask fold, a refresh) rebuilds the open
+// edit/split/add sheet from the todo, which would throw away what was typed.
+// Carry the field values and focus across, matched by position in the sheet.
+function sheetFields(treeEl) {
+  return [...treeEl.querySelectorAll(".sheet input, .sheet textarea, .sheet select")];
+}
+
+function snapshotSheet(treeEl) {
+  if (!activePanel || !["edit", "add", "split"].includes(activePanel.mode)) return null;
+  const fields = sheetFields(treeEl);
+  if (!fields.length) return null;
+  return {
+    key: `${activePanel.mode}:${activePanel.todoId}`,
+    values: fields.map((f) => (f.type === "checkbox" ? f.checked : f.value)),
+    focus: fields.indexOf(document.activeElement),
+    caret: document.activeElement && document.activeElement.selectionStart,
+  };
+}
+
+function restoreSheet(treeEl, snap) {
+  if (!snap || !activePanel || snap.key !== `${activePanel.mode}:${activePanel.todoId}`) return;
+  const fields = sheetFields(treeEl);
+  if (fields.length !== snap.values.length) return;
+  fields.forEach((f, i) => {
+    const v = snap.values[i];
+    if (f.type === "checkbox") f.checked = v;
+    else if (f.value !== v) f.value = v;
+    f.dispatchEvent(new Event("input")); // keeps dependent controls (time, repeat) in step
+  });
+  // renderSheet focuses the first field on the next frame; land after it.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const f = snap.focus >= 0 ? fields[snap.focus] : null;
+    if (!f || !f.isConnected) return;
+    f.focus();
+    if (snap.caret != null && f.setSelectionRange) {
+      try { f.setSelectionRange(snap.caret, snap.caret); } catch (e) { /* date/time/number */ }
+    }
+  }));
+}
+
 function renderTree() {
   const treeEl = document.getElementById("todo-tree");
+  const sheetSnap = snapshotSheet(treeEl);
   treeEl.innerHTML = "";
   renderSummary();
   if (model.roots.length === 0) {
@@ -1564,6 +1605,7 @@ function renderTree() {
   if (activePanel && activePanel.mode === "view" && !treeEl.querySelector(".sheet-full")) {
     setActivePanel(null);
   }
+  restoreSheet(treeEl, sheetSnap);
   placeOpenMenu();
 }
 

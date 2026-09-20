@@ -290,7 +290,11 @@ svg {
   align-items: center;
   gap: 4px;
   min-height: var(--row-min);
-  padding: 4px 4px 4px 6px;
+  /* Rows bleed back out to the card edge so a color bar lines up at every
+     depth; padding-left restores the content position. */
+  --shift: calc(var(--depth, 0) * var(--indent));
+  margin-left: calc(-1 * var(--shift));
+  padding: 4px 4px 4px calc(6px + var(--shift));
   user-select: none;
   -webkit-user-select: none;
 }
@@ -301,7 +305,7 @@ svg {
   content: "";
   position: absolute;
   top: 0;
-  left: 98px;
+  left: calc(98px + var(--shift));
   right: 0;
   height: 1px;
   background: var(--separator);
@@ -316,7 +320,7 @@ svg {
 
 .todo-stem {
   position: absolute;
-  left: calc(28px - var(--guide-w) / 2);
+  left: calc(28px - var(--guide-w) / 2 + var(--shift, 0px));
   top: calc(50% + 13px);
   bottom: 0;
   width: var(--guide-w);
@@ -343,7 +347,7 @@ svg {
 .todo-children > .todo-node > .todo-row::after {
   content: "";
   position: absolute;
-  left: calc(var(--guide-x) + var(--guide-w));
+  left: calc(var(--guide-x) + var(--guide-w) + var(--shift));
   top: 0;
   width: calc(14px - var(--guide-x) - var(--guide-w));
   height: 50%;
@@ -353,7 +357,7 @@ svg {
 }
 
 .todo-children > .todo-node:last-child > .todo-row::after {
-  left: var(--guide-x);
+  left: calc(var(--guide-x) + var(--shift));
   width: calc(14px - var(--guide-x));
   border-left: var(--guide-w) solid var(--guide);
   border-bottom-left-radius: 8px;

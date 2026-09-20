@@ -34,3 +34,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-19: Push reminders: app/push.py planner, /push/devices and Scheduler-only /internal/notify, sw.js + push.js, More panel regrouped (Look/Mascot/Alerts/Support), shake re-arms on first tap after relaunch, scripts/setup-push.sh; app v53. New features/push-reminders.md; routes, firestore, deploy, monitoring updated.
 - 2026-09-19: Color inherited from nearest colored ancestor; Next up rows show the todo's (effective) color. app v54. features/fields.md updated.
 - 2026-09-19: Push reminders confirmed on an iPhone (digest push received via Scheduler, More panel layout and shake re-arm both checked). push-reminders.md updated.
+- 2026-09-19: Color bar on nested rows now bleeds to the card edge (rows use negative margin by depth) so it aligns with the parent bar; guides offset by --shift. app v55.
