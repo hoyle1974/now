@@ -4,9 +4,7 @@
 # Needs gcloud logged in with permission to create buckets and edit IAM.
 set -euo pipefail
 
-PROJECT="${PROJECT:-your-gcp-project-id}"
-REGION="${REGION:-us-central1}"      # same region as Cloud Run; inside the Always Free tier
-SERVICE="${SERVICE:-now}"
+source "$(dirname "$0")/lib/config.sh"   # PROJECT, REGION (same region as Cloud Run keeps it in the Always Free tier), SERVICE
 BUCKET="${BUCKET:-${PROJECT}-attachments}"
 
 if ! gcloud storage buckets describe "gs://${BUCKET}" --project "$PROJECT" >/dev/null 2>&1; then

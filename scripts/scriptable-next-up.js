@@ -2,7 +2,8 @@
 // Setup: paste into a new Scriptable script, fill in TOKEN, then add a Scriptable
 // widget (Lock Screen: rectangular; Home Screen: small/medium) and pick this script.
 // TOKEN is the WIDGET_TOKEN env var on the Cloud Run service; it only unlocks GET /todos/next.
-const BASE = "https://your-service-url.a.run.app";
+// BASE: your service URL (`gcloud run services describe <service> --format="value(status.url)"`).
+const BASE = "https://YOUR-SERVICE-URL";
 const TOKEN = "PASTE_WIDGET_TOKEN_HERE";
 
 const lock = config.widgetFamily === "accessoryRectangular";

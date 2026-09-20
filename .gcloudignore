@@ -29,3 +29,5 @@ firestore.indexes.json
 README.md
 CLAUDE.md
 run.sh
+.now.env
+.now.env.example

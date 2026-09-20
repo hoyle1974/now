@@ -3,7 +3,7 @@ type: Index
 title: now — knowledge bundle
 description: Curated knowledge about the "now" todo app, in Open Knowledge Format v0.1.
 tags: [okf, index]
-timestamp: 2026-09-19T20:00:00Z
+timestamp: 2026-09-20T22:00:00Z
 ---
 # now
 
@@ -36,4 +36,4 @@ like code.
   [image attachments](features/attachments.md),
   [trash, clear completed, archive](features/trash-archive.md), [auto-done and done-sink](features/auto-done.md),
   [event log](features/event-log.md), [push reminders](features/push-reminders.md)
-- Ops: [testing](ops/testing.md), [deploy](ops/deploy.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)
+- Ops: [testing](ops/testing.md), [deploy](ops/deploy.md), [forking and config](ops/forking.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)

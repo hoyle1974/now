@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-20T20:00:00Z
+timestamp: 2026-09-20T22:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -20,6 +20,7 @@ timestamp: 2026-09-20T20:00:00Z
 - Toast (`#error`): `apiFetch` only clears an error it showed itself (`apiErrorShown`), never sync notices or the Undo toast. Full-screen viewer/edit sheet owns one `history` entry (`syncHistory`/`popstate` in `app.js`) so the back gesture closes or steps back.
 - `sparkle.js` — decorative confetti on completion / when everything is done (no-op under reduced motion).
 - Main UI, split from one file into ten classic scripts that share one global scope and load in this order (`index.html`): `app.js` (API, sync glue, todo actions; holds `APP_VERSION`, [sync model](../features/sync-model.md)), `ui-helpers.js` (panel state, icons, dates, row menu/meta), `row-interactions.js` (drag, long press), `render-node.js` (`renderNode`), `editors.js` (edit/split/add sheets and the viewer, see [fields](../features/fields.md)), `tree-view.js` (summary, `renderTree`, load, page lifecycle), `composer.js`, `next-up-ui.js` (tabs, Next up rows), `pull-refresh.js`, `more-panel.js` (event log, reminders, badge, look/mascot/shake). Order matters only for top-level statements; add a new part to `index.html` and to this list.
+- `config.js` (git-ignored, `config.example.js`) — per-deployment Firebase web config read by `auth.js` ([forking](../ops/forking.md)).
 - `sync.js`, `idb-store.js` — outbox and IndexedDB persistence.
 - `freshness.js` — remote-change checks. `eventlog.js` — [event log](../features/event-log.md).
 - `reorder.js` — drag-drop → reparent ([ordering](../features/ordering-nesting.md)). `outline.js`.

@@ -179,7 +179,7 @@ service (`app/auth.py`). Unset, the token is off.
 1. Make a token and set it on the service (this is a secret; don't commit it):
    ```bash
    openssl rand -hex 24
-   gcloud run services update now --region us-central1 --update-env-vars WIDGET_TOKEN=<token>
+   gcloud run services update <service> --region <region> --update-env-vars WIDGET_TOKEN=<token>
    ```
    Rotate it the same way, then update the script. Keep a local copy in
    `.scriptable-secret` (git-ignored).
@@ -191,7 +191,7 @@ service (`app/auth.py`). Unset, the token is off.
    Script. On the Home Screen, small shows 4 and medium shows 6.
 4. "Next up: can't load" means the request failed: check the token, the `BASE` URL
    in the script, and that the service is deployed. Test with
-   `curl -H "X-Widget-Token: <token>" https://now-app.web.app/todos/next?limit=3`.
+   `curl -H "X-Widget-Token: <token>" https://<your-site>.web.app/todos/next?limit=3`.
 
 iOS decides when widgets refresh (the script asks for ~15 minutes), so the list
 can lag a little.
@@ -227,6 +227,35 @@ queued offline, and a todo that hasn't synced yet can't take images.
 ```bash
 ALLOWED_EMAIL=you@example.com ./deploy.sh   # first deploy; later ones keep it
 ```
+
+Project, region and service come from `.zilch.config` (see below) and `.now.env`.
+
+## Running your own copy
+
+MIT licensed; fork it. It is a single-user app: one Google account (`ALLOWED_EMAIL`)
+owns all the data. Setup is two layers:
+
+1. **Infrastructure** with [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (Cloud Shell
+   is easiest): project, Cloud Run, Firestore, Firebase Auth APIs, Scheduler, monitoring.
+   It writes `.zilch.config`; copy it into this repo (git-ignored). Also create a
+   Firebase project on the GCP project (console: *Add Firebase*).
+2. **The app**, with two commands:
+   ```bash
+   scripts/init.sh --dry-run   # see what it will do
+   scripts/init.sh --push      # Firebase web app + web/config.js, Hosting, indexes,
+                               # first deploy, bucket; --push adds reminders
+   scripts/doctor.sh           # read-only check of everything above
+   ```
+   `init.sh` cannot enable Google sign-in for you: turn it on in the Firebase console
+   (Authentication > Sign-in method) and confirm your `<site>.web.app` domain is under
+   Authorized domains.
+
+Per-copy settings live in three git-ignored or generated places: `.zilch.config`
+(project, region, service name), `.now.env` (overrides, see `.now.env.example`) and
+`web/config.js` (Firebase web config, see `web/config.example.js`). The Scriptable
+widget script has a `BASE` to fill in. `init.sh` is newer than the rest of the app and has only
+been exercised in `--dry-run` and against the author's own project, so read it before
+running it on yours.
 
 ## Next: GCP Migration
 

@@ -1,21 +1,25 @@
 #!/bin/bash
 # Deploy the current tree to Cloud Run. Env vars and secrets already on the
 # service (ALLOWED_EMAIL, ATTACHMENTS_BUCKET, WIDGET_TOKEN, NOTIFY_*) are kept.
+# PROJECT / REGION / SERVICE come from scripts/lib/config.sh (.now.env, .zilch.config).
 #
 # --no-cpu-throttling: the archive sweep runs after a response is sent (see
 # _load_tree in app/main.py) and would crawl if CPU were throttled between requests.
 set -euo pipefail
 cd "$(dirname "$0")"
-
-PROJECT="${PROJECT:-your-gcp-project-id}"
-REGION="${REGION:-us-central1}"
-SERVICE="${SERVICE:-now}"
+source scripts/lib/config.sh
 
 args=(--source . --project "$PROJECT" --region "$REGION" --no-cpu-throttling)
 # Set these only when exporting them, e.g. ALLOWED_EMAIL=me@example.com ./deploy.sh
+ALLOWED_EMAIL="${ALLOWED_EMAIL:-$(_cfg .now.env ALLOWED_EMAIL)}"
 env_vars=""
 [ -n "${ALLOWED_EMAIL:-}" ] && env_vars+="ALLOWED_EMAIL=${ALLOWED_EMAIL},"
 [ -n "${ATTACHMENTS_BUCKET:-}" ] && env_vars+="ATTACHMENTS_BUCKET=${ATTACHMENTS_BUCKET},"
 [ -n "$env_vars" ] && args+=(--update-env-vars "${env_vars%,}")
+
+if [ ! -f web/config.js ]; then
+  echo "error: web/config.js is missing (Firebase web config). Run scripts/init.sh, or copy web/config.example.js." >&2
+  exit 1
+fi
 
 gcloud run deploy "$SERVICE" "${args[@]}"

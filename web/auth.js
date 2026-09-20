@@ -1,17 +1,21 @@
 // Google sign-in via Firebase Auth. Wraps window.fetch so every /todos request
 // carries the user's ID token; the server only accepts one Google account.
 (function () {
-  const config = {
-    apiKey: "YOUR_FIREBASE_API_KEY",
-    // On the Hosting domain, run the sign-in handler same-origin: iOS Safari
-    // partitions storage, so a redirect back from another domain loses the result.
-    // Elsewhere fall back to the default domain (registered on the OAuth client).
-    authDomain: window.location.host === "now-app.web.app"
-      ? "now-app.web.app" : "your-gcp-project-id.firebaseapp.com",
-    projectId: "your-gcp-project-id",
-    messagingSenderId: "000000000000", // the project number; FCM push needs it
-    appId: "YOUR_FIREBASE_APP_ID",
-  };
+  const cfg = window.NOW_CONFIG && window.NOW_CONFIG.firebase;
+  if (!cfg) {
+    // No web/config.js: say so instead of failing silently (see web/config.example.js).
+    const overlay = document.getElementById("signin");
+    document.getElementById("signin-message").textContent =
+      "This deployment has no web/config.js (Firebase web config). See web/config.example.js.";
+    document.getElementById("signin-button").hidden = true;
+    overlay.hidden = false;
+    return;
+  }
+  const hosting = window.NOW_CONFIG.hostingDomain;
+  // On the Hosting domain, run the sign-in handler same-origin: iOS Safari
+  // partitions storage, so a redirect back from another domain loses the result.
+  // Elsewhere fall back to the default domain (registered on the OAuth client).
+  const config = { ...cfg, authDomain: hosting && window.location.host === hosting ? hosting : cfg.authDomain };
 
   firebase.initializeApp(config);
   const auth = firebase.auth();

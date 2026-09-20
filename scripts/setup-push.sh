@@ -5,9 +5,7 @@
 # rights. Read it first; it changes IAM and creates a Scheduler job.
 set -euo pipefail
 
-PROJECT="${PROJECT:-your-gcp-project-id}"
-REGION="${REGION:-us-central1}"
-SERVICE="${SERVICE:-now}"
+source "$(dirname "$0")/lib/config.sh"   # PROJECT, REGION, SERVICE
 JOB="${JOB:-now-notify}"
 CALLER_NAME="${CALLER_NAME:-now-notify}"
 # Daytime only, every 10 minutes; the 9:00 rule itself uses each device's own timezone.
