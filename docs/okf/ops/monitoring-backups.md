@@ -12,4 +12,4 @@ Configured in project `your-gcp-project-id` with gcloud; nothing here is in the 
 - **Log-based metric** `now_sync_conflicts`: 409/412 responses from service `now` ([sync model](../features/sync-model.md)).
 - **Error Reporting** is automatic for `logging.exception` stack traces in Cloud Run logs.
 - **Firestore backups:** point-in-time recovery on (7-day window) plus a daily backup schedule with 7-day retention, database `(default)` ([collections](../data/firestore.md)). Restore with `gcloud firestore databases clone` (PITR) or `gcloud firestore databases restore` (backup) into a new database.
-- **Secret Manager:** the widget token is still a plain env var; moving it is pending ([widget](widget.md)).
+- **Secret Manager:** the widget token lives in secret `widget-token`, mounted as env `WIDGET_TOKEN` ([widget](widget.md)).
