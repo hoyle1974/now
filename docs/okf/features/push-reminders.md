@@ -4,7 +4,7 @@ title: Push reminders
 description: A 9am digest and 1-hour heads-ups for timed todos, sent as web push through FCM.
 resource: app/push.py
 tags: [push, notifications, fcm, scheduler]
-timestamp: 2026-09-19T20:00:00Z
+timestamp: 2026-09-19T21:00:00Z
 ---
 - **Rules** (`plan_device`, pure): nothing before 9:00 device-local. At or after 9:00, one **digest** per local day if any open todo is [due today or overdue](due-time.md) ("3 due today", first three titles). A **heads-up** goes out for a *timed* todo (not date-only) when it is due within the next hour. A heads-up whose window opened before 9:00 and whose todo the digest already listed is skipped; an afternoon todo still gets its own heads-up.
 - **Devices:** the app posts its FCM token, IANA timezone and platform to `POST /push/devices` at each launch (`web/push.js`), so travel just works ([routes](../api/routes.md)). `POST /push/devices/unregister {token}` removes one. Collections `push_devices` and `push_sent` ([Firestore](../data/firestore.md)).
@@ -13,4 +13,4 @@ timestamp: 2026-09-19T20:00:00Z
 - **No duplicates:** the marker (`digest:{local date}:{device}` or `soon:{todo}:{due}:{device}`) is written *before* the send, so a failure loses one push rather than repeating it. Markers expire by Firestore TTL on `expires_at`. FCM `UnregisteredError` or `SenderIdMismatchError` deletes the device.
 - **Client:** `web/sw.js` shows every push (data-only messages, always displayed, because iOS revokes permission from pushes that show nothing) and focuses the app on tap; it does no caching. The More panel's Reminders button needs a tap for the iOS permission prompt. `web/push.js` uses the Firebase messaging SDK with FCM's default VAPID key (`VAPID_KEY` empty).
 - **Setup:** `scripts/setup-push.sh` ([deploy](../ops/deploy.md)). Test a tick with `gcloud scheduler jobs run now-notify --location us-central1`.
-- **Shake permission:** iOS forgets motion access on a full relaunch, so Mascot stores `now.shakeOn` and re-requests on the first tap of the next session ("shake" event log line `re-armed on first tap`). Unverified on-device whether iOS asks again.
+- **Shake permission:** iOS forgets motion access on a full relaunch, so Mascot stores `now.shakeOn` and re-requests on the first tap of the next session ("shake" event log line `re-armed on first tap`). Confirmed on an iPhone after v53: shake stays armed across an app update with far fewer prompts.
