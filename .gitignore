@@ -9,3 +9,4 @@ todo.db
 firestore-debug.log
 .scriptable-secret
 .claude
+graphify-out/
