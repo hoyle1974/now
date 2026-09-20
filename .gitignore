@@ -8,3 +8,4 @@ todo.db
 .firebase/
 firestore-debug.log
 .scriptable-secret
+.claude
