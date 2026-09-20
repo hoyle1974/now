@@ -11,7 +11,7 @@
       {
         "source": "**",
         "run": {
-          "serviceId": "now",
+          "serviceId": "now-app",
           "region": "us-central1"
         }
       }
