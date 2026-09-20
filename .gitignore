@@ -7,3 +7,4 @@ todo.db
 .zilch.config
 .firebase/
 firestore-debug.log
+.scriptable-secret
