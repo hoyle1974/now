@@ -35,3 +35,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-19: Color inherited from nearest colored ancestor; Next up rows show the todo's (effective) color. app v54. features/fields.md updated.
 - 2026-09-19: Push reminders confirmed on an iPhone (digest push received via Scheduler, More panel layout and shake re-arm both checked). push-reminders.md updated.
 - 2026-09-19: Color bar on nested rows now bleeds to the card edge (rows use negative margin by depth) so it aligns with the parent bar; guides offset by --shift. app v55.
+- 2026-09-19: Open Edit/Split/Add sheets keep typed text across re-renders (sync ack, subtask fold); previously the text was wiped and Save/Split silently did nothing. features/ordering-nesting.md updated. app v55.
