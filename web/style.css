@@ -653,7 +653,8 @@ body.menu-room {
 /* ---------- Inline editors ---------- */
 
 .sheet {
-  margin: 0 0 12px;
+  /* Bleed back out of the nested list's indent so the sheet spans the whole card. */
+  margin: 0 0 12px calc(-1 * var(--depth, 0) * var(--indent));
   padding: 12px;
   background: var(--fill);
   border-radius: var(--radius-control);

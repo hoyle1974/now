@@ -4,13 +4,12 @@ title: HTTP routes
 description: All routes in app/main.py.
 resource: app/main.py
 tags: [api]
-timestamp: 2026-09-20T12:00:00Z
+timestamp: 2026-09-20T23:30:00Z
 ---
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. |
 | `POST /todos` | Create. |
-| any route with `X-Txn-Id` | Header must be a safe token (`[A-Za-z0-9_-]{1,100}`, not `__x__`), else 400. |
 | `GET /todos/tree` | Full tree; adds derived `blocked`. Triggers the [archive](../features/trash-archive.md) sweep. |
 | `GET /todos/rev` | Current revision + app `version`; the cheap freshness check ([sync](../features/sync-model.md)). |
 | `GET /todos/next` | [Next up](../features/next-up.md); also accepts `X-Widget-Token` ([widget](../ops/widget.md)). |
@@ -26,6 +25,6 @@ timestamp: 2026-09-20T12:00:00Z
 | `POST /internal/notify` | Cloud Scheduler only (OIDC); sends due reminders, returns `{devices, sent}`. |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
-Writes carry `X-Txn-Id` for idempotency; write responses reveal remote changes via `X-Rev-Prev`.
+Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev`.
 
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
