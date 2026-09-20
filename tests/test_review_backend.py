@@ -154,11 +154,61 @@ def test_archive_bumps_rev_when_it_moves_something():
     assert db.get_rev() > before
 
 
-def test_archive_run_claim_is_exclusive():
+def _reset_archive_state():
+    db_firestore._archive_checked = None
+    db.get_conn().collection("meta").document("archive").delete()
+
+
+def test_archive_run_claim_is_exclusive_and_success_burns_daily_claim():
+    _reset_archive_state()
     now = datetime.datetime.now(UTC)
     assert db_firestore._claim_archive_run(now) is True
+    # a concurrent claim while the lease is held loses
     assert db_firestore._claim_archive_run(now + datetime.timedelta(minutes=1)) is False
+    db_firestore._finish_archive_run(now, ok=True)
+    assert db_firestore._claim_archive_run(now + datetime.timedelta(hours=2)) is False
     assert db_firestore._claim_archive_run(now + datetime.timedelta(days=2)) is True
+
+
+def test_failed_archive_run_does_not_burn_daily_claim():
+    _reset_archive_state()
+    now = datetime.datetime.now(UTC)
+    assert db_firestore._claim_archive_run(now) is True
+    db_firestore._finish_archive_run(now, ok=False)
+    assert db_firestore._claim_archive_run(now + datetime.timedelta(minutes=1)) is True
+
+
+def test_stale_lease_can_be_retaken():
+    _reset_archive_state()
+    now = datetime.datetime.now(UTC)
+    assert db_firestore._claim_archive_run(now) is True
+    assert db_firestore._claim_archive_run(now + datetime.timedelta(hours=1)) is True
+
+
+def test_maybe_archive_expired_failure_retries_and_success_sticks(monkeypatch):
+    _reset_archive_state()
+    calls = []
+    def boom(now=None):
+        calls.append(1)
+        raise RuntimeError("x")
+    monkeypatch.setattr(db_firestore, "archive_expired", boom)
+    with pytest.raises(RuntimeError):
+        db_firestore.maybe_archive_expired()
+    # the lease was released, so another attempt may run (in-process backoff aside)
+    db_firestore._archive_checked = None
+    monkeypatch.setattr(db_firestore, "archive_expired", lambda now=None: calls.append(2) or 0)
+    db_firestore.maybe_archive_expired()
+    assert calls == [1, 2]
+    db_firestore._archive_checked = None
+    db_firestore.maybe_archive_expired()
+    assert calls == [1, 2]
+
+
+def test_tree_read_schedules_sweep_in_background(monkeypatch):
+    ran = []
+    monkeypatch.setattr(db, "maybe_archive_expired", lambda: ran.append(1) or 0)
+    assert c.get("/todos/tree").status_code == 200
+    assert ran == [1]  # TestClient runs background tasks before returning
 
 
 # E. naive / aware timestamps ----------------------------------------------

@@ -1,6 +1,5 @@
 from __future__ import annotations
-from fastapi.templating import Jinja2Templates
-from fastapi import Depends, FastAPI, File, HTTPException, Header, Query, Response, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Header, Query, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +8,6 @@ import logging
 import re
 from pathlib import Path
 from typing import Callable
-import re
 import uuid
 from app import attachments
 from app import blobstore
@@ -48,7 +46,7 @@ async def _limit_upload_size(request, call_next):
         if length > models.MAX_ATTACHMENT_BYTES + _UPLOAD_SLACK_BYTES:
             return JSONResponse({"detail": "image too large (10 MB max)"}, status_code=413)
     return await call_next(request)
-templates = Jinja2Templates(directory="templates")
+
 
 # Routes go here.
 
@@ -147,27 +145,35 @@ def get_rev() -> dict:
     value; a different version means the page is running old code and must reload."""
     return {"rev": db.get_rev(), "version": APP_VERSION}
 
-def _load_tree(rev: int) -> tuple[list[models.Todo], dict[str, models.Todo]]:
+def _housekeeping() -> None:
     try:
         db.maybe_archive_expired()  # housekeeping must never fail a read
     except Exception:
         logging.exception("archiving old deleted todos failed")
+
+def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
+    # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
+    # on Cloud Run with request-based billing (the default) CPU may be throttled
+    # once the response is out, so the sweep can crawl until the next request;
+    # the claim is a 15-minute lease, so a stalled run is simply retaken. Deploy
+    # with --no-cpu-throttling for it to finish promptly.
+    background.add_task(_housekeeping)
     return db.get_tree(rev)
 
 @app.get("/todos/next", response_model=None)
-def get_next_up(limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
+def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
     """The todos to work on next, best first (see app/next_up.py for the rules)."""
     rev = db.get_rev()
-    roots, todosById = _load_tree(rev)
+    roots, todosById = _load_tree(rev, background)
     return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit))}
 
 @app.get("/todos/tree", response_model=dict)
-def get_tree() -> dict:
+def get_tree(background: BackgroundTasks) -> dict:
     """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
     # Read the revision first, so it can only be older than the tree we return:
     # the worst case is one redundant refresh, never a missed change.
     rev = db.get_rev()
-    roots, todosById = _load_tree(rev)
+    roots, todosById = _load_tree(rev, background)
 
     return {
         "rev": rev,

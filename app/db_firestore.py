@@ -5,6 +5,7 @@ from app import blobstore
 from app import db_firestore_helpers
 from app import recurrence
 import contextvars
+import threading
 import datetime
 import copy
 import json
@@ -20,8 +21,11 @@ _todos_collection = None
 # the live collection, which every tree read scans, stays small.
 ARCHIVE_COLLECTION = "todos_archive"
 ARCHIVE_AFTER_DAYS = 30
-ARCHIVE_DOC = "archive"  # in REV_COLLECTION: {"last_run": iso}, so instances don't repeat the sweep
+ARCHIVE_DOC = "archive"  # in REV_COLLECTION: {"last_success": iso, "lease_until": iso}, so instances don't repeat the sweep
 _ARCHIVE_CHECK_SECONDS = 24 * 3600
+_ARCHIVE_RETRY_SECONDS = 15 * 60  # in-process backoff after a failed run
+_ARCHIVE_LEASE = datetime.timedelta(minutes=15)  # how long a run may hold the claim
+_archive_lock = threading.Lock()  # one sweep at a time per process
 _archive_checked: float | None = None
 
 # (rev, roots, todosById) of the last full tree read. A tree read costs one
@@ -762,30 +766,63 @@ def sweep_orphan_blobs(min_age: datetime.timedelta = datetime.timedelta(hours=1)
     return removed
 
 def _claim_archive_run(now: datetime.datetime) -> bool:
-    """Atomically take today's archive run: True for exactly one instance."""
+    """Take the archive run: True for exactly one instance at a time. It fails
+    while a successful run is under a day old (last_success) or another
+    instance holds a live lease (lease_until). The lease is short so a crashed
+    or CPU-starved run is retried soon; only _finish_archive_run(ok=True) burns
+    the daily claim."""
     ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
 
     @firestore.transactional
     def claim(tx) -> bool:
         snap = ref.get(transaction=tx)
-        last = snap.to_dict().get("last_run") if snap.exists else None
+        doc = snap.to_dict() if snap.exists else {}
+        last = doc.get("last_success") or doc.get("last_run")
         if last and now - _aware(datetime.datetime.fromisoformat(last)) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
             return False
-        tx.set(ref, {"last_run": now.isoformat()})
+        lease = doc.get("lease_until")
+        if lease and _aware(datetime.datetime.fromisoformat(lease)) > now:
+            return False
+        tx.set(ref, {"last_success": last, "lease_until": (now + _ARCHIVE_LEASE).isoformat()})
         return True
 
     return claim(get_conn().transaction())
 
+def _finish_archive_run(now: datetime.datetime, ok: bool) -> None:
+    """Release the lease; on success also record the daily last_success."""
+    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
+    if ok:
+        ref.set({"last_success": now.isoformat(), "lease_until": None})
+    else:
+        ref.update({"lease_until": None})
+
 def maybe_archive_expired() -> int:
-    """archive_expired at most once a day across all instances (in-process timer
-    first, then a stored last-run time claimed in a transaction), so calling it
-    on every read is cheap."""
+    """archive_expired plus the orphan-blob sweep, at most once a day across all
+    instances and one at a time per process. Meant to run off the request path
+    (see _load_tree). A failure releases the claim so a later read retries; this
+    process backs off for _ARCHIVE_RETRY_SECONDS first."""
     global _archive_checked
-    if _archive_checked is not None and time.monotonic() - _archive_checked < _ARCHIVE_CHECK_SECONDS:
+    now_m = time.monotonic()
+    if _archive_checked is not None and now_m - _archive_checked < _ARCHIVE_CHECK_SECONDS:
         return 0
-    _archive_checked = time.monotonic()
-    if not _claim_archive_run(_now_utc()):
+    if not _archive_lock.acquire(blocking=False):
         return 0
-    moved = archive_expired(_now_utc())
-    sweep_orphan_blobs()
-    return moved
+    try:
+        _archive_checked = time.monotonic()
+        started = _now_utc()
+        if not _claim_archive_run(started):
+            return 0
+        try:
+            moved = archive_expired(_now_utc())
+            sweep_orphan_blobs()
+        except Exception:
+            _archive_checked = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
+            try:
+                _finish_archive_run(started, ok=False)
+            except Exception:
+                pass  # the lease expires by itself
+            raise
+        _finish_archive_run(_now_utc(), ok=True)
+        return moved
+    finally:
+        _archive_lock.release()

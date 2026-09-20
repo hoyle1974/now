@@ -28,3 +28,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-20: Added ops/monitoring-backups.md: uptime check, 5xx and health alert policies, now_sync_conflicts metric, Firestore PITR and daily backup schedule (GCP config only, no code change).
 - 2026-09-19: Edit sheet: removed the non-working "Pick date" chip; an empty due-date field now shows "Pick a date" over it (.date-field, pointer-events none). APP_VERSION/asset v=50.
 - 2026-09-20: WIDGET_TOKEN moved from a plain Cloud Run env var to Secret Manager (secret widget-token); widget.md rotation steps updated. Token value unchanged.
+- 2026-09-19: Archive sweep moved to a background task; claim is now a lease plus last_success (failed runs retry). Removed dead Jinja2Templates in main.py.
