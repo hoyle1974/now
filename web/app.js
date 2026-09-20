@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "36";
+const APP_VERSION = "38";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -363,6 +363,7 @@ function celebrate(todoId) {
     if (!justCompleted.size && !editingInTree()) renderTree();
   }, 1400));
   if (navigator.vibrate) navigator.vibrate(12); // Android only; iOS ignores it
+  if (window.Sound) window.Sound.pop();
   // Confetti from the checkbox once the row has rendered; a bigger burst when
   // that was the last open todo.
   requestAnimationFrame(() => {
@@ -373,6 +374,7 @@ function celebrate(todoId) {
     }
     if (window.Sparkle && model.todosById.size && [...model.todosById.values()].every((t) => t.done)) {
       window.Sparkle.celebrateAll();
+      if (window.Sound) window.Sound.fanfare();
     }
   });
 }
@@ -1945,4 +1947,38 @@ document.getElementById("event-log-copy").addEventListener("click", async (event
     tools.hidden = !tools.hidden;
     toggle.setAttribute("aria-expanded", String(!tools.hidden));
   });
+})();
+
+// Look & feel controls inside the header's "More" panel: completion sound and
+// accent color. Per-device preferences (see themes.js).
+(() => {
+  const soundBtn = document.getElementById("sound-toggle");
+  const swatches = document.getElementById("theme-swatches");
+  if (!soundBtn || !swatches || !window.Themes || !window.Sound) return;
+  const paintSound = () => {
+    const on = window.Sound.on();
+    soundBtn.textContent = on ? "Sound on" : "Sound off";
+    soundBtn.setAttribute("aria-pressed", String(on));
+  };
+  soundBtn.addEventListener("click", () => {
+    window.Sound.set(!window.Sound.on());
+    paintSound();
+    window.Sound.pop(); // a preview when turning on; silent when turning off
+  });
+  paintSound();
+  const paintSwatches = () => {
+    for (const b of swatches.children) b.setAttribute("aria-pressed", String(b.dataset.theme === window.Themes.current()));
+  };
+  const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+  for (const [id, t] of Object.entries(window.Themes.THEMES)) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "theme-swatch";
+    b.dataset.theme = id;
+    b.setAttribute("aria-label", `${t.name} accent`);
+    b.style.setProperty("--sw", (dark ? t.dark : t.light)[0]);
+    b.addEventListener("click", () => { window.Themes.set(id); paintSwatches(); });
+    swatches.appendChild(b);
+  }
+  paintSwatches();
 })();

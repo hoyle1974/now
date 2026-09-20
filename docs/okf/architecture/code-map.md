@@ -15,6 +15,7 @@ timestamp: 2026-09-19T14:00:00Z
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).
 
 **Client (`web/`)**
+- `themes.js` — per-device accent themes and the opt-in completion sound (`Themes`, `Sound`).
 - `sparkle.js` — decorative confetti on completion / when everything is done (no-op under reduced motion).
 - `app.js` — main UI (incl. the todo viewer and edit sheets, see [fields](../features/fields.md)); holds `APP_VERSION` ([sync model](../features/sync-model.md)).
 - `sync.js`, `idb-store.js` — outbox and IndexedDB persistence.

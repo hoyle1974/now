@@ -1704,3 +1704,56 @@ li.search-hit { cursor: default; }
   color: var(--accent);
   font-weight: 500;
 }
+
+/* ---------- Look & feel controls (More panel) ---------- */
+
+.look-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.theme-swatches {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+}
+
+.theme-swatch {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  margin: 0 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--sw);
+  cursor: pointer;
+  transition: transform 0.15s var(--ease);
+}
+
+.theme-swatch::after {
+  content: "";
+  position: absolute;
+  inset: -11px -4px; /* 44pt hit area */
+}
+
+.theme-swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--card, #fff), 0 0 0 4px var(--sw);
+  transform: scale(1.1);
+}
+
+.theme-swatch:active { transform: scale(0.9); }
+
+/* The opened More panel sits on its own row under the pills. */
+.dev-tools:not([hidden]) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 0;
+  margin-top: 6px;
+}
+
+.dev-tools .look-tools { flex-basis: 100%; }
+.dev-tools .log-toggle { margin-left: 0; margin-right: 6px; }
