@@ -5,13 +5,28 @@ from app import db_firestore_helpers
 from app import recurrence
 import contextvars
 import datetime
+import copy
 import json
+import time
 import uuid
 from typing import Callable
 from google.cloud import firestore
 
 _client = None
 _todos_collection = None
+
+# Todos deleted for ARCHIVE_AFTER_DAYS move (subtree and all) out of "todos", so
+# the live collection, which every tree read scans, stays small.
+ARCHIVE_COLLECTION = "todos_archive"
+ARCHIVE_AFTER_DAYS = 30
+ARCHIVE_DOC = "archive"  # in REV_COLLECTION: {"last_run": iso}, so instances don't repeat the sweep
+_ARCHIVE_CHECK_SECONDS = 24 * 3600
+_archive_checked: float | None = None
+
+# (rev, roots, todosById) of the last full tree read. A tree read costs one
+# document read per todo, so it is reused for as long as the revision counter
+# hasn't moved (every write to a todo bumps it in run_atomic).
+_tree_cache: tuple | None = None
 
 TXN_COLLECTION = "txn_log"
 # One document holding a counter that every data-changing transaction bumps.
@@ -55,7 +70,9 @@ def _update(ref, data: dict):
 
 def init(memory: bool = False):
     """Initialize Firestore connection"""
-    global _client, _todos_collection
+    global _client, _todos_collection, _tree_cache, _archive_checked
+    _tree_cache = None
+    _archive_checked = None
     _client = firestore.Client()
     _todos_collection = _client.collection("todos")
     print("firestore: initialized")
@@ -67,11 +84,17 @@ def get_conn():
 
 def teardown():
     """Cleanup Firestore connection"""
-    global _client, _todos_collection
+    global _client, _todos_collection, _tree_cache, _archive_checked
+    _tree_cache = None
+    _archive_checked = None
     if _client is not None:
         _client.close()
     _client = None
     _todos_collection = None
+
+
+def _now_utc() -> datetime.datetime:
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 def get_rev() -> int:
@@ -185,7 +208,8 @@ def delete_todo(todo_id: models.TodoId):
     descendant_ids.insert(0, str(todo_id))
 
     for desc_id in descendant_ids:
-        _todos_collection.document(desc_id).update({"deleted": True})
+        _todos_collection.document(desc_id).update(
+            {"deleted": True, "deleted_at": _now_utc().isoformat()})
 
 def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
     """Move a todo up or down within its siblings (roots are siblings too).
@@ -274,7 +298,7 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
     child_ids = _child_ids(str(todo_id))  # reads must precede the write
 
     version = root_data.get("version", 1) + 1
-    fields = {"deleted": False, "version": version, "order_idx": order_idx,
+    fields = {"deleted": False, "deleted_at": None, "version": version, "order_idx": order_idx,
               "parent_id": parent_id}
     _update(root_ref, fields)
 
@@ -318,7 +342,8 @@ def clear_completed() -> list[tuple[str, int]]:
         if check(tid):
             data = live[tid]
             version = data.get("version", 1) + 1
-            _update(_todos_collection.document(tid), {"deleted": True, "version": version})
+            _update(_todos_collection.document(tid),
+                    {"deleted": True, "deleted_at": _now_utc().isoformat(), "version": version})
             cleared.append((tid, version))
         else:
             pending.extend(children.get(tid, []))
@@ -339,6 +364,10 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
 
     if bump_version:
         todo.version += 1
+    if not todo.deleted:
+        todo.deleted_at = None
+    elif todo.deleted_at is None:
+        todo.deleted_at = _now_utc()
     doc_data = db_firestore_helpers.todo_to_doc(todo)
     _update(_todos_collection.document(str(todo.todo_id)), doc_data)
 
@@ -524,12 +553,27 @@ def get_root_todos() -> list[models.Todo]:
 def _root_sort_key(t: models.Todo):
     return (t.order_idx if t.order_idx is not None else 999999, t.create_date, str(t.todo_id))
 
-def get_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
+def get_tree(rev: int | None = None) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     """The whole live tree from one collection read: (roots, todosById).
 
     Only todos reachable from a root are returned, so the children of a deleted
     todo stay hidden. child_ids come back in sibling order.
+
+    rev is the revision the caller already read (read here if omitted). It is
+    taken before the collection is, so the cache can only be keyed older than
+    its contents: a write in between costs one extra reload, never a stale hit.
+    Callers get their own copy, so they may modify what they receive.
     """
+    global _tree_cache
+    if rev is None:
+        rev = get_rev()
+    if _tree_cache is not None and _tree_cache[0] == rev:
+        return copy.deepcopy(_tree_cache[1:])
+    roots, reachable = _read_tree()
+    _tree_cache = (rev, roots, reachable)
+    return copy.deepcopy((roots, reachable))
+
+def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
     live: dict[str, models.Todo] = {}
     for doc in _todos_collection.stream():
         data = doc.to_dict()
@@ -644,3 +688,59 @@ def blocked_by_would_cycle(todo_id: str, new_blockers: list[str]) -> bool:
         if doc:
             stack.extend(doc.get("blocked_by") or [])
     return False
+
+
+def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AFTER_DAYS) -> int:
+    """Move todos deleted at least `days` ago, with everything beneath them, from
+    "todos" to the archive collection. Returns how many documents moved.
+
+    Deleting only flags the top of a subtree, so the descendants go with it or
+    they would sit in "todos" unreachable and still be read on every tree load.
+    Todos deleted before deleted_at existed have no date: they get one now, so
+    their 30 days start today. Each batch copies first and deletes second, so a
+    crash leaves a duplicate that the next run overwrites, never a lost todo.
+    """
+    now = now or _now_utc()
+    cutoff = now - datetime.timedelta(days=days)
+    moving: dict[str, dict] = {}
+    for doc in _todos_collection.where("deleted", "==", True).stream():
+        data = doc.to_dict()
+        stamp = data.get("deleted_at")
+        if stamp is None:
+            doc.reference.update({"deleted_at": now.isoformat()})
+        elif datetime.datetime.fromisoformat(stamp) <= cutoff and data["todo_id"] not in moving:
+            moving[data["todo_id"]] = data
+            for below in db_firestore_helpers.get_subtree_docs(_todos_collection, data["todo_id"]):
+                moving.setdefault(below["todo_id"], below)
+
+    docs = list(moving.values())
+    client = get_conn()
+    archive = client.collection(ARCHIVE_COLLECTION)
+    for start in range(0, len(docs), 200):
+        chunk = docs[start:start + 200]
+        batch = client.batch()
+        for data in chunk:
+            batch.set(archive.document(data["todo_id"]), {**data, "archived_at": now.isoformat()})
+        batch.commit()
+        batch = client.batch()
+        for data in chunk:
+            batch.delete(_todos_collection.document(data["todo_id"]))
+        batch.commit()
+    return len(docs)
+
+def maybe_archive_expired() -> int:
+    """archive_expired at most once a day across all instances (in-process timer
+    first, then a stored last-run time), so calling it on every read is cheap."""
+    global _archive_checked
+    if _archive_checked is not None and time.monotonic() - _archive_checked < _ARCHIVE_CHECK_SECONDS:
+        return 0
+    _archive_checked = time.monotonic()
+    now = _now_utc()
+    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
+    snap = ref.get()
+    last = snap.to_dict().get("last_run") if snap.exists else None
+    if last and now - datetime.datetime.fromisoformat(last) < datetime.timedelta(seconds=_ARCHIVE_CHECK_SECONDS):
+        return 0
+    moved = archive_expired(now)
+    ref.set({"last_run": now.isoformat()})
+    return moved

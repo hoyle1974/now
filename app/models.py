@@ -101,6 +101,8 @@ class Todo(BaseModel):
     parent_id: TodoId | None = Field(None)
     child_ids: list[TodoId] = Field([])
     deleted: bool = Field(False)
+    # When it was soft-deleted (UTC); None while live or for todos deleted before this was kept.
+    deleted_at: datetime.datetime | None = Field(None)
     collapsed: bool = Field(False)
     repeat: Repeat | None = Field(None)
     # Set by the server once this todo has spawned its next occurrence, so a

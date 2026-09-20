@@ -5,6 +5,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 import datetime
+import logging
 from pathlib import Path
 from typing import Callable
 import re
@@ -116,14 +117,18 @@ def get_rev() -> dict:
     value; a different version means the page is running old code and must reload."""
     return {"rev": db.get_rev(), "version": APP_VERSION}
 
-def _load_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
-    return db.get_tree()
+def _load_tree(rev: int) -> tuple[list[models.Todo], dict[str, models.Todo]]:
+    try:
+        db.maybe_archive_expired()  # housekeeping must never fail a read
+    except Exception:
+        logging.exception("archiving old deleted todos failed")
+    return db.get_tree(rev)
 
 @app.get("/todos/next", response_model=None)
 def get_next_up(limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
     """The todos to work on next, best first (see app/next_up.py for the rules)."""
     rev = db.get_rev()
-    roots, todosById = _load_tree()
+    roots, todosById = _load_tree(rev)
     return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit))}
 
 @app.get("/todos/tree", response_model=dict)
@@ -132,7 +137,7 @@ def get_tree() -> dict:
     # Read the revision first, so it can only be older than the tree we return:
     # the worst case is one redundant refresh, never a missed change.
     rev = db.get_rev()
-    roots, todosById = _load_tree()
+    roots, todosById = _load_tree(rev)
 
     return {
         "rev": rev,
