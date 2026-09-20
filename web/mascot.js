@@ -30,6 +30,10 @@
 </svg>`;
 
   const sfx = (name) => { if (root.Sound && root.Sound.sfx) root.Sound.sfx(name); };
+  // The unprompted idle pop-up (and its blink, beep and exit) is near-silent;
+  // cheers, happy pops, and anything after you tap him keep the normal voice.
+  let soft = false;
+  const voice = (name) => sfx(soft ? name + "Soft" : name);
   let el, bubble, idleTimer, hideTimer, up = false, source = null, lastMsg = -1;
 
   function build() {
@@ -42,6 +46,7 @@
     el.addEventListener("click", () => {
       if (!up) return;
       el.classList.add("is-giggle");
+      soft = false;
       sfx("giggle");
       if (root.Sparkle) {
         const r = el.getBoundingClientRect();
@@ -71,7 +76,7 @@
     const tick = () => {
       if (!up || n >= times * 2) return;
       el.classList.toggle("is-blink", n % 2 === 0);
-      if (n % 2 === 0) sfx("blink");
+      if (n % 2 === 0) voice("blink");
       n++;
       setTimeout(tick, n % 2 ? 130 : 260);
     };
@@ -91,7 +96,7 @@
     bubble.style.setProperty("--bubble-shift", `${Math.round(clamped - left)}px`);
   }
 
-  function show({ cheer = false, happy = false, text } = {}) {
+  function show({ cheer = false, happy = false, text, idle = false } = {}) {
     if (!enabled() || reduced() || up) return;
     build();
     up = true;
@@ -103,8 +108,9 @@
     bubble.textContent = msg;
     if (msg) keepBubbleOnScreen();
     el.classList.add("is-up");
-    sfx(cheer ? "cheer" : happy ? "giggle" : "peek");
-    if (msg && !cheer) setTimeout(() => up && sfx("beep"), 700);
+    soft = idle && !cheer && !happy;
+    sfx(cheer ? "cheer" : happy ? "giggle" : soft ? "peekSoft" : "peek");
+    if (msg && !cheer) setTimeout(() => up && voice("beep"), 700);
     blink(2);
     clearTimeout(hideTimer);
     hideTimer = setTimeout(hide, cheer ? STAY + 1400 : STAY + (msg ? 900 : 0));
@@ -114,7 +120,7 @@
     if (!up) return;
     up = false;
     clearTimeout(hideTimer);
-    sfx("hide");
+    voice("hide");
     el.classList.remove("is-up");
     schedule();
   }
@@ -124,7 +130,7 @@
     if (!enabled() || reduced()) return;
     idleTimer = setTimeout(() => {
       if (quiet()) return schedule();
-      show();
+      show({ idle: true });
     }, IDLE_MIN + Math.random() * IDLE_SPAN);
   }
 

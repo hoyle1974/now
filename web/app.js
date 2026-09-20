@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "48";
+const APP_VERSION = "49";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.

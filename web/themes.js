@@ -91,6 +91,11 @@
   const SFX = {
     peek: () => { sweep(500, 1500, 0, 0.13, "triangle"); sweep(900, 2000, 0.16, 0.11, "triangle"); },
     beep: () => { sweep(880, 880, 0, 0.09, "square", 0.03); sweep(660, 660, 0.12, 0.09, "square", 0.03); sweep(990, 990, 0.24, 0.14, "square", 0.03); },
+    // The idle pop-up is meant to be barely there: pure sines at a whisper.
+    peekSoft: () => { sweep(520, 980, 0, 0.14, "sine", 0.008); sweep(760, 1250, 0.17, 0.12, "sine", 0.006); },
+    beepSoft: () => { sweep(700, 700, 0, 0.1, "sine", 0.005); sweep(880, 880, 0.13, 0.12, "sine", 0.005); },
+    blinkSoft: () => sweep(1900, 1600, 0, 0.04, "sine", 0.004),
+    hideSoft: () => sweep(700, 300, 0, 0.18, "sine", 0.006),
     blink: () => sweep(2200, 1800, 0, 0.04, "sine", 0.04),
     hide: () => { sweep(900, 260, 0, 0.2, "triangle"); },
     giggle: () => { [0, 0.11, 0.22].forEach((s, i) => sweep(900 + i * 220, 1500 + i * 260, s, 0.09, "triangle")); },
