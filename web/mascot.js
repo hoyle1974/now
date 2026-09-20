@@ -135,16 +135,29 @@
   }
 
   // Any interaction resets the idle clock, and sends a visible mascot home.
-  function activity() {
-    if (up && !el.matches(":active")) hide();
-    else if (!up) schedule();
+  // A tap on the mascot himself is not "activity": it must reach his click
+  // handler (giggle) instead of hiding him first. The idle re-arm is throttled
+  // so a scroll (many events a second) doesn't churn timers.
+  let lastArm = 0;
+  function activity(e) {
+    if (e && e.target && e.target.closest && e.target.closest(".mascot")) return;
+    if (up) hide();
+    else {
+      const t = Date.now();
+      if (t - lastArm < 1000) return;
+      lastArm = t;
+      schedule();
+    }
   }
 
   function init() {
     for (const ev of ["pointerdown", "keydown", "scroll", "touchstart"]) {
       root.addEventListener(ev, activity, { passive: true, capture: true });
     }
-    document.addEventListener("visibilitychange", () => (document.hidden ? hide() : schedule()));
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden) hide(); else schedule();
+      syncMotion();
+    });
     schedule();
   }
 
@@ -189,10 +202,20 @@
         if ((await root.DeviceMotionEvent.requestPermission()) !== "granted") return "denied";
       } catch (_) { return "denied"; }
     }
-    if (!shakeOn) { root.addEventListener("devicemotion", onMotion); shakeOn = true; }
+    shakeOn = true;
+    syncMotion();
     return "granted";
   }
-  // Android and desktop need no permission: listen right away.
+  // The motion stream is ~60 readings a second, so only listen while the shake
+  // feature is armed, the page is visible and the mascot is enabled.
+  let motionListening = false;
+  function syncMotion() {
+    const want = shakeOn && enabled() && !(typeof document !== "undefined" && document.hidden);
+    if (want && !motionListening) root.addEventListener("devicemotion", onMotion);
+    else if (!want && motionListening) root.removeEventListener("devicemotion", onMotion);
+    motionListening = want;
+  }
+  // Android and desktop need no permission: arm right away.
   if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();
 
   // A reaction to something that just happened. Polite by design: a global
@@ -214,7 +237,7 @@
     react,
     shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
     enabled,
-    setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); },
+    setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); syncMotion(); },
     peek: (opts) => show(opts),
     cheer: () => show({ cheer: true, text: "All done! Look at you ✨" }),
     hide,

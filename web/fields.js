@@ -104,5 +104,13 @@
     return out;
   }
 
-  return { COLORS, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
+  // PATCH body for an edit. `dueDate` undefined = a rename: send only the title
+  // so the due time and repeat rule stay untouched. Otherwise null/"" clears the
+  // due date, and a repeat rule needs a date.
+  function patchPayload({ title, dueDate, repeat = null, fields = {} }) {
+    if (dueDate === undefined) return { title, ...fields };
+    return { title, due_date: dueDate || null, repeat: dueDate ? repeat : null, ...fields };
+  }
+
+  return { patchPayload, COLORS, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
 });

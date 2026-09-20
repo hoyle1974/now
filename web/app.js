@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "50";
+const APP_VERSION = "51";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -30,6 +30,9 @@ function isStandalone() {
 logEvent("load", `page #${nextPageNumber()} v${APP_VERSION} ${document.visibilityState} ` +
   `online=${navigator.onLine} standalone=${isStandalone()}`);
 
+// True while the toast shows an apiFetch failure (the only thing apiFetch may clear).
+let apiErrorShown = false;
+
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
   try {
@@ -37,8 +40,11 @@ async function apiFetch(path, options = {}) {
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }
-    // Only clear if there's no active undo message
-    if (!lastDeleted) {
+    // Only clear a failure apiFetch itself showed; never a sync-engine notice
+    // or the Undo toast.
+    if (apiErrorShown) {
+      apiErrorShown = false;
+      clearTimeout(apiFetch.hideTimer);
       errorDiv.hidden = true;
       errorDiv.textContent = "";
     }
@@ -48,11 +54,16 @@ async function apiFetch(path, options = {}) {
     return await response.json();
   } catch (err) {
     logEvent("fetch-fail", `${path}: ${err.message}`);
+    clearTimeout(undoTimer);
+    clearTimeout(noticeTimer);
+    lastDeleted = null;
+    errorDiv.onclick = null;
     errorDiv.hidden = false;
     errorDiv.textContent = "Something went wrong — " + err.message;
+    apiErrorShown = true;
     clearTimeout(apiFetch.hideTimer);
     apiFetch.hideTimer = setTimeout(() => {
-      errorDiv.hidden = true;
+      if (apiErrorShown) { apiErrorShown = false; errorDiv.hidden = true; }
     }, 5000);
     throw err;
   }
@@ -96,6 +107,8 @@ function showNotice({ level, message }) {
   const errorDiv = document.getElementById("error");
   clearTimeout(undoTimer);
   clearTimeout(noticeTimer);
+  clearTimeout(apiFetch.hideTimer);
+  apiErrorShown = false;
   lastDeleted = null;
   errorDiv.hidden = false;
   errorDiv.textContent = message;
@@ -319,6 +332,9 @@ let undoTimer = null;
 
 function showUndo(todoId) {
   lastDeleted = todoId;
+  apiErrorShown = false;
+  clearTimeout(apiFetch.hideTimer);
+  clearTimeout(noticeTimer);
   const errorDiv = document.getElementById("error");
   errorDiv.onclick = null;
   errorDiv.hidden = false;
@@ -343,12 +359,13 @@ function showUndo(todoId) {
   }, 5000);
 }
 
+// dueDate undefined = rename only (leave due date/time and repeat alone).
 async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
   setActivePanel(viewerOrigin === todoId ? "view" : null, todoId);
   // null explicitly clears the due date (and a repeat rule needs a date).
   // fields: only the changed color/links/blocked_by/references (see fields.js).
   engine.enqueue({ kind: "patch", target_id: todoId,
-    payload: { title, due_date: dueDate || null, repeat: dueDate ? repeat : null, ...fields } });
+    payload: Fields.patchPayload({ title, dueDate, repeat, fields }) });
 }
 
 async function saveSplit(todoId, descriptions, dueDate = null) {
@@ -430,11 +447,42 @@ let activePanel = null;
 // go back to it instead of the list.
 let viewerOrigin = null;
 
+// Back gesture / browser back closes the full-screen viewer or edit sheet. One
+// history entry covers "a full-screen panel is open": it is pushed on entering
+// and popped (history.back) when a button closes the panel, so nothing goes
+// stale. Every failure is swallowed: without history support the panel simply
+// has no back gesture, as before.
+let historyPushed = false;
+let ignorePops = 0;
+function syncHistory(open) {
+  try {
+    if (open && !historyPushed) {
+      history.pushState({ nowPanel: 1 }, "");
+      historyPushed = true;
+    } else if (!open && historyPushed) {
+      historyPushed = false;
+      ignorePops += 1;
+      history.back();
+    }
+  } catch (e) { /* no history support: skip */ }
+}
+
+window.addEventListener("popstate", () => {
+  if (ignorePops > 0) { ignorePops -= 1; return; }
+  if (!historyPushed) return;
+  historyPushed = false; // the browser already consumed our entry
+  if (!stepBack() && activePanel && activePanel.mode === "edit") {
+    setActivePanel(null); // an edit sheet opened from the list: same as Cancel
+    renderTree();
+  }
+});
+
 function setActivePanel(mode, todoId) {
   activePanel = mode ? { mode, todoId } : null;
   if (mode !== "edit") viewerOrigin = null;
   // The full-screen viewer/edit sheet is fixed; keep the page behind it still.
   document.body.style.overflow = mode === "view" || mode === "edit" ? "hidden" : "";
+  syncHistory(mode === "view" || mode === "edit");
   // After the caller has re-rendered: the closed editor's inputs are gone by then.
   if (!mode) setTimeout(() => freshness.poke(), 0);
 }
@@ -802,10 +850,13 @@ function attachRowInteractions(row, todo) {
         input.focus();
         input.select();
 
+        let finished = false; // Escape/Enter/blur must act once (removing the input fires blur)
         const save = async () => {
+          if (finished) return;
+          finished = true;
           const newTitle = input.value.trim();
           if (newTitle && newTitle !== todo.title) {
-            await reportedFailure(saveEdit(todo.todo_id, newTitle, todo.due_date ? todo.due_date.slice(0, 10) : ''));
+            await reportedFailure(saveEdit(todo.todo_id, newTitle, undefined));
           } else {
             renderTree();
           }
@@ -814,7 +865,7 @@ function attachRowInteractions(row, todo) {
         input.addEventListener('blur', save);
         input.addEventListener('keydown', (e) => {
           if (e.key === 'Enter') save();
-          if (e.key === 'Escape') renderTree();
+          if (e.key === 'Escape') { finished = true; renderTree(); }
         });
       }
     });
@@ -1517,17 +1568,26 @@ function renderTree() {
   placeOpenMenu();
 }
 
-// Escape closes the viewer, or steps back from an edit sheet opened from it.
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !activePanel) return;
+// Closes the viewer, or steps back from an edit sheet opened from it.
+// Returns whether it did anything.
+function stepBack() {
+  if (!activePanel) return false;
   if (activePanel.mode === "view") {
     setActivePanel(null);
     renderTree();
-  } else if (activePanel.mode === "edit" && viewerOrigin) {
+    return true;
+  }
+  if (activePanel.mode === "edit" && viewerOrigin) {
     const id = viewerOrigin;
     setActivePanel("view", id);
     renderTree();
+    return true;
   }
+  return false;
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") stepBack();
 });
 
 // The menu opens below its kebab. Near the bottom of the screen that puts it
@@ -1594,8 +1654,24 @@ document.addEventListener("DOMContentLoaded", async () => {
   try { navigator.storage?.persist?.(); } catch (e) { /* best effort */ }
   await engine.load();
   await reportedFailure(loadAndRender());
+  // Offline launch with edits waiting: the list stays empty and the outbox is
+  // held (sync.js needsTree) until a tree loads, so say so and keep trying.
+  if (engine.needsTree()) {
+    showNotice({ level: "error", message: `Offline — couldn't load your list. Your ${engine.pending()} unsent edit(s) are saved and will sync once it loads.` });
+    setInterval(retryFirstLoad, 15000);
+  }
   engine.kick();
 });
+
+// Retry the first tree load (see above); a no-op once one has loaded.
+function retryFirstLoad() {
+  if (!engine.needsTree()) return;
+  reportedFailure(loadAndRender()).then(() => {
+    if (engine.needsTree()) return;
+    const errorDiv = document.getElementById("error");
+    if (errorDiv.textContent.startsWith("Offline — couldn't load your list")) errorDiv.hidden = true;
+  });
+}
 
 // Coming back to the app: resend anything pending and see if another window
 // wrote while we were away. visibilitychange/pageshow are the reliable signals
@@ -1608,6 +1684,7 @@ function markAway() {
 function onReturn(force = false) {
   const awayMs = leftAt === null ? 0 : Date.now() - leftAt;
   leftAt = null;
+  retryFirstLoad();
   engine.kick();
   freshness.check({ awayMs, force });
 }
@@ -1636,6 +1713,7 @@ document.getElementById("todo-tree").addEventListener("focusout", () => {
 // Tapping the status pill drains the outbox, then pulls the latest from the
 // server (the way to pick up changes made on another device).
 document.getElementById("sync-status").addEventListener("click", async () => {
+  retryFirstLoad();
   engine.kick(true); // navigator.onLine can be wrong; let a manual tap try anyway
   await engine.flush();
   if (engine.pending() === 0) {
@@ -1936,6 +2014,10 @@ document.addEventListener("touchstart", (event) => {
 
 document.addEventListener("touchmove", (event) => {
   if (!ptrStart) return;
+  if (dragState) { // a long-press row drag owns this gesture: never pull-to-refresh after the drop
+    ptrStart = null; ptrDist = 0; paintPtr(0, false);
+    return;
+  }
   const dy = event.touches[0].clientY - ptrStart.y;
   const dx = event.touches[0].clientX - ptrStart.x;
   if (window.scrollY > 0 || dy < 0 || Math.abs(dx) > Math.abs(dy)) {

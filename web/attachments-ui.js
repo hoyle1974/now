@@ -44,6 +44,20 @@ const AttachmentsUI = (() => {
     return blobUrls.get(key);
   }
 
+  // Free an object URL (when the fetch is still in flight, once it lands).
+  function release(key) {
+    const pending = blobUrls.get(key);
+    blobUrls.delete(key);
+    if (pending) pending.then((url) => URL.revokeObjectURL(url), () => {});
+  }
+
+  // Keep blobs only for the todo on screen; the rest are re-fetched on demand.
+  function releaseOthers(todoId) {
+    for (const key of Array.from(blobUrls.keys())) {
+      if (!key.startsWith(`${todoId}/`)) release(key);
+    }
+  }
+
   // ---- lightbox -------------------------------------------------------------
 
   function openLightbox(todoId, attachment, onRemove) {
@@ -90,6 +104,7 @@ const AttachmentsUI = (() => {
   // ---- the section ----------------------------------------------------------
 
   function renderSection(todo) {
+    releaseOthers(todo.todo_id);
     const root = el("div", "attachments");
     root.appendChild(el("p", "detail-heading", "Images"));
     const grid = el("div", "attachment-grid");
@@ -196,11 +211,13 @@ const AttachmentsUI = (() => {
       if (response.status === 404) {
         // Already gone (removed elsewhere): drop it locally too.
         node().attachments = list().filter((x) => x.id !== a.id);
+        release(`${todo.todo_id}/${a.id}`);
       } else if (!response.ok) {
         deps.notify("Couldn't remove the image. Please try again.");
         return;
       } else {
         adopt(await response.json(), revHeaders(response));
+        release(`${todo.todo_id}/${a.id}`);
       }
       draw();
     }

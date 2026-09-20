@@ -28,7 +28,7 @@ function memoryStore() {
 const ok = (body, status = 200, revs = {}) => () => Promise.resolve({ status, body, ...revs });
 const netFail = () => () => Promise.reject(new Error("network"));
 
-function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails = false } = {}) {
+function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails = false, now = null } = {}) {
   const net = { online: true };
   const model = Sync.createModel();
   model.roots = tree.roots;
@@ -60,6 +60,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails =
       clearTimeout: (id) => { if (timers[id]) timers[id].live = false; },
     },
     random: () => 0.5,
+    ...(now ? { now } : {}),
     uuid: () => "u" + (++n),
   });
   const fire = () => { const t = timers.filter((x) => x.live).pop(); t.live = false; t.fn(); };
@@ -961,4 +962,70 @@ test("a JSON 'todo not found' 404 drops the item; other 404s retry", async () =>
   await h.engine.flush();
   assert.equal(h.engine.pending(), 0);
   assert.equal(h.model.todosById.has("a"), false);
+});
+
+// ---- restored outbox: hold until a tree has loaded -------------------------
+
+const savedOp = (extra = {}) => ({ txn_id: "t1", kind: "patch", target_id: "a", payload: { title: "X" },
+  state: "pending", attempts: 0, conflicts: 0, sent: false, ...extra });
+
+test("restored ops are held until a tree loads, then replay with If-Match", async () => {
+  const h = harness({ script: [ok(todo("a", { version: 4 }))] });
+  h.store.ops = [savedOp()];
+  await h.engine.load();
+  assert.equal(h.engine.needsTree(), true);
+  h.engine.kick();
+  await h.engine.flush();
+  assert.equal(h.calls.length, 0, "nothing sent against an empty model");
+  assert.equal(h.engine.pending(), 1);
+  h.engine.rebuild(treeOf(todo("a", { version: 4 })));
+  assert.equal(h.engine.needsTree(), false);
+  await h.engine.flush();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.calls[0].headers["If-Match"], "4");
+});
+
+test("with nothing restored, needsTree is false and sends are not held", async () => {
+  const h = harness({ tree: treeOf(todo("a")), script: [ok(todo("a"))] });
+  await h.engine.load();
+  assert.equal(h.engine.needsTree(), false);
+});
+
+// ---- restored outbox: suspect committed creates (txn_log is kept 30 days) ---
+
+const DAY = 86400000;
+function staleHarness(op, tree) {
+  const h = harness({ script: [ok({ todo_id: "srv1", version: 1, create_date: "x", order_idx: 1 }, 201)],
+    now: () => Date.UTC(2026, 8, 19) });
+  h.store.ops = [op];
+  return h.engine.load().then(() => { h.engine.rebuild(tree); return h; });
+}
+const oldCreate = (extra = {}) => ({ txn_id: "c1", kind: "create", target_id: "tmp:1", payload: { title: "Buy milk" },
+  state: "pending", attempts: 0, conflicts: 0, sent: true, queued_at: Date.UTC(2026, 8, 19) - 40 * DAY, ...extra });
+
+test("an old sent create that already exists on the server is dropped, not replayed", async () => {
+  const dup = todo("srv1", { title: "Buy milk", create_date: new Date(Date.UTC(2026, 8, 19) - 40 * DAY + 1000).toISOString() });
+  const h = await staleHarness(oldCreate(), treeOf(dup));
+  assert.equal(h.engine.pending(), 0);
+  await h.engine.flush();
+  assert.equal(h.calls.length, 0);
+});
+
+test("an old sent create with no matching server todo is replayed", async () => {
+  const h = await staleHarness(oldCreate(), treeOf(todo("other", { title: "Else" })));
+  assert.equal(h.engine.pending(), 1);
+  await h.engine.flush();
+  assert.equal(h.calls.length, 1);
+});
+
+test("a same-titled todo created BEFORE the op was queued does not drop it", async () => {
+  const old = todo("srv1", { title: "Buy milk", create_date: "2020-01-01T00:00:00" });
+  const h = await staleHarness(oldCreate(), treeOf(old));
+  assert.equal(h.engine.pending(), 1);
+});
+
+test("a recent sent create is never treated as suspect", async () => {
+  const dup = todo("srv1", { title: "Buy milk", create_date: new Date(Date.UTC(2026, 8, 19) - DAY).toISOString() });
+  const h = await staleHarness(oldCreate({ queued_at: Date.UTC(2026, 8, 19) - 2 * DAY }), treeOf(dup));
+  assert.equal(h.engine.pending(), 1);
 });

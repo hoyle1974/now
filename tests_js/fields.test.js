@@ -83,3 +83,15 @@ test("pickerCandidates leaves out todos in the exclude set", () => {
   const out = Fields.pickerCandidates(m, "a", "", new Set(), new Set(["b"]));
   assert.deepEqual(out.map((x) => x.todo.todo_id), ["c"]);
 });
+
+test("patchPayload: a rename (no due arg) sends only the title", () => {
+  assert.deepEqual(Fields.patchPayload({ title: "New" }), { title: "New" });
+});
+
+test("patchPayload: an edit sends due_date and repeat; no date clears the repeat", () => {
+  assert.deepEqual(
+    Fields.patchPayload({ title: "T", dueDate: "2026-01-02T09:00", repeat: "daily", fields: { color: "red" } }),
+    { title: "T", due_date: "2026-01-02T09:00", repeat: "daily", color: "red" });
+  assert.deepEqual(Fields.patchPayload({ title: "T", dueDate: "", repeat: "daily" }),
+    { title: "T", due_date: null, repeat: null });
+});

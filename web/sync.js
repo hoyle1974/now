@@ -13,6 +13,9 @@
   const MAX_CONFLICTS = 3;
   const BACKOFF_BASE_MS = 1000;
   const BACKOFF_CAP_MS = 30000;
+  // Older than this, a sent create/split may be committed server-side but unacked
+  // while the server's 30-day replay log is about to forget it.
+  const SUSPECT_AGE_MS = 25 * 24 * 3600 * 1000;
   const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat",
     "color", "links", "blocked_by", "references"];
 
@@ -297,6 +300,7 @@
     const timers = opts.timers || { setTimeout: (f, ms) => setTimeout(f, ms), clearTimeout: (t) => clearTimeout(t) };
     const random = opts.random || Math.random;
     const uuid = opts.uuid || defaultUuid;
+    const now = opts.now || Date.now;
     // navigator.onLine can't be trusted to say "yes", but a "no" is reliable
     // enough to stop burning retries; a manual kick(true) overrides it.
     const isOnline = opts.isOnline || (() => true);
@@ -322,6 +326,9 @@
     // Holding the outbox because the device is offline (no retry timer runs).
     let parked = false;
     let forceOnline = false;
+    // A restored outbox must not replay against an empty model (no versions, so
+    // no If-Match): hold sending until a server tree has been loaded.
+    let needTree = false;
     let saveChain = Promise.resolve();
     const waiters = [];
 
@@ -478,7 +485,7 @@
       const op = {
         txn_id: uuid(), kind,
         target_id: kind === "create" ? "tmp:" + uuid() : resolve(target_id),
-        payload: { ...payload }, state: "pending", attempts: 0, conflicts: 0, sent: false,
+        payload: { ...payload }, state: "pending", attempts: 0, conflicts: 0, sent: false, queued_at: now(),
       };
       // Callers may still hold a temporary id whose create has since been acked.
       if (op.payload.parent_id) op.payload.parent_id = resolve(op.payload.parent_id);
@@ -707,6 +714,14 @@
             }
             break;
           }
+          if (needTree) {
+            if (!parked) {
+              parked = true;
+              log("hold", `${ops.length} restored edit(s) wait for the first tree load`);
+              emitStatus();
+            }
+            break;
+          }
           parked = false;
           const op = ops[0];
           if (op.kind !== "create" && isTmp(op.target_id)) {
@@ -771,14 +786,52 @@
     async function load() {
       const saved = await store.load();
       ops = (saved || []).map((o) => ({ ...o, state: "pending" }));
+      needTree = ops.length > 0;
+      // The server keeps its replay log (txn_log) for 30 days. A create/split
+      // that was sent and then sat in the outbox nearly that long may already be
+      // committed but unacked; replaying it would duplicate it, so rebuild()
+      // checks it against the server tree first.
+      for (const op of ops) {
+        if (op.sent && (op.kind === "create" || op.kind === "split") &&
+            typeof op.queued_at === "number" && now() - op.queued_at > SUSPECT_AGE_MS) {
+          op.suspect = true;
+        }
+      }
       log("outbox", `${ops.length} unsent edit(s) restored`);
       emitStatus();
     }
 
     // Replace the model with a fresh server tree and re-apply everything still
     // in the outbox on top of it, so unsent edits stay visible.
+    // True when the server tree already holds what a suspect (old, sent) op
+    // would create, made after the op was queued.
+    function alreadyCommitted(op, todosById) {
+      const since = op.queued_at - 60000;
+      const fresh = (t) => !t.deleted && Date.parse(t.create_date) >= since;
+      if (op.kind === "create") {
+        for (const t of todosById.values()) {
+          if (!t.parent_id && t.title === op.payload.title && fresh(t)) return true;
+        }
+        return false;
+      }
+      const parent = todosById.get(op.target_id);
+      if (!parent) return false;
+      const kids = parent.child_ids.map((c) => todosById.get(c)).filter((c) => c && fresh(c));
+      return op.payload.descriptions.every((d) => kids.some((k) => k.title === d));
+    }
+
     function rebuild(tree) {
       const todosById = tree.todosById;
+      needTree = false;
+      const before = ops.length;
+      ops = ops.filter((op) => {
+        if (!op.suspect) return true;
+        delete op.suspect;
+        if (!alreadyCommitted(op, todosById)) return true;
+        log("drop", `${op.kind}: already on the server (old outbox), not replaying`);
+        return false;
+      });
+      if (ops.length !== before) { epoch += 1; persist(); }
       model.todosById = todosById;
       model.roots = tree.roots.map((r) => todosById.get(r.todo_id) || r);
       model.trash = new Map();
@@ -794,11 +847,13 @@
       }
       log("rebuild", `rev ${tree.rev ?? "?"}, ${todosById.size} todos, ${ops.length} pending`);
       onChange();
+      if (parked && ops.length) run(); // held for the first tree: go now
     }
 
     return {
       enqueue, load, rebuild, flush, kick, resolve,
       pending: () => ops.length,
+      needsTree: () => needTree,
       epoch: () => epoch,
       knownRev: () => knownRev,
       isStale: () => stale,

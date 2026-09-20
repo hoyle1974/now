@@ -29,3 +29,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-19: Edit sheet: removed the non-working "Pick date" chip; an empty due-date field now shows "Pick a date" over it (.date-field, pointer-events none). APP_VERSION/asset v=50.
 - 2026-09-20: WIDGET_TOKEN moved from a plain Cloud Run env var to Secret Manager (secret widget-token); widget.md rotation steps updated. Token value unchanged.
 - 2026-09-19: Archive sweep moved to a background task; claim is now a lease plus last_success (failed runs retry). Removed dead Jinja2Templates in main.py.
+- 2026-09-19: Client review fixes: toast no longer wiped by apiFetch, rename keeps due/repeat, restored outbox held until first tree load + 25-day suspect-create check, back-gesture closes viewer/edit sheet, mascot tap/idle/motion fixes, attachment blob URL release, pull-to-refresh ignores row drags. APP_VERSION/asset v=51.
