@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-19T23:00:00Z
+timestamp: 2026-09-20T12:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -30,4 +30,4 @@ timestamp: 2026-09-19T23:00:00Z
   `search.js` / `search-ui.js`.
 
 **Other:** `scripts/` (test.sh, e2e.sh, scriptable-next-up.js, generate_icons.py),
-`tests/` and `test_*.py` (python), `tests_js/` (node), `docs/superpowers/` (design specs).
+`tests/` (python), `tests_js/` (node), `docs/superpowers/` (design specs).

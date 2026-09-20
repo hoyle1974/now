@@ -1,14 +1,19 @@
 from __future__ import annotations
-from pydantic import BaseModel,Field
-from typing import Literal
+from pydantic import BaseModel, Field, RootModel, field_validator
+from typing import Annotated, Literal, get_args
 from uuid import uuid4
 import uuid
 import datetime
-from typing import Literal
 from urllib.parse import urlparse
-from pydantic import field_validator
 
-from pydantic import RootModel
+
+def utc_now() -> datetime.datetime:
+    """Now in UTC as a naive datetime: the form every stored timestamp already
+    has (a server clock in another timezone must not leak into the data), and
+    naive and aware values can't be compared, so the form must not change."""
+    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+
+
 class TodoId(RootModel[uuid.UUID]):
     def __str__(self) -> str:
         return str(self.root)
@@ -17,12 +22,16 @@ class Repeat(BaseModel):
     """Repeat rule: every `every` units. "weekday" means the next Mon-Fri day."""
     unit: Literal["day", "weekday", "week", "month", "year"]
     every: int = Field(1, ge=1, le=999)
-COLORS = ("red", "orange", "yellow", "green", "teal", "blue", "purple", "pink")
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
+COLORS = get_args(Color)
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
 MAX_LABEL_LEN = 200
 MAX_REFS = 50
+# Generous, but a Firestore document is capped at 1 MiB: refuse absurd input with
+# a 422 rather than let the write fail as a 500.
+MAX_TITLE_LEN = 2000
+MAX_SPLIT_ITEMS = 100
 
 class Link(BaseModel):
     url: str
@@ -55,11 +64,11 @@ class Attachment(BaseModel):
     size: int
 
 class TodoCreate(BaseModel):
-    title: str
+    title: str = Field(max_length=MAX_TITLE_LEN)
     due_date: datetime.datetime | None = Field(None)
 
 class TodoUpdate(BaseModel):
-    title: str | None = Field(None)
+    title: str | None = Field(None, max_length=MAX_TITLE_LEN)
     done: bool | None = Field(None)
     due_date: datetime.datetime | None = Field(None)
     deleted: bool | None = Field(None)
@@ -95,14 +104,14 @@ class TodoRepeatRequest(BaseModel):
     today: datetime.date | None = Field(None)  # the client's local date; server date if omitted
 
 class TodoSplit(BaseModel):
-    descriptions: list[str] = Field([])
+    descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
     due_date: datetime.datetime | None = Field(None)
 
 class Todo(BaseModel):
     todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )
-    title: str
+    title: str  # unbounded on read: a stored todo must always load
     done: bool = Field(False)
-    create_date: datetime.datetime = Field(default_factory = datetime.datetime.now)
+    create_date: datetime.datetime = Field(default_factory=utc_now)
     due_date: datetime.datetime | None = Field(None)
     order_idx: int | None = Field(None)
     parent_id: TodoId | None = Field(None)

@@ -4,12 +4,12 @@ title: Todo
 description: Fields, limits and derived values of a todo document.
 resource: app/models.py
 tags: [data, model]
-timestamp: 2026-09-19T12:00:00Z
+timestamp: 2026-09-20T12:00:00Z
 ---
 | Field | Notes |
 |---|---|
 | `todo_id` | UUID. Client uses a temporary `tmp:` id until the server assigns one ([sync](../features/sync-model.md)). |
-| `title`, `done`, `create_date` | Basics. |
+| `title`, `done`, `create_date` | Basics. Titles are capped at 2000 chars on write (split: 100 items); `create_date` is naive UTC (`models.utc_now`), the form every stored timestamp has. |
 | `due_date` | Optional; midnight = all-day ([due time](../features/due-time.md)). |
 | `order_idx`, `parent_id`, `child_ids` | Tree position ([ordering](../features/ordering-nesting.md)). |
 | `deleted`, `deleted_at` | Soft delete + UTC stamp ([trash](../features/trash-archive.md)). |

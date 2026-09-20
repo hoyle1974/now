@@ -3,6 +3,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Head
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+import contextlib
 import datetime
 import logging
 import re
@@ -28,7 +29,22 @@ def check_txn_id(x_txn_id: str | None = Header(None)) -> None:
             not _TXN_ID_RE.match(x_txn_id) or (x_txn_id.startswith("__") and x_txn_id.endswith("__"))):
         raise HTTPException(400, "invalid X-Txn-Id")
 
-app = FastAPI(dependencies=[Depends(require_user), Depends(check_txn_id)])
+log = logging.getLogger(__name__)
+
+@contextlib.asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Connect at startup, not import, so importing app.main needs no Firestore
+    # (tests drive db.init()/teardown() themselves and never run the lifespan).
+    db.init()
+    try:
+        # Idempotency records only need to outlive a client's retry window.
+        db.prune_txn_log()
+    except Exception:
+        log.exception("txn_log prune skipped")
+    yield
+    db.teardown()
+
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(check_txn_id)])
 
 _UPLOAD_PATH_RE = re.compile(r"^/todos/[^/]+/attachments$")
 # Multipart framing adds a little to the file's own size.
@@ -48,16 +64,6 @@ async def _limit_upload_size(request, call_next):
             return JSONResponse({"detail": "image too large (10 MB max)"}, status_code=413)
     return await call_next(request)
 
-
-# Routes go here.
-
-db.init()
-
-try:
-    # Idempotency records only need to outlive a client's retry window.
-    db.prune_txn_log()
-except Exception as e:
-    print(f"txn_log prune skipped: {e}")
 
 def _parse_if_match(value: str | None) -> int | None:
     if value is None:
@@ -132,17 +138,6 @@ def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) ->
 
     return _reply(*db.run_atomic(x_txn_id, create))
 
-def _print_todo(indent:int, todo: models.Todo) -> None:
-    print(f"{'':>{indent * 2}}{todo.title} Create:{todo.create_date} Due:{todo.due_date} [{'done' if todo.done else 'not done'}]")
-    for child_id in todo.child_ids:
-        _print_todo(indent+1, db.get_todo(child_id))
-
-@app.get("/todos/print", response_model=None)
-def print_all_todos() -> None:
-    for todo in db.get_root_todos():
-        _print_todo(0,todo)
-
-
 @app.get("/todos/root", response_model=list[models.Todo])
 def list_todos() -> list[models.Todo]:
     return db.get_root_todos()
@@ -168,7 +163,7 @@ def _housekeeping() -> None:
     try:
         db.maybe_archive_expired()  # housekeeping must never fail a read
     except Exception:
-        logging.exception("archiving old deleted todos failed")
+        log.exception("archiving old deleted todos failed")
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
@@ -286,7 +281,7 @@ def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.Todo
                 x_txn_id: str | None = Header(None)) -> Response:
     """Create the next occurrence of a repeating todo (call it after completing
     the original). A todo spawns at most once: later calls return the same copy."""
-    today = body.today or datetime.date.today()
+    today = body.today or datetime.datetime.now(datetime.timezone.utc).date()
 
     def action(todo: models.Todo) -> dict:
         if todo.repeat is None:

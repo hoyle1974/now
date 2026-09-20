@@ -1,0 +1,8 @@
+# Allow-list: the image holds only the API and the web client, so local
+# secrets, databases, tests and docs can never be baked in.
+*
+!requirements.txt
+!app
+!web
+**/__pycache__
+**/*.pyc

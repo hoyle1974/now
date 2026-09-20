@@ -9,10 +9,13 @@ import threading
 import datetime
 import copy
 import json
+import logging
 import time
 import uuid
 from typing import Callable
 from google.cloud import firestore
+
+log = logging.getLogger(__name__)
 
 _client = None
 _todos_collection = None
@@ -80,7 +83,7 @@ def init(memory: bool = False):
     _archive_checked = None
     _client = firestore.Client()
     _todos_collection = _client.collection("todos")
-    print("firestore: initialized")
+    log.info("firestore: initialized")
 
 def get_conn():
     """Return Firestore client"""
@@ -411,7 +414,7 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
         copy.parent_id = new_parent
         copy.done = False
         copy.deleted = False
-        copy.create_date = datetime.datetime.now()
+        copy.create_date = models.utc_now()
         copy.due_date = due
         copy.spawned_id = None
         copy.version = 1

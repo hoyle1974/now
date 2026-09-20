@@ -1,0 +1,31 @@
+# Used by `gcloud run deploy --source .` in place of .gitignore, so it must
+# repeat the private files. Everything the Dockerfile needs is: Dockerfile,
+# .dockerignore, requirements.txt, app/, web/.
+.git
+.gitignore
+.venv/
+.claude/
+.superpowers/
+.firebase/
+.firebaserc
+.pytest_cache/
+graphify-out/
+.graphifyignore
+hosting-public/
+docs/
+scripts/
+tests/
+tests_js/
+__pycache__/
+*.pyc
+*.log
+*.db
+.scriptable-secret
+.zilch.config
+conftest.py
+requirements-dev.txt
+firebase.json
+firestore.indexes.json
+README.md
+CLAUDE.md
+run.sh

@@ -1,6 +1,6 @@
-fastapi
-uvicorn
-jinja2
-python-multipart
-firebase-admin
-google-cloud-storage
+fastapi==0.141.1
+uvicorn==0.53.0
+python-multipart==0.0.32
+firebase-admin==7.6.0
+google-cloud-firestore==2.31.0
+google-cloud-storage==3.14.1

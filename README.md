@@ -6,7 +6,7 @@ Designed as a learning project, but simple enough to actually use day-to-day.
 
 ## Stack
 
-- **Backend:** FastAPI + Jinja2 (server-rendered HTML, no separate JS frontend)
+- **Backend:** FastAPI serving a JSON API plus the static vanilla-JS client in `web/`
 - **Database:** Firestore (tests run against the emulator: `scripts/test.sh`)
 - **Deployment:** Local dev → GCP CloudRun + Firestore
 
@@ -15,7 +15,7 @@ Designed as a learning project, but simple enough to actually use day-to-day.
 ```bash
 python3.13 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt   # requirements.txt alone is the runtime set
 uvicorn app.main:app --reload
 ```
 
@@ -23,10 +23,8 @@ Server runs at `http://localhost:8000`
 
 ## What's here
 
-- `app/main.py` — FastAPI app with routes and Jinja2 templating
+- `app/main.py` — FastAPI app with routes
 - `app/db.py`, `app/db_firestore.py` — Firestore data layer
-- `templates/` — Jinja2 templates for UI
-- `static/` — CSS/JS and other assets
 - `web/` — Frontend JavaScript for drag-and-drop and interactions
 - `scripts/` — Utility scripts
 - `docs/` — Project documentation

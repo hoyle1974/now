@@ -1,9 +1,6 @@
 """Tests for the todo API endpoints.
 
-Run with: pytest test_main.py -v
-
-Stub only -- imports and test function names are set up, bodies are
-yours to fill in.
+Run with: scripts/test.sh (they need the Firestore emulator).
 """
 
 import pytest
@@ -193,9 +190,21 @@ def test_delete_todo(db_setup):
     response3 = client.get(f"/todos/{id}")
     assert response3.status_code == 404
 
-def test_print(db_setup, create_test_data):
-    response = client.get("/todos/print")
-    assert response.status_code == 200
+def test_oversized_title_is_rejected_with_422(db_setup):
+    too_long = "x" * (models.MAX_TITLE_LEN + 1)
+    assert client.post("/todos", json={"title": too_long}).status_code == 422
+    todo = client.post("/todos", json={"title": "ok"}).json()
+    assert client.patch(f"/todos/{todo['todo_id']}", json={"title": too_long}).status_code == 422
+    too_many = ["a"] * (models.MAX_SPLIT_ITEMS + 1)
+    assert client.post(f"/todos/{todo['todo_id']}/split", json={"descriptions": too_many}).status_code == 422
+
+
+def test_create_date_defaults_to_naive_utc():
+    import datetime
+    before = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    created = models.Todo(title="t").create_date
+    assert created.tzinfo is None
+    assert before <= created <= datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
 
 
 def test_root_serves_frontend_shell(db_setup):
