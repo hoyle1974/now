@@ -758,6 +758,34 @@ body.menu-room {
   cursor: pointer;
 }
 
+/* "Pick a date" sits over the empty date input so it reads as tappable. */
+.date-field {
+  position: relative;
+  margin: 0 0 12px;
+}
+
+.date-field input[type="date"] {
+  margin: 0;
+}
+
+.date-field-hint {
+  position: absolute;
+  inset: 0 40px 0 12px;
+  display: none;
+  align-items: center;
+  font-size: 17px;
+  color: var(--label-2);
+  pointer-events: none; /* taps go to the date input underneath */
+}
+
+.date-field.is-empty .date-field-hint {
+  display: flex;
+}
+
+.date-field.is-empty input[type="date"] {
+  color: transparent; /* hide the browser's own mm/dd/yyyy placeholder */
+}
+
 .sheet textarea {
   resize: vertical;
   min-height: 96px;
