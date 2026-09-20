@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "45";
+const APP_VERSION = "46";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -116,8 +116,28 @@ let phaseSince = 0;
 let phaseTimer = null;
 const MIN_PHASE_MS = 800; // long enough to actually be read
 
+// Nudge reacts to sync news: a recovery, or a batch of changes finally landing.
+let lastSyncState = null;
+let syncPeak = 0;
+function reactToSync(state, pending) {
+  const was = lastSyncState;
+  lastSyncState = state;
+  if (state === "syncing") syncPeak = Math.max(syncPeak, pending);
+  if (!window.Mascot) return;
+  if (state === "offline" && was !== "offline") {
+    window.Mascot.react("Offline. I'll keep your changes safe.", { key: "offline", cooldown: 300000, happy: false, delay: 1500 });
+  } else if (state === "synced" && (was === "offline" || was === "error")) {
+    window.Mascot.react("Back online. All synced \u2713", { key: "recovered", cooldown: 20000 });
+    syncPeak = 0;
+  } else if (state === "synced" && was === "syncing") {
+    if (syncPeak >= 3) window.Mascot.react(`${syncPeak} changes synced \u2713`, { key: "batch", cooldown: 120000 });
+    syncPeak = 0;
+  }
+}
+
 function renderSyncStatus(st) {
   if (st) engineStatus = st;
+  reactToSync(engineStatus.state, engineStatus.pending);
   const el = document.getElementById("sync-status");
   const { state, pending } = engineStatus;
   let dataState = state;
@@ -160,9 +180,15 @@ function setPhase(next) {
     phaseTimer = setTimeout(() => setPhase("idle"), MIN_PHASE_MS - held);
     return;
   }
+  const wasRefreshing = phase === "refreshing";
   phase = next;
   phaseSince = performance.now();
   renderSyncStatus();
+  // The list was re-downloaded because another device changed it (not the
+  // routine refresh at launch): let the mascot mention it.
+  if (wasRefreshing && next === "idle" && performance.now() > 15000 && window.Mascot) {
+    window.Mascot.react("Fresh changes from your other device \u2728", { key: "remote", cooldown: 120000 });
+  }
 }
 
 const model = Sync.createModel();
@@ -246,7 +272,8 @@ function doneToday(delta = 0) {
 }
 
 async function toggleDone(todoId, done) {
-  doneToday(done ? 1 : -1);
+  const count = doneToday(done ? 1 : -1);
+  if (done) reactToDoneCount(count, model.todosById.get(todoId));
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
   if (!done) return; // one-way: un-doing a subtask never reopens its parent
   // Finishing the last open subtask finishes the parent (and so on upward).
@@ -1637,6 +1664,7 @@ if (window.visualViewport) window.visualViewport.addEventListener("resize", meas
 window.addEventListener("load", measureComposer);
 measureComposer();
 
+let createdThisSession = 0;
 addForm.addEventListener("submit", (event) => {
   event.preventDefault();
   const input = document.getElementById("add-title");
@@ -1647,6 +1675,12 @@ addForm.addEventListener("submit", (event) => {
     payload.due_date = addDue.value;
   }
   engine.enqueue({ kind: "create", payload });
+  if (window.Mascot) {
+    createdThisSession += 1;
+    if (createdThisSession === 1 || createdThisSession % 5 === 0) {
+      window.Mascot.react(["Added!", "On the list.", "Got it.", "Noted!"][createdThisSession % 4], { key: "added", cooldown: 45000, delay: 700 });
+    }
+  }
   input.value = "";
   addDue.value = "";
   renderComposerDue();
@@ -2081,3 +2115,48 @@ if (window.Mascot) {
     if (taps.length >= 3) { taps = []; window.Mascot.peek({}); }
   });
 })();
+
+// ---- more mascot reactions -------------------------------------------------
+
+// Welcome back after a real absence, and a once-a-day greeting.
+(() => {
+  if (!window.Mascot) return;
+  let hiddenAt = 0;
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { hiddenAt = Date.now(); return; }
+    if (hiddenAt && Date.now() - hiddenAt > 20 * 60 * 1000) {
+      const open = [...model.todosById.values()].filter((t) => !t.done).length;
+      window.Mascot.react(open ? `Welcome back! ${open} open.` : "Welcome back! All clear.", { key: "back", cooldown: 600000, delay: 1200 });
+    }
+    hiddenAt = 0;
+  });
+
+  const KEY = "now.greeted";
+  const today = new Date().toDateString();
+  let greeted = null;
+  try { greeted = localStorage.getItem(KEY); } catch (_) { /* unavailable */ }
+  if (greeted !== today) {
+    setTimeout(() => {
+      const all = [...model.todosById.values()];
+      if (!all.length) return; // the list hasn't loaded, or is empty: try tomorrow
+      const hour = new Date().getHours();
+      const hello = hour < 5 ? "Burning the midnight oil?" : hour < 12 ? "Good morning!" : hour < 18 ? "Good afternoon!" : "Good evening!";
+      const open = all.filter((t) => !t.done).length;
+      const overdue = all.filter(isOverdue).length;
+      const tail = overdue ? ` ${overdue} overdue.` : open ? ` ${open} to do.` : " Nothing to do!";
+      window.Mascot.react(hello + tail, { key: "greet", cooldown: 0, delay: 0 });
+      try { localStorage.setItem(KEY, today); } catch (_) { /* unavailable */ }
+    }, 4000);
+  }
+})();
+
+// Milestones: 3, 5, 10, 20... done today (see doneToday()).
+function reactToDoneCount(n, todo) {
+  if (!window.Mascot) return;
+  if ([3, 5, 10, 15, 20, 30].includes(n)) {
+    const lines = { 3: "Three down. On a roll!", 5: "Five done today. Nice!", 10: "Ten! You're unstoppable.", 15: "Fifteen?! Legend.", 20: "Twenty. Wow.", 30: "Thirty. Take a bow." };
+    window.Mascot.react(lines[n], { key: `milestone${n}`, cooldown: 3600000, delay: 1600 });
+  } else if (todo && todo.repeat) {
+    window.Mascot.react("Done. See you next time! \ud83d\udd01", { key: "repeat", cooldown: 30000, delay: 1600 });
+  }
+}

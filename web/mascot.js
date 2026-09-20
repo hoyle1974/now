@@ -91,19 +91,19 @@
     bubble.style.setProperty("--bubble-shift", `${Math.round(clamped - left)}px`);
   }
 
-  function show({ cheer = false, text } = {}) {
+  function show({ cheer = false, happy = false, text } = {}) {
     if (!enabled() || reduced() || up) return;
     build();
     up = true;
     el.style.setProperty("--x", cheer ? "50%" : ["18%", "50%", "82%"][Math.floor(Math.random() * 3)]);
     el.classList.remove("is-giggle", "is-blink");
-    el.classList.toggle("is-cheer", cheer);
+    el.classList.toggle("is-cheer", cheer || happy);
     const msg = text || (Math.random() < 0.6 || cheer ? message() : "");
     bubble.hidden = !msg;
     bubble.textContent = msg;
     if (msg) keepBubbleOnScreen();
     el.classList.add("is-up");
-    sfx(cheer ? "cheer" : "peek");
+    sfx(cheer ? "cheer" : happy ? "giggle" : "peek");
     if (msg && !cheer) setTimeout(() => up && sfx("beep"), 700);
     blink(2);
     clearTimeout(hideTimer);
@@ -189,7 +189,23 @@
   // Android and desktop need no permission: listen right away.
   if (typeof document !== "undefined" && shakeSupported() && !needsPermission()) requestShake();
 
+  // A reaction to something that just happened. Polite by design: a global
+  // 10s gap between reactions, a per-topic cooldown, and never while you're
+  // busy (sheet/menu/typing), away, or while he's already up.
+  const lastReact = {};
+  let lastAny = 0;
+  function react(text, { key = text, cooldown = 60000, delay = 900, happy = true } = {}) {
+    setTimeout(() => {
+      if (!enabled() || reduced() || up || document.hidden || quiet()) return;
+      const now = Date.now();
+      if (now - lastAny < 10000 || now - (lastReact[key] || 0) < cooldown) return;
+      lastAny = lastReact[key] = now;
+      show({ text, happy });
+    }, delay);
+  }
+
   root.Mascot = {
+    react,
     shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, active: () => shakeOn, _onMotion: onMotion },
     enabled,
     setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); },
