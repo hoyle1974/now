@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "38";
+const APP_VERSION = "39";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -375,6 +375,7 @@ function celebrate(todoId) {
     if (window.Sparkle && model.todosById.size && [...model.todosById.values()].every((t) => t.done)) {
       window.Sparkle.celebrateAll();
       if (window.Sound) window.Sound.fanfare();
+      if (window.Mascot) window.Mascot.cheer();
     }
   });
 }
@@ -1981,4 +1982,43 @@ document.getElementById("event-log-copy").addEventListener("click", async (event
     swatches.appendChild(b);
   }
   paintSwatches();
+})();
+
+// The mascot's idle chatter reflects the list (see mascot.js).
+if (window.Mascot) {
+  window.Mascot.setMessageSource(() => {
+    const all = [...model.todosById.values()];
+    if (!all.length) return "A blank slate. Add something!";
+    const open = all.filter((t) => !t.done).length;
+    const overdue = all.filter(isOverdue).length;
+    if (open === 0) return "Nothing left. Go enjoy it \u2728";
+    const lines = [
+      overdue ? `${overdue} overdue\u2026 one small step?` : null,
+      open === 1 ? "Just one thing left!" : `${open} to go. Pick the easiest!`,
+      "Tiny steps count.",
+      "Psst\u2026 you've got this.",
+      doneToday() ? `${doneToday()} done today. Nice!` : "Ready when you are.",
+    ].filter(Boolean);
+    let i;
+    do { i = Math.floor(Math.random() * lines.length); } while (lines.length > 1 && i === window.__mascotLast);
+    window.__mascotLast = i;
+    return lines[i];
+  });
+}
+
+// Mascot on/off, alongside the other look-and-feel controls.
+(() => {
+  const btn = document.getElementById("mascot-toggle");
+  if (!btn || !window.Mascot) return;
+  const paint = () => {
+    const on = window.Mascot.enabled();
+    btn.textContent = on ? "Mascot on" : "Mascot off";
+    btn.setAttribute("aria-pressed", String(on));
+  };
+  btn.addEventListener("click", () => {
+    window.Mascot.setEnabled(!window.Mascot.enabled());
+    paint();
+    if (window.Mascot.enabled()) window.Mascot.peek({ text: "Hi! I'm Nudge \ud83d\udc4b" });
+  });
+  paint();
 })();

@@ -16,6 +16,7 @@ timestamp: 2026-09-19T14:00:00Z
 
 **Client (`web/`)**
 - `themes.js` — per-device accent themes and the opt-in completion sound (`Themes`, `Sound`).
+- `mascot.js` — the idle mascot "Nudge" (peek/blink/duck away; `Mascot`); tinted by `--accent`.
 - `sparkle.js` — decorative confetti on completion / when everything is done (no-op under reduced motion).
 - `app.js` — main UI (incl. the todo viewer and edit sheets, see [fields](../features/fields.md)); holds `APP_VERSION` ([sync model](../features/sync-model.md)).
 - `sync.js`, `idb-store.js` — outbox and IndexedDB persistence.
