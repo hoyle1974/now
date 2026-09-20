@@ -196,7 +196,11 @@ const FieldsUI = (() => {
         const btn = el("button", "picker-option" + (selected ? " is-selected" : ""), c.title);
         btn.type = "button";
         btn.setAttribute("aria-pressed", String(selected));
-        btn.addEventListener("click", () => toggle(c.todo_id));
+        btn.addEventListener("click", () => {
+          // Picked: clear the search so the chip above is the only trace.
+          if (!ids.has(c.todo_id)) search.value = "";
+          toggle(c.todo_id);
+        });
         list.appendChild(btn);
       });
       if (!cands.length) list.appendChild(el("p", "detail-empty", "No matching todos."));

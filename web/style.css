@@ -187,11 +187,11 @@ svg {
 /* ---------- Event log (diagnostics) ---------- */
 
 .log-toggle {
-  margin: 8px 0 0 6px;
-  padding: 3px 8px;
+  margin: 0 0 0 2px;
+  padding: 12px 8px;
   border: none;
   background: none;
-  color: var(--label-3);
+  color: var(--label-2);
   font: inherit;
   font-size: 12px;
   text-decoration: underline;
@@ -552,6 +552,11 @@ svg {
 
 .todo-menu {
   position: relative;
+}
+
+/* Extra scroll room so a menu on the last rows can clear the fixed composer. */
+body.menu-room {
+  padding-bottom: calc(var(--composer-h, 84px) + 320px);
 }
 
 .todo-menu-dropdown {

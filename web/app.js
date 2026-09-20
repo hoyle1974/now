@@ -1411,6 +1411,7 @@ function renderTree() {
 // under the composer, so open it upward if there's room above, otherwise
 // scroll it into view.
 function placeOpenMenu() {
+  document.body.classList.remove("menu-room");
   const menu = document.querySelector(".todo-menu-dropdown");
   if (!menu) return;
   const composer = document.getElementById("add-form");
@@ -1426,6 +1427,8 @@ function placeOpenMenu() {
   if (kebab.top - 4 - height >= topLimit) {
     menu.classList.add("todo-menu-dropdown--up");
   } else {
+    // A short page can't scroll far enough to clear the composer, so add room.
+    document.body.classList.add("menu-room");
     window.scrollBy({ top: kebab.bottom + 4 + height - bottomLimit, behavior: "auto" });
   }
 }
