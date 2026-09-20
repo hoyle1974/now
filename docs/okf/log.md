@@ -25,3 +25,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-19: API 404s carry explicit detail text (todo not found / attachment not found / parent not found) so the client can tell an item gone from a missing route.
 - 2026-09-19: Edit sheet gets a "Pick date" chip and a tappable date field (due-time.md); app v48.
 - 2026-09-19: Mascot idle pop-up is near-silent: peek, blink, beep and hide use "Soft" sine variants (gain 0.004-0.008) when started by the idle timer (`show({idle:true})`); summons (shake, triple-tap, greeting), cheers and taps keep the normal voice. APP_VERSION/asset v=49.
+- 2026-09-20: Added ops/monitoring-backups.md: uptime check, 5xx and health alert policies, now_sync_conflicts metric, Firestore PITR and daily backup schedule (GCP config only, no code change).

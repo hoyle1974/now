@@ -36,4 +36,4 @@ like code.
   [image attachments](features/attachments.md),
   [trash, clear completed, archive](features/trash-archive.md), [auto-done and done-sink](features/auto-done.md),
   [event log](features/event-log.md)
-- Ops: [testing](ops/testing.md), [deploy](ops/deploy.md), [Lock Screen widget](ops/widget.md)
+- Ops: [testing](ops/testing.md), [deploy](ops/deploy.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)
