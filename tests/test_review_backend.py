@@ -187,3 +187,30 @@ def test_upload_rejected_early_by_content_length():
                headers={"content-length": str(models.MAX_ATTACHMENT_BYTES * 3)})
     assert r.status_code == 413
     assert c.get(f"/todos/{t['todo_id']}").json()["attachments"] == []
+
+
+# 404 detail text (the client tells "todo gone" from a route 404 by it) ------
+
+MISSING = "00000000-0000-0000-0000-000000000000"
+
+
+def test_missing_todo_404s_say_todo_not_found():
+    for r in (c.get(f"/todos/{MISSING}"),
+              c.patch(f"/todos/{MISSING}", json={"title": "x"}),
+              c.patch(f"/todos/{MISSING}/move/up"),
+              c.patch(f"/todos/{MISSING}/reparent", json={"parent_id": None}),
+              c.get(f"/todos/{MISSING}/attachments/abc"),
+              c.post(f"/todos/{MISSING}/attachments", files={"file": ("p.png", PNG, "image/png")})):
+        assert r.status_code == 404 and r.json()["detail"] == "todo not found", r.request.url
+    # DELETE of a missing todo is an idempotent 204, not a 404.
+    assert c.delete(f"/todos/{MISSING}").status_code == 204
+
+
+def test_missing_attachment_and_parent_404s_are_distinct():
+    t = mk()
+    r = c.get(f"/todos/{t['todo_id']}/attachments/nope")
+    assert r.status_code == 404 and r.json()["detail"] == "attachment not found"
+    r = c.delete(f"/todos/{t['todo_id']}/attachments/nope")
+    assert r.status_code == 404 and r.json()["detail"] == "attachment not found"
+    r = c.patch(f"/todos/{t['todo_id']}/reparent", json={"parent_id": MISSING})
+    assert r.status_code == 404 and r.json()["detail"] == "parent not found"

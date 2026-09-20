@@ -25,3 +25,5 @@ timestamp: 2026-09-19T00:00:00Z
 | `DELETE /todos/{id}` | Soft delete (204). |
 
 Writes carry `X-Txn-Id` for idempotency; write responses reveal remote changes via `X-Rev-Prev`.
+
+404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
