@@ -253,3 +253,8 @@
 
 .lightbox-bar .btn { color: #fff; }
 .lightbox-bar .lightbox-remove { color: #ff6369; }
+
+.next-row[data-color] {
+  box-shadow: inset 4px 0 0 var(--tc);
+  background: color-mix(in srgb, var(--tc) 9%, transparent);
+}

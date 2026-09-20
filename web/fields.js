@@ -51,6 +51,16 @@
     return { links, error: null };
   }
 
+  // A todo's own color, else the nearest colored ancestor's, else null.
+  function effectiveColor(todo, todosById) {
+    const seen = new Set();
+    for (let node = todo; node && !seen.has(node.todo_id); node = node.parent_id ? todosById.get(node.parent_id) : null) {
+      if (COLORS.includes(node.color)) return node.color;
+      seen.add(node.todo_id);
+    }
+    return null;
+  }
+
   // Other todos to choose from, filtered by a title search. Temp ids are left
   // out (the server doesn't know them yet), as are deleted todos and self.
   // Ids of a todo's ancestors and descendants: a todo already waits on its own
@@ -112,5 +122,5 @@
     return { title, due_date: dueDate || null, repeat: dueDate ? repeat : null, ...fields };
   }
 
-  return { patchPayload, COLORS, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
+  return { patchPayload, COLORS, effectiveColor, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
 });

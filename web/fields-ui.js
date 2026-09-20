@@ -16,9 +16,8 @@ const FieldsUI = (() => {
   // ---- row decoration -------------------------------------------------------
 
   function decorateRow(row, todo) {
-    if (Fields.COLORS.includes(todo.color)) {
-      row.dataset.color = todo.color;
-    }
+    const color = Fields.effectiveColor(todo, deps.model.todosById);
+    if (color) row.dataset.color = color;
   }
 
   function blockedChip(todo) {

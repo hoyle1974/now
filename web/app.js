@@ -1,5 +1,5 @@
 const API_BASE = "/todos";
-const APP_VERSION = "53";
+const APP_VERSION = "54";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -1873,6 +1873,8 @@ function renderNextRow(item) {
   const row = document.createElement("button");
   row.type = "button";
   row.className = "next-row";
+  const color = Fields.effectiveColor(model.todosById.get(item.todo_id) || {}, model.todosById);
+  if (color) row.dataset.color = color;
 
   const rank = document.createElement("span");
   rank.className = "next-rank";
