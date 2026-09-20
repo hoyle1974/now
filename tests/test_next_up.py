@@ -25,8 +25,8 @@ def mk(title, due=None, done=False, order=None, kids=(), blocked_by=(), deleted=
     return t
 
 
-def rank(*roots, limit=10):
-    return rank_next_up(list(roots), _ALL, limit)
+def rank(*roots, limit=10, today=None):
+    return rank_next_up(list(roots), _ALL, limit, today)
 
 
 def titles(items):
@@ -172,3 +172,15 @@ def test_items_name_their_open_blockers():
     blocked = mk("Book job", blocked_by=[blocker, done_b])
     out = rank(blocked, blocker)
     assert out[0]["blocked_by"] == [] and out[1]["blocked_by"] == ["Get quote"]
+
+
+def test_all_due_today_or_overdue_shown_beyond_limit():
+    todos = [mk(f"due{i}", d(10)) for i in range(4)] + [mk("later", d(25)), mk("undated")]
+    assert [i["title"] for i in rank(*todos, limit=2, today=datetime.date(2026, 9, 20))] == [
+        "due0", "due1", "due2", "due3"]
+
+
+def test_fills_to_limit_with_next_most_urgent():
+    todos = [mk("due", d(20)), mk("a", d(22)), mk("b", d(23)), mk("undated")]
+    titles = [i["title"] for i in rank(*todos, limit=3, today=datetime.date(2026, 9, 20))]
+    assert titles == ["due", "a", "b"]

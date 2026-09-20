@@ -14,6 +14,10 @@ parent is finished by finishing its children). Candidates are ranked by:
 
 Todos with no date anywhere go last, in list order.
 
+The list is `limit` long, but never cuts off a todo whose effective due date is
+`today` or earlier (when `today` is given): all of those are shown, and if they
+number fewer than `limit` the next most urgent fill it up.
+
 Blocking: a todo waits on the open todos in its blocked_by (and its ancestors').
 After ranking, each blocker is pulled up to sit just above what it blocks, so
 the blocked todo is never demoted for it. A blocker with open subtasks brings
@@ -44,7 +48,8 @@ def _due(todo: models.Todo) -> datetime.datetime | None:
 
 
 def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
-                 limit: int = DEFAULT_LIMIT) -> list[dict]:
+                 limit: int = DEFAULT_LIMIT,
+                 today: datetime.date | None = None) -> list[dict]:
     candidates: list[tuple] = []
 
     def open_children(todo: models.Todo) -> list[models.Todo]:
@@ -125,6 +130,11 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
     for cand in candidates:
         place(cand)
     candidates = ordered
+
+    if today is not None:
+        due_now = [i for i, c in enumerate(candidates) if c[0].date() <= today]
+        if due_now:
+            limit = max(limit, due_now[-1] + 1)
 
     items = []
     for rank, (_, _, _, todo, titles, effective, source) in enumerate(candidates[:limit], start=1):

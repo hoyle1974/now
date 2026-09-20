@@ -41,7 +41,7 @@ async function refreshNext() {
   // Unsent edits aren't on the server yet, so let them land before asking.
   await Promise.race([engine.flush(), new Promise((resolve) => setTimeout(resolve, 4000))]);
   try {
-    const response = await fetch(`${API_BASE}/next`);
+    const response = await fetch(`${API_BASE}/next?today=${getTodayString()}`);
     if (!response.ok) throw new Error(`${response.status}`);
     const data = await response.json();
     if (mine !== nextRequest) return; // a newer request is in flight

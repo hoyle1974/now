@@ -177,11 +177,13 @@ def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo]
     return db.get_tree(rev)
 
 @app.get("/todos/next", response_model=None)
-def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50)) -> dict:
-    """The todos to work on next, best first (see app/next_up.py for the rules)."""
+def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_LIMIT, ge=1, le=50),
+                today: datetime.date | None = None) -> dict:
+    """The todos to work on next, best first (see app/next_up.py for the rules).
+    With `today` (the client's local date) every todo due then or earlier is included."""
     rev = db.get_rev()
     roots, todosById = _load_tree(rev, background)
-    return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit))}
+    return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit, today))}
 
 @app.get("/todos/tree", response_model=dict)
 def get_tree(background: BackgroundTasks) -> dict:
