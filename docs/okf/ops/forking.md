@@ -4,7 +4,7 @@ title: Forking and per-deployment config
 description: How a fork is set up (zilch for infrastructure, init.sh for the app), and where per-deployment settings live.
 resource: scripts/init.sh
 tags: [fork, config, zilch, deploy]
-timestamp: 2026-09-20T22:00:00Z
+timestamp: 2026-09-20T23:00:00Z
 ---
 Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (sibling repo `../zilch-gcp`, Terraform): project APIs, Cloud Run, Firestore, Scheduler, monitoring; it writes `.zilch.config`. **The app** is set up by `scripts/init.sh` (`--dry-run` to preview, `--push` to add reminders) and verified by the read-only `scripts/doctor.sh` (names only, never env values). `init.sh` has only been run as `--dry-run` and against the author's own project.
 
@@ -18,5 +18,7 @@ Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle19
 **Not scriptable:** enabling Google sign-in and the authorized domain in the Firebase console.
 
 **Migrating the author's prod from service `now` to zilch's `now-app`** (deliberately not done): no data moves (Firestore and the bucket belong to the project). Deploy to `now-app`, then repoint the Hosting rewrite, the widget `BASE`, the Scheduler URI and `NOTIFY_AUDIENCE`, re-set the env vars/secret, delete `now`. Changing `SERVICE` in `.now.env` plus `firebase.json` covers the scripts; the widget URL and Scheduler job are manual.
+
+Open items: [roadmap](roadmap.md); relationship to zilch: [zilch-gcp](../architecture/zilch-gcp.md).
 
 zilch changes made for this (see its wiki): `ignore_changes` on the Cloud Run image and env so `terraform apply` cannot revert a deploy, and a hardened bucket (public access prevention, uniform access).
