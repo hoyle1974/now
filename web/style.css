@@ -1778,12 +1778,15 @@ li.search-hit { cursor: default; }
 .mascot-body {
   width: 80px;
   height: 64px;
-  transform: translateY(100%);
-  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1); /* springy overshoot */
+  /* Well below the clip line (the antenna and its sway stick out above the box). */
+  transform: translateY(calc(100% + 24px));
+  visibility: hidden;
+  /* Springy overshoot on the way up; hidden outright once he is away. */
+  transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0s 0.5s;
 }
 
 .mascot.is-up { pointer-events: auto; }
-.mascot.is-up .mascot-body { transform: translateY(0); }
+.mascot.is-up .mascot-body { transform: translateY(0); visibility: visible; transition: transform 0.45s cubic-bezier(0.34, 1.56, 0.64, 1), visibility 0s; }
 
 .mascot svg { display: block; overflow: visible; }
 
@@ -1814,10 +1817,10 @@ li.search-hit { cursor: default; }
   position: absolute;
   bottom: 70px;
   left: 50%;
-  transform: translateX(-50%) scale(0.6);
+  transform: translateX(calc(-50% + var(--bubble-shift, 0px))) scale(0.6);
   transform-origin: bottom center;
   width: max-content;
-  max-width: 200px;
+  max-width: min(200px, calc(100vw - 28px));
   padding: 8px 12px;
   border-radius: 14px;
   background: var(--card, #fff);
@@ -1834,7 +1837,7 @@ li.search-hit { cursor: default; }
 .mascot-bubble::after {
   content: "";
   position: absolute;
-  left: 50%;
+  left: calc(50% - var(--bubble-shift, 0px));
   bottom: -5px;
   width: 10px;
   height: 10px;
@@ -1844,7 +1847,7 @@ li.search-hit { cursor: default; }
   border-radius: 2px;
 }
 
-.mascot.is-up .mascot-bubble { opacity: 1; transform: translateX(-50%) scale(1); }
+.mascot.is-up .mascot-bubble { opacity: 1; transform: translateX(calc(-50% + var(--bubble-shift, 0px))) scale(1); }
 
 @media (prefers-reduced-motion: reduce) {
   .mascot { display: none; }

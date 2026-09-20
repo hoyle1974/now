@@ -78,6 +78,19 @@
     setTimeout(tick, 650);
   }
 
+  // The bubble is centred on him; near a screen edge that would push it off, so
+  // shift it inward (the tail keeps pointing at him, see --bubble-shift in CSS).
+  function keepBubbleOnScreen() {
+    const margin = 10;
+    const vw = document.documentElement.clientWidth;
+    bubble.style.setProperty("--bubble-shift", "0px");
+    const cx = el.getBoundingClientRect().left + el.offsetWidth / 2;
+    const w = bubble.offsetWidth;
+    const left = cx - w / 2;
+    const clamped = Math.min(Math.max(left, margin), Math.max(margin, vw - margin - w));
+    bubble.style.setProperty("--bubble-shift", `${Math.round(clamped - left)}px`);
+  }
+
   function show({ cheer = false, text } = {}) {
     if (!enabled() || reduced() || up) return;
     build();
@@ -88,6 +101,7 @@
     const msg = text || (Math.random() < 0.6 || cheer ? message() : "");
     bubble.hidden = !msg;
     bubble.textContent = msg;
+    if (msg) keepBubbleOnScreen();
     el.classList.add("is-up");
     sfx(cheer ? "cheer" : "peek");
     if (msg && !cheer) setTimeout(() => up && sfx("beep"), 700);
