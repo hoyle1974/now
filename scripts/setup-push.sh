@@ -10,7 +10,10 @@ JOB="${JOB:-now-notify}"
 CALLER_NAME="${CALLER_NAME:-now-notify}"
 # Daytime only, every 10 minutes; the 9:00 rule itself uses each device's own timezone.
 SCHEDULE="${SCHEDULE:-*/10 6-23 * * *}"
-SCHEDULE_TZ="${SCHEDULE_TZ:-America/Los_Angeles}"
+# Timezone of the schedule window: SCHEDULE_TZ, else .now.env, else this machine'"'"'s, else UTC.
+SCHEDULE_TZ="${SCHEDULE_TZ:-$(_cfg .now.env SCHEDULE_TZ)}"
+SCHEDULE_TZ="${SCHEDULE_TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')}"
+SCHEDULE_TZ="${SCHEDULE_TZ:-UTC}"
 
 gcloud services enable fcm.googleapis.com fcmregistrations.googleapis.com \
   firebaseinstallations.googleapis.com cloudscheduler.googleapis.com --project "$PROJECT"

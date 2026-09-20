@@ -242,8 +242,9 @@ owns all the data. Setup is two layers:
 2. **The app**, with two commands:
    ```bash
    scripts/init.sh --dry-run   # see what it will do
-   scripts/init.sh --push      # Firebase web app + web/config.js, Hosting, indexes,
-                               # first deploy, bucket; --push adds reminders
+   scripts/init.sh --push --widget   # Firebase web app + web/config.js, Hosting, indexes,
+                               # first deploy, bucket; --push adds reminders,
+                               # --widget the lock screen widget token
    scripts/doctor.sh           # read-only check of everything above
    ```
    `init.sh` cannot enable Google sign-in for you: turn it on in the Firebase console

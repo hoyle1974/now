@@ -5,6 +5,7 @@
 #   scripts/init.sh --dry-run    # print what would change, change nothing
 #   scripts/init.sh              # ask once, then do it
 #   scripts/init.sh --push       # also set up push reminders (Scheduler job, IAM)
+#   scripts/init.sh --widget     # also create the lock screen widget token (Secret Manager)
 #
 # Prerequisites: gcloud and firebase logged in; a project with billing and a Firestore
 # database (zilch creates both); a Firebase project on it (console: "Add Firebase").
@@ -14,12 +15,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/config.sh
 
-DRY=0; PUSH=0
+DRY=0; PUSH=0; WIDGET=0
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY=1 ;;
     --push) PUSH=1 ;;
-    *) echo "usage: $0 [--dry-run] [--push]" >&2; exit 2 ;;
+    --widget) WIDGET=1 ;;
+    *) echo "usage: $0 [--dry-run] [--push] [--widget]" >&2; exit 2 ;;
   esac
 done
 
@@ -101,6 +103,27 @@ run scripts/create-bucket.sh
 if [ "$PUSH" = 1 ]; then
   say "5b Push reminders"
   run scripts/setup-push.sh
+fi
+
+if [ "$WIDGET" = 1 ]; then
+  say "5c Widget token (secret widget-token; unlocks only GET /todos/next)"
+  if gcloud secrets describe widget-token --project "$PROJECT" >/dev/null 2>&1; then
+    echo "   secret widget-token exists, keeping it"
+  else
+    if [ "$DRY" = 1 ]; then echo "   [dry-run] create secret widget-token from a random 24-byte token"; else
+      openssl rand -hex 24 | tr -d '\n' | gcloud secrets create widget-token --project "$PROJECT" \
+        --replication-policy automatic --data-file=-
+    fi
+  fi
+  SA="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
+    --format 'value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)"
+  SA="${SA:-$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)' 2>/dev/null)-compute@developer.gserviceaccount.com}"
+  run gcloud secrets add-iam-policy-binding widget-token --project "$PROJECT" \
+    --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor
+  run gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" \
+    --update-secrets WIDGET_TOKEN=widget-token:latest
+  echo "   read the token to paste into Scriptable with:"
+  echo "   gcloud secrets versions access latest --secret widget-token --project $PROJECT"
 fi
 
 say "6/6 Firebase Hosting (serves the app on $HOSTING_SITE.web.app)"
