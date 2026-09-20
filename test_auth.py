@@ -63,3 +63,10 @@ def test_widget_token_off_when_unset(monkeypatch):
     monkeypatch.setattr(auth, "WIDGET_TOKEN", "")
     with pytest.raises(HTTPException):
         auth.require_user(_request("/todos/next", widget=""))
+
+
+def test_widget_token_non_ascii_header_is_401_not_500(monkeypatch):
+    monkeypatch.setattr(auth, "WIDGET_TOKEN", "s3cret")
+    with pytest.raises(HTTPException) as e:
+        auth.require_user(_request("/todos/next", widget="é"))
+    assert e.value.status_code == 401

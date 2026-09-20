@@ -20,7 +20,7 @@ def _widget_token_ok(request: Request) -> bool:
     supplied = request.headers.get("x-widget-token", "")
     return bool(WIDGET_TOKEN and supplied and request.method == "GET"
                 and request.url.path == _WIDGET_PATH
-                and hmac.compare_digest(supplied, WIDGET_TOKEN))
+                and hmac.compare_digest(supplied.encode(), WIDGET_TOKEN.encode()))
 
 def require_user(request: Request) -> None:
     if request.url.path in _PUBLIC_PATHS:
