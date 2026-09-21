@@ -1053,7 +1053,8 @@ body:has(#error:not([hidden])) {
 
 .composer-chips {
   flex-wrap: nowrap;
-  margin-bottom: 8px;
+  /* Must repeat the auto side margins: .chip-row's margin (above) would win. */
+  margin: 0 auto 8px;
 }
 
 .chip {
