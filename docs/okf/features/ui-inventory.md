@@ -3,7 +3,7 @@ type: Feature
 title: UI feature inventory
 description: Every user-facing capability and where to reach it; the checklist to run before shipping a UI change.
 tags: [ui, checklist, regression]
-timestamp: 2026-09-21T22:00:00Z
+timestamp: 2026-09-21T23:00:00Z
 ---
 Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this list. When a capability is added or moved, update this file in the same commit; removing one needs the user's explicit yes. Run through it in Chrome ([local browser testing](../ops/local-browser-testing.md)) before deploying UI changes.
 
@@ -25,7 +25,7 @@ Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this l
 
 **Trash** (footer link): every trashed item incl. those inside a deleted parent, type icon, tap for read-only view, Undelete (restores the parent chain), Load more. **Clear N completed** (footer, Undo).
 
-**More panel**: event log, reminders on/off, calendar feed (copy / subscribe), accent theme, completion sound, mascot (greets with overdue / due-today counts), shake, badge.
+**More panel**: event log, reminders on/off, calendar feed (copy / subscribe), accent theme, completion sound, mascot (greets with overdue / due-today counts; his pupils glance around, follow phone tilt when shake is on, and look at where you tap him), shake, badge.
 
 **Toasts**: Undo after delete / clear completed / type change; errors stay until tapped; "offline, couldn't load your list".
 

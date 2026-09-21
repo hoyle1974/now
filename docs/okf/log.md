@@ -101,3 +101,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-21: Mascot anchored to the composer by layout (app v88): he is now a child of #add-form (absolute, bottom = top of the New Item box) instead of a fixed box positioned from the measured `--composer-h`, which was stale on iOS standalone (base landed mid-box). His feet sink 16px behind the box (clipped) so wiggles never show his bottom. Updated nothing else in the inventory (no capability change).
 - 2026-09-21: Mascot sinks only 6px behind the New Item box (was 16, hid his mouth) (app v89).
 - 2026-09-21: Mascot has separate left/right arms; about half of pop-ups he waves with the arm away from the nearest screen edge (toward the middle; random at centre) (app v90). ui-inventory unchanged (cosmetic, no new control).
+- 2026-09-21: Mascot eyes move (app v91): random glances, pupils follow phone tilt when shake is on, look toward a tap. New `tests_js/gaze.test.js`. Updated ui-inventory and code-map (cosmetic, no new control).

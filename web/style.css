@@ -1907,6 +1907,11 @@ li.search-hit { cursor: default; }
   transition: transform 0.09s ease-in;
 }
 .mascot.is-blink .m-eyes { transform: scaleY(0.08); }
+/* Pupils follow --gx / --gy (SVG units), set from mascot.js. */
+.mascot .m-pupil {
+  transform: translate(calc(var(--gx, 0) * 1px), calc(var(--gy, 0) * 1px));
+  transition: transform 0.22s ease-out;
+}
 
 .mascot .m-bulb { animation: mascot-twinkle 1.2s ease-in-out infinite; transform-box: fill-box; transform-origin: center; }
 .mascot .m-antenna { transform-origin: 40px 14px; animation: mascot-sway 2.4s ease-in-out infinite; }

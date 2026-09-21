@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T17:00:00Z
+timestamp: 2026-09-21T23:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
@@ -28,6 +28,7 @@ timestamp: 2026-09-21T17:00:00Z
 **Client behaviours worth knowing**
 - Toast (`#error`): one `Toast` (`web/toast.js`, latest message wins, owns its timers). `toast.show({message, level, ttl, action:{label,run}, source, kind})`; `showNotice` is a thin wrapper. `apiFetch` tags its failures `source: "api"` and on success only clears those (`hideSource`); the offline notice is `kind: "offline"` (`hideKind`). Undo toasts (delete, clear completed, type change) are `action`s, not separate code.
 - The full-screen viewer/edit sheet owns one `history` entry (`syncHistory` in `ui-helpers.js`, `popstate` in `app.js`), so the back gesture closes or steps back.
+- Mascot eyes: pupils move via CSS vars `--gx/--gy` (SVG units, clamped to 3). Sources: random glances every 0.7-2s while he is up (`lookAround`), phone tilt from the same `devicemotion` stream as shake (`gazeFromTilt`, sign flipped on iOS; only when shake is armed, so no extra permission), and a tap (`lookAt`). Timers stop in `hide`. Test: `tests_js/gaze.test.js`.
 - Mascot: taps on him are not activity; idle re-arm is throttled to 1s; the `devicemotion` listener is attached only while shake is armed, the page is visible and the mascot enabled. iOS forgets motion access on a full relaunch, so `now.shakeOn` is stored and re-requested on the first tap of the next session (event log line `re-armed on first tap`).
 
 **Other:** `scripts/` (`test.sh`, `e2e.sh`, `init.sh`, `doctor.sh`, `create-bucket.sh`, `setup-push.sh`, `setup-calendar.sh`, `migrate-service.sh`, `lib/config.sh`, `scriptable-next-up.js`, `generate_icons.py`, `okf-reminder.sh`), `tests/` (python), `tests_js/` (node), `docs/superpowers/` (design specs and plans), `hosting-public/` (empty Firebase Hosting root; all traffic is rewritten to Cloud Run).

@@ -31,6 +31,45 @@
   <path class="m-mouth" d="M33 49 Q40 56 47 49" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
 </svg>`;
 
+  // ---- eyes ----
+  // Pupils drift in SVG units (eye white radius 7.5, pupil 3.6, so 3 is the edge).
+  // Two sources add up: a tilt of the phone (gravity pulls them down-hill) and
+  // random glances; a tap on him pulls them toward the finger for a moment.
+  const GAZE_MAX = 3;
+  const clampGaze = (v) => Math.max(-GAZE_MAX, Math.min(GAZE_MAX, v));
+  // ax/ay: accelerationIncludingGravity. Android reads the reaction to gravity, iOS the
+  // opposite sign, so flip for iOS (flip = true). Upright phone: pupils rest a touch low.
+  function gazeFromTilt(ax, ay, flip) {
+    const s = flip ? -1 : 1;
+    return { x: clampGaze((-s * ax / GRAVITY) * GAZE_MAX * 1.5), y: clampGaze((s * ay / GRAVITY) * GAZE_MAX * 0.6) };
+  }
+  let tilt = { x: 0, y: 0 }, glance = { x: 0, y: 0 }, lookTimer = null, lookLockUntil = 0;
+  function applyGaze() {
+    if (!el) return;
+    el.style.setProperty("--gx", clampGaze(tilt.x + glance.x).toFixed(2));
+    el.style.setProperty("--gy", clampGaze(tilt.y + glance.y).toFixed(2));
+  }
+  const GLANCES = [[-1, 0], [1, 0], [0, -0.7], [0, 0], [-1, 0.6], [1, 0.6], [0.6, -0.5]];
+  function lookAround() {
+    clearTimeout(lookTimer);
+    if (!up) return;
+    if (Date.now() >= lookLockUntil) {
+      const g = GLANCES[Math.floor(Math.random() * GLANCES.length)];
+      const amp = shakeOn ? 1.2 : GAZE_MAX; // tilt already moves them; keep glances small then
+      glance = { x: g[0] * amp, y: g[1] * amp };
+      applyGaze();
+    }
+    lookTimer = setTimeout(lookAround, 700 + Math.random() * 1300);
+  }
+  function lookAt(clientX, clientY) {
+    const r = el.getBoundingClientRect();
+    const dx = clientX - (r.left + r.width / 2), dy = clientY - (r.top + r.height / 2);
+    const d = Math.hypot(dx, dy) || 1;
+    glance = { x: clampGaze((dx / d) * GAZE_MAX), y: clampGaze((dy / d) * GAZE_MAX) };
+    lookLockUntil = Date.now() + 900;
+    applyGaze();
+  }
+
   const sfx = (name) => { if (root.Sound && root.Sound.sfx) root.Sound.sfx(name); };
   // The unprompted idle pop-up (and its blink, beep and exit) is near-silent;
   // cheers, happy pops, and anything after you tap him keep the normal voice.
@@ -45,8 +84,9 @@
     el.setAttribute("aria-hidden", "true");
     el.innerHTML = `<div class="mascot-bubble" hidden></div><div class="mascot-body">${SVG}</div>`;
     bubble = el.querySelector(".mascot-bubble");
-    el.addEventListener("click", () => {
+    el.addEventListener("click", (e) => {
       if (!up) return;
+      if (e && e.clientX != null) lookAt(e.clientX, e.clientY);
       el.classList.add("is-giggle");
       soft = false;
       sfx("giggle");
@@ -123,6 +163,10 @@
     sfx(cheer ? "cheer" : happy ? "giggle" : soft ? "peekSoft" : "peek");
     if (msg && !cheer) setTimeout(() => up && voice("beep"), 700);
     blink(2);
+    glance = { x: 0, y: 0 };
+    lookLockUntil = 0;
+    applyGaze();
+    lookTimer = setTimeout(lookAround, 900);
     clearTimeout(hideTimer);
     hideTimer = setTimeout(hide, cheer ? STAY + 1400 : STAY + (msg ? 900 : 0));
   }
@@ -131,6 +175,7 @@
     if (!up) return;
     up = false;
     clearTimeout(hideTimer);
+    clearTimeout(lookTimer);
     voice("hide");
     el.classList.remove("is-up");
     schedule();
@@ -186,6 +231,7 @@
     if (!a || a.x == null) return;
     const dev = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - GRAVITY);
     if (peakListener) peakListener(dev);
+    if (up) { tilt = gazeFromTilt(a.x, a.y, needsPermission()); applyGaze(); }
     if (dev < 7) return; // ordinary movement
     const now = Date.now();
     if (now - lastSpike < 100) return; // one swing counts once
@@ -273,6 +319,7 @@
 
   root.Mascot = {
     react,
+    gaze: { fromTilt: gazeFromTilt, max: GAZE_MAX },
     shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, armOnFirstTap, active: () => shakeOn, _onMotion: onMotion },
     enabled,
     setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); syncMotion(); },
