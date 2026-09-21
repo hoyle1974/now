@@ -1,7 +1,7 @@
 // The one due-date control: chips Today / Tomorrow / Pick date / Clear, plus an optional
 // time field. Used by the composer, the new-item sheet and the edit sheet, so a date is
 // entered the same way everywhere. The pure helper runs under `node --test`; the DOM part
-// needs getTodayString/getTomorrowString/formatDue (ui-helpers.js) and Due (due.js) at call time.
+// needs DOM (dom.js) and Due (due.js) at call time.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -25,17 +25,8 @@
   // Returns { chips, timeField, dateInput, timeInput, date(), time(), value(), set(date) }.
   // Repeat controls listen for "input" on dateInput, so every change fires that event.
   function create(opts = {}) {
-    const el = (tag, className, text) => {
-      const node = document.createElement(tag);
-      if (className) node.className = className;
-      if (text != null) node.textContent = text;
-      return node;
-    };
-    const chip = (text, extra) => {
-      const b = el("button", "chip" + (extra ? " " + extra : ""), text);
-      b.type = "button";
-      return b;
-    };
+    const el = DOM.el;
+    const chip = (text, extra) => DOM.button(text, "chip" + (extra ? " " + extra : ""));
 
     const chips = el("div", "chip-row" + (opts.rowClass ? " " + opts.rowClass : ""));
     const todayChip = chip("Today");
@@ -57,18 +48,15 @@
       timeInput.type = "time";
       timeInput.value = opts.time || "";
       timeField = el("div", "date-picker-time");
-      const label = el("label", "sheet-label", "Time (optional)");
-      timeInput.id = `field-${Math.random().toString(36).slice(2)}`;
-      label.htmlFor = timeInput.id;
-      timeField.append(label, timeInput);
+      timeField.append(DOM.label("Time (optional)", timeInput), timeInput);
     }
 
     const render = () => {
-      const state = chipState(dateInput.value, getTodayString(), getTomorrowString());
+      const state = chipState(dateInput.value, Due.today(), Due.tomorrow());
       todayChip.classList.toggle("is-active", state.today);
       tomorrowChip.classList.toggle("is-active", state.tomorrow);
       pickChip.classList.toggle("is-active", state.custom);
-      pickText.textContent = state.custom ? formatDue(`${dateInput.value}T00:00:00`) : "Pick date";
+      pickText.textContent = state.custom ? Due.format(`${dateInput.value}T00:00:00`) : "Pick date";
       clearChip.hidden = !dateInput.value;
       if (timeInput) {
         timeInput.disabled = !dateInput.value;
@@ -85,9 +73,9 @@
     };
 
     // Tapping the lit Today/Tomorrow chip clears it.
-    todayChip.addEventListener("click", () => setDate(dateInput.value === getTodayString() ? "" : getTodayString()));
+    todayChip.addEventListener("click", () => setDate(dateInput.value === Due.today() ? "" : Due.today()));
     tomorrowChip.addEventListener("click", () =>
-      setDate(dateInput.value === getTomorrowString() ? "" : getTomorrowString()));
+      setDate(dateInput.value === Due.tomorrow() ? "" : Due.tomorrow()));
     clearChip.addEventListener("click", () => setDate(""));
     // The date input sits invisibly over its chip; some desktop browsers only open the
     // picker from a small icon, so ask for it explicitly.

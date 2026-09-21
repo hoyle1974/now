@@ -41,7 +41,7 @@ async function refreshNext() {
   // Unsent edits aren't on the server yet, so let them land before asking.
   await Promise.race([engine.flush(), new Promise((resolve) => setTimeout(resolve, 4000))]);
   try {
-    const response = await fetch(`${API_BASE}/next?today=${getTodayString()}`, { cache: "no-store" });
+    const response = await fetch(`${API_BASE}/next?today=${Due.today()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`${response.status}`);
     const data = await response.json();
     if (mine !== nextRequest) return; // a newer request is in flight
@@ -83,11 +83,11 @@ function renderNextRow(item) {
     meta.appendChild(path);
   }
   if (item.effective_due) {
-    const days = daysUntil(item.effective_due);
+    const days = Due.daysUntil(item.effective_due);
     const due = document.createElement("span");
     due.className = "todo-chip" + (Due.isOverdue(item.effective_due) ? " todo-chip--overdue" : days === 0 ? " todo-chip--today" : "");
     const text = document.createElement("span");
-    text.textContent = formatDue(item.effective_due) + (item.due_source === "parent" ? " · from parent" : "");
+    text.textContent = Due.format(item.effective_due) + (item.due_source === "parent" ? " · from parent" : "");
     due.append(icon("calendar"), text);
     meta.appendChild(due);
   }

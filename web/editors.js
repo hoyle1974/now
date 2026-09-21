@@ -6,32 +6,18 @@
 // its own content elements and save behavior, but the button chrome and the
 // "Cancel closes this panel" behavior are identical across all of them.
 function renderEditorActions(onSave, saveLabel = "Save") {
-  const buttons = document.createElement("div");
-  buttons.className = "sheet-actions";
-
-  const cancelBtn = document.createElement("button");
-  cancelBtn.type = "button";
-  cancelBtn.className = "btn btn-plain";
-  cancelBtn.textContent = "Cancel";
-  cancelBtn.addEventListener("click", () => {
-    const back = viewerOrigin;
-    setActivePanel(back ? "view" : null, back);
-    renderTree();
-  });
-
-  const saveBtn = document.createElement("button");
-  saveBtn.type = "button";
-  saveBtn.className = "btn btn-primary";
-  saveBtn.textContent = saveLabel;
-  saveBtn.addEventListener("click", onSave);
-
-  buttons.append(cancelBtn, saveBtn);
-  return buttons;
+  return DOM.actionBar(
+    DOM.sheetButton("Cancel", "plain", () => {
+      const back = viewerOrigin;
+      setActivePanel(back ? "view" : null, back);
+      renderTree();
+    }),
+    DOM.sheetButton(saveLabel, "primary", onSave)
+  );
 }
 
 function renderSheet(...children) {
-  const editor = document.createElement("div");
-  editor.className = "sheet";
+  const editor = DOM.el("div", "sheet");
   editor.append(...children);
   // Focus the first field once it's in the DOM, so opening an editor from
   // the menu goes straight to typing instead of needing a second tap.
@@ -41,31 +27,13 @@ function renderSheet(...children) {
 
 // Full-screen sheet: a heading and the fields scroll, the action bar stays put.
 function renderFullSheet(title, nodes, buttons, subtitle) {
-  const heading = document.createElement("h2");
-  heading.className = "sheet-title";
-  heading.textContent = title;
-  const body = document.createElement("div");
-  body.className = "sheet-body";
-  body.append(heading);
-  if (subtitle) {
-    const sub = document.createElement("p");
-    sub.className = "sheet-subtitle";
-    sub.textContent = subtitle;
-    body.append(sub);
-  }
+  const body = DOM.el("div", "sheet-body");
+  body.append(DOM.el("h2", "sheet-title", title));
+  if (subtitle) body.append(DOM.el("p", "sheet-subtitle", subtitle));
   body.append(...nodes);
   const screen = renderSheet(body, buttons);
   screen.classList.add("sheet-full");
   return screen;
-}
-
-function sheetLabel(text, forEl) {
-  const label = document.createElement("label");
-  label.className = "sheet-label";
-  label.textContent = text;
-  forEl.id = `field-${Math.random().toString(36).slice(2)}`;
-  label.htmlFor = forEl.id;
-  return label;
 }
 
 function renderSplitEditor(todo) {
@@ -148,21 +116,11 @@ function renderTypePanel(todo) {
       else renderTree();
     },
   });
-  const cancel = document.createElement("button");
-  cancel.type = "button";
-  cancel.className = "btn btn-plain";
-  cancel.textContent = "Cancel";
-  cancel.addEventListener("click", () => {
+  const actions = DOM.actionBar(DOM.sheetButton("Cancel", "plain", () => {
     setActivePanel(null);
     renderTree();
-  });
-  const actions = document.createElement("div");
-  actions.className = "sheet-actions";
-  actions.appendChild(cancel);
-  const heading = document.createElement("p");
-  heading.className = "sheet-label";
-  heading.textContent = "Change type";
-  return renderSheet(heading, picker.node, actions);
+  }));
+  return renderSheet(DOM.el("p", "sheet-label", "Change type"), picker.node, actions);
 }
 
 // Full-screen read-only look at one todo; Edit hands off to the edit sheet.
@@ -191,30 +149,21 @@ function renderViewer(todo, counts) {
   };
   fact("Type", Types.get(todo).label);
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
-  if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? formatDue(todo.due_date) : "No due date");
+  if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? Due.format(todo.due_date) : "No due date");
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
   if (Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
   body.appendChild(facts);
   body.appendChild(FieldsUI.renderDetail(todo));
 
-  const buttons = document.createElement("div");
-  buttons.className = "sheet-actions";
-  const closeBtn = document.createElement("button");
-  closeBtn.type = "button";
-  closeBtn.className = "btn btn-plain";
-  closeBtn.textContent = "Close";
-  closeBtn.addEventListener("click", close);
-  const editBtn = document.createElement("button");
-  editBtn.type = "button";
-  editBtn.className = "btn btn-primary";
-  editBtn.textContent = "Edit";
-  editBtn.addEventListener("click", () => {
-    setActivePanel("edit", todo.todo_id);
-    viewerOrigin = todo.todo_id;
-    renderTree();
-  });
-  buttons.append(closeBtn, editBtn);
+  const buttons = DOM.actionBar(
+    DOM.sheetButton("Close", "plain", close),
+    DOM.sheetButton("Edit", "primary", () => {
+      setActivePanel("edit", todo.todo_id);
+      viewerOrigin = todo.todo_id;
+      renderTree();
+    })
+  );
 
   const screen = renderSheet(body, buttons);
   screen.classList.add("sheet-full");
@@ -222,18 +171,10 @@ function renderViewer(todo, counts) {
 }
 
 function renderEmptyState(heading = "All clear", message = "Add your first todo below.") {
-  const empty = document.createElement("li");
-  empty.className = "todo-empty";
-  const badge = document.createElement("div");
-  badge.className = "todo-empty-icon";
+  const badge = DOM.el("div", "todo-empty-icon");
   badge.appendChild(icon("check"));
-  const title = document.createElement("p");
-  title.className = "todo-empty-title";
-  title.textContent = heading;
-  const text = document.createElement("p");
-  text.className = "todo-empty-text";
-  text.textContent = message;
-  empty.append(badge, title, text);
+  const empty = DOM.el("li", "todo-empty");
+  empty.append(badge, DOM.el("p", "todo-empty-title", heading), DOM.el("p", "todo-empty-text", message));
   return empty;
 }
 

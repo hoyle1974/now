@@ -5,7 +5,7 @@
 // The app-icon badge shows how many open todos are due today or overdue.
 let lastBadge = null;
 function updateBadge(all) {
-  const count = Badge.dueCount(all, (t) => daysUntil(t.due_date));
+  const count = Badge.dueCount(all, (t) => Due.daysUntil(t.due_date));
   if (count === lastBadge) return;
   lastBadge = count;
   Badge.apply(navigator, count);

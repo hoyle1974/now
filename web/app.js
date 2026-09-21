@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "82";
+const APP_VERSION = "83";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -290,7 +290,7 @@ async function toggleDone(todoId, done) {
 function spawnNextOccurrence(todoId) {
   const todo = model.todosById.get(todoId);
   if (!todo || !todo.repeat || todo.spawned_id) return;
-  engine.enqueue({ kind: "repeat", target_id: todoId, payload: { today: getTodayString() } });
+  engine.enqueue({ kind: "repeat", target_id: todoId, payload: { today: Due.today() } });
 }
 
 // Collapse state lives on the todo so it survives refresh and syncs across

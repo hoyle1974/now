@@ -10,15 +10,6 @@ const ItemForm = (() => {
   // A new item only asks for what is needed to file it; the rest is one Edit away.
   const CREATE_FIELDS = ["due_date"];
 
-  function labelFor(text, forEl) {
-    const label = document.createElement("label");
-    label.className = "sheet-label";
-    label.textContent = text;
-    forEl.id = `field-${Math.random().toString(36).slice(2)}`;
-    label.htmlFor = forEl.id;
-    return label;
-  }
-
   // The type a new item under `parent` starts as: its newest sibling's, else the default.
   function defaultTypeFor(parent) {
     const siblings = parent ? parent.child_ids.map((id) => model.todosById.get(id)).filter(Boolean) : model.roots;
@@ -43,8 +34,8 @@ const ItemForm = (() => {
     const extra = editing ? FieldsUI.renderEditFields(todo) : { groups: {}, changes: () => ({ fields: {} }) };
 
     const nodes = {
-      due_date: [labelFor("Due date", picker.dateInput), picker.chips, picker.timeField],
-      ...(editing ? { repeat: [labelFor("Repeat every", repeatControls.unit), repeatControls.row] } : {}),
+      due_date: [DOM.label("Due date", picker.dateInput), picker.chips, picker.timeField],
+      ...(editing ? { repeat: [DOM.label("Repeat every", repeatControls.unit), repeatControls.row] } : {}),
       ...extra.groups,
     };
     const initialType = editing ? Types.nameOf(todo) : defaultTypeFor(parent);
@@ -91,22 +82,11 @@ const ItemForm = (() => {
       });
     }
 
-    const heading = document.createElement("h2");
-    heading.className = "sheet-title";
-    heading.textContent = editing ? "Edit item" : "New item";
-    const body = document.createElement("div");
-    body.className = "sheet-body";
-    body.append(heading);
-    if (!editing) {
-      const sub = document.createElement("p");
-      sub.className = "sheet-subtitle";
-      sub.textContent = `In ${parent.title}`;
-      body.append(sub);
-    }
-    const typeLabel = document.createElement("p");
-    typeLabel.className = "sheet-label";
-    typeLabel.textContent = "Type";
-    body.append(labelFor("Title", titleInput), titleInput, typeLabel, typePicker.node, ...groups);
+    const body = DOM.el("div", "sheet-body");
+    body.append(DOM.el("h2", "sheet-title", editing ? "Edit item" : "New item"));
+    if (!editing) body.append(DOM.el("p", "sheet-subtitle", `In ${parent.title}`));
+    body.append(DOM.label("Title", titleInput), titleInput, DOM.el("p", "sheet-label", "Type"),
+      typePicker.node, ...groups);
     const screen = renderSheet(body, renderEditorActions(submit, editing ? "Save" : "Add"));
     screen.classList.add("sheet-full");
     return screen;

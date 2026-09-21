@@ -4,7 +4,7 @@ title: Item types
 description: Every todo has a type (todo, list, project); a shared registry says what each type can do.
 resource: app/types.json
 tags: [types, registry, data]
-timestamp: 2026-09-21T14:00:00Z
+timestamp: 2026-09-21T17:00:00Z
 ---
 Every row is a typed item: `todo` (today's behaviour), `list` (flat group header) or `project` (container that will show a progress readout). `Todo.type` ([Todo](../data/todo.md)) defaults to `todo`; a document with no or an unknown `type` reads as `todo` (server `doc_to_todo`, client `Types.get`), so there is no migration and an old cached client stays safe. New documents write `type: "todo"`.
 
@@ -32,3 +32,5 @@ Every row is a typed item: `todo` (today's behaviour), `list` (flat group header
 **Progress.** `Types.descendantCounts` counts only todos (checkbox types) at any depth, looking through containers; a project (and a todo with subtasks) shows the "n of m" ring chip when it holds at least one todo, a list shows none. Registry flag `showsProgress` is true for `todo` and `project`.
 
 **Create.** `POST /todos` and `POST /todos/{id}/split` accept `type` (default `todo`, unknown → 422; split applies it to every child). A type without `due_date` ignores a supplied due date server-side (nothing is scheduled). Designs: `docs/superpowers/specs/2026-09-21-item-types-design.md`, `docs/superpowers/specs/2026-09-21-unified-item-ui-design.md`.
+
+**Known duplication: the `notifies` filter (fix when a fourth consumer appears).** Three server paths each filter "open, live, has a due date, type `notifies`" by hand: the push digest and heads-up (`app/push.py`, two places) and the calendar feed (`app/ics.py`), plus the Cloud Tasks scheduling check in `app/tasks.py`. Each reads clearly and the flag itself lives in the registry, so it was left alone. **Fix it when** (a) a fourth consumer needs the same filter (a widget, an email digest, ...), or (b) a change to what counts as notifiable (a new type flag, a snooze or "done" rule) has to be made in more than one of them, or (c) the paths disagree in a bug report. Then add one `types.notifiable(todo)` (or `next_up`-style shared predicate in `app/`) that owns done/deleted/due/`notifies`, use it in all of them, and test it once. Until then, any change to that rule must touch all four places.

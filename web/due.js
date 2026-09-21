@@ -1,6 +1,7 @@
-// Due date + optional time. A date-only due is stored as midnight and treated
-// as all-day; any other time of day makes it a timed due. No DOM access, so it
-// runs under `node --test`.
+// Due dates. A date-only due is stored as midnight and treated as all-day; any other
+// time of day makes it a timed due. Also the calendar-day helpers (today, tomorrow,
+// daysUntil, and "Today" / "Tomorrow" phrasing). No DOM access, so it runs under
+// `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -52,5 +53,51 @@
     return `Every ${every} ${rule.unit}s`;
   }
 
-  return { hasTime, timePart, combine, isOverdue, formatRepeat };
+  // ---- calendar days ----------------------------------------------------
+  // All take an optional `now` so they can be tested; the app passes nothing.
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const dayString = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+  // "YYYY-MM-DD" for today / tomorrow in the device's timezone (what a date input holds).
+  function today(now = new Date()) {
+    return dayString(now);
+  }
+
+  function tomorrow(now = new Date()) {
+    const d = new Date(now);
+    d.setDate(d.getDate() + 1);
+    return dayString(d);
+  }
+
+  // Whole calendar days from today to the due date (negative = overdue).
+  function daysUntil(iso, now = new Date()) {
+    return Math.round((startOfDay(iso) - startOfDay(now)) / 86400000);
+  }
+
+  // Relative phrasing for the next week, a short date beyond that: the way native
+  // reminders apps talk about time ("Today", "Tomorrow", "Fri").
+  function formatDay(iso, now = new Date()) {
+    const days = daysUntil(iso, now);
+    if (days === 0) return "Today";
+    if (days === 1) return "Tomorrow";
+    if (days === -1) return "Yesterday";
+    if (days < 0) return `${-days} days overdue`;
+    const date = new Date(iso);
+    if (days < 7) return date.toLocaleDateString(undefined, { weekday: "long" });
+    return date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(date.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+    });
+  }
+
+  // formatDay, plus the time for a timed due ("Today 3:00 PM"); "N days overdue" stays terse.
+  function format(iso, now = new Date()) {
+    const day = formatDay(iso, now);
+    if (!hasTime(iso) || daysUntil(iso, now) < -1) return day;
+    return `${day} ${new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+  }
+
+  return { hasTime, timePart, combine, isOverdue, formatRepeat, today, tomorrow, daysUntil, formatDay, format };
 });

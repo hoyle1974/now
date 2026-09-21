@@ -22,12 +22,7 @@ const AttachmentsUI = (() => {
     });
   }
 
-  const el = (tag, className, text) => {
-    const node = document.createElement(tag);
-    if (className) node.className = className;
-    if (text != null) node.textContent = text;
-    return node;
-  };
+  const el = DOM.el;
 
   function blobUrl(todoId, attachmentId) {
     const key = `${todoId}/${attachmentId}`;

@@ -81,53 +81,6 @@ function icon(name) {
   return span.firstElementChild;
 }
 
-function startOfDay(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-// Whole calendar days from today to the due date (negative = overdue).
-function daysUntil(isoString) {
-  return Math.round((startOfDay(isoString) - startOfDay(new Date())) / 86400000);
-}
-
-// Relative phrasing for the next week, a short date beyond that — the way
-// native reminders apps talk about time ("Today", "Tomorrow", "Fri").
-function formatDue(isoString) {
-  const day = formatDueDay(isoString);
-  // A timed due shows its time ("Today 3:00 PM"); "N days overdue" stays terse.
-  if (!Due.hasTime(isoString) || daysUntil(isoString) < -1) return day;
-  const time = new Date(isoString).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  return `${day} ${time}`;
-}
-
-function formatDueDay(isoString) {
-  const days = daysUntil(isoString);
-  if (days === 0) return "Today";
-  if (days === 1) return "Tomorrow";
-  if (days === -1) return "Yesterday";
-  if (days < 0) return `${-days} days overdue`;
-  if (days < 7) return new Date(isoString).toLocaleDateString(undefined, { weekday: "long" });
-  const sameYear = new Date(isoString).getFullYear() === new Date().getFullYear();
-  return new Date(isoString).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
-  });
-}
-
-function getTodayString() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
-function getTomorrowString() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
-
 // Strictly overdue (due date has already passed) — used for the red
 // due-date treatment, which should stay off for something due later today.
 function isOverdue(todo) {
@@ -139,7 +92,7 @@ function isOverdue(todo) {
 // surfacing to the top even though it isn't red yet.
 function isUrgent(todo) {
   if (todo.done || !todo.due_date || !Types.hasField(todo, "due_date")) return false;
-  return daysUntil(todo.due_date) <= 0;
+  return Due.daysUntil(todo.due_date) <= 0;
 }
 
 // Descendant { total, done } counts for every node, computed once per render
@@ -160,13 +113,9 @@ async function copyOutline(todoId) {
 }
 
 function menuItem(label, iconName, onClick, extraClass = "") {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = `todo-menu-item ${extraClass}`.trim();
+  const btn = DOM.button("", `todo-menu-item ${extraClass}`.trim());
   btn.setAttribute("role", "menuitem");
-  const text = document.createElement("span");
-  text.textContent = label;
-  btn.append(text, icon(iconName));
+  btn.append(DOM.el("span", null, label), icon(iconName));
   btn.addEventListener("click", (event) => {
     event.stopPropagation();
     onClick();
@@ -175,9 +124,7 @@ function menuItem(label, iconName, onClick, extraClass = "") {
 }
 
 function iconButton(className, iconName, ariaLabel) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = `icon-btn ${className}`;
+  const btn = DOM.button("", `icon-btn ${className}`);
   btn.setAttribute("aria-label", ariaLabel);
   btn.appendChild(icon(iconName));
   return btn;
@@ -218,7 +165,7 @@ function renderMeta(todo, hasChildren, counts) {
       due.classList.add("todo-chip--today");
     }
     const text = document.createElement("span");
-    text.textContent = formatDue(todo.due_date);
+    text.textContent = Due.format(todo.due_date);
     due.append(icon("calendar"), text);
     meta.appendChild(due);
   }
