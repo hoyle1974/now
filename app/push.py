@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field
 
-from app import models
+from app import models, types
 
 MAX_TITLES = 3
 MARKER_TTL = datetime.timedelta(days=3)
@@ -92,7 +92,8 @@ def plan_device(dev_id: str, tz: str, now_utc: datetime.datetime,
     dkey = f"digest:{today.isoformat()}:{dev_id}"
     if sent(dkey) is not None:
         return []
-    due = sorted(((d, t) for t in todos if not t.done and not t.deleted and t.due_date
+    due = sorted(((d, t) for t in todos
+                  if not t.done and not t.deleted and t.due_date and types.can(t, "notifies")
                   for d in [_local_due(t, zone)] if d.date() <= today), key=lambda p: p[0])
     titles = ", ".join(t.title for _, t in due[:MAX_TITLES])
     if len(due) > MAX_TITLES:
@@ -146,7 +147,8 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
             except Exception:
                 logging.exception("push send failed for device %s", dev["id"])
     tz = tasks.home_tz(devices)
-    scheduled = sum(tasks.schedule_heads_up(str(t.todo_id), t.due_date, t.done, t.deleted, now_utc, tz, create_task)
+    scheduled = sum(tasks.schedule_heads_up(str(t.todo_id), t.due_date, t.done, t.deleted, now_utc, tz, create_task,
+                                       item_type=t.type)
                     for t in todos) if tz else 0
     return {"devices": len(devices), "sent": sent, "scheduled": scheduled}
 
@@ -163,7 +165,8 @@ def run_heads_up(todo_id: str, due_iso: str, now_utc: datetime.datetime,
     except ValueError:
         return {"sent": 0, "skipped": "bad id"}
     todo = db.get_todo(tid)
-    if todo is None or todo.done or todo.due_date is None or todo.due_date.isoformat() != due_iso:
+    if (todo is None or todo.done or not types.can(todo, "notifies") or todo.due_date is None
+            or todo.due_date.isoformat() != due_iso):
         return {"sent": 0, "skipped": "stale"}
     sent = 0
     for dev in db.list_push_devices():

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from app import models
+from app import models, types
 
 TIMED_MINUTES = 30
 _MIDNIGHT = datetime.time(0, 0)
@@ -56,7 +56,8 @@ def build_calendar(todos_by_id: dict[str, models.Todo], now: datetime.datetime |
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//now//todos//EN", "CALSCALE:GREGORIAN",
              "METHOD:PUBLISH", "X-WR-CALNAME:now", "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
              "X-PUBLISHED-TTL:PT1H"]
-    open_dated = sorted((t for t in todos_by_id.values() if t.due_date and not t.done and not t.deleted),
+    open_dated = sorted((t for t in todos_by_id.values()
+                         if t.due_date and not t.done and not t.deleted and types.can(t, "notifies")),
                         key=lambda t: (t.due_date, str(t.todo_id)))
     for t in open_dated:
         parent = todos_by_id.get(str(t.parent_id)) if t.parent_id else None

@@ -119,3 +119,41 @@ def test_container_is_never_an_open_blocker():
     x = _mk("x", blocked_by=[lst])
     by_id = {str(t.todo_id): t for t in _ALL}
     assert rank_next_up([x], by_id, 10)[0]["blocked_by"] == []
+
+
+# ---- push, heads-up, calendar -----------------------------------------------
+
+def _due_today(title, type="todo"):
+    return models.Todo(title=title, type=type, due_date=dt.datetime(2026, 9, 19, 12, 0))
+
+
+def test_digest_skips_types_that_do_not_notify():
+    now = dt.datetime(2026, 9, 19, 16, 0, tzinfo=dt.UTC)
+    todos = [_due_today("real"), _due_today("hidden", "list"), _due_today("hidden2", "project")]
+    out = push.plan_device("dev", "America/Los_Angeles", now, todos, lambda k: None)
+    assert out[0].title == "1 due today" and out[0].body == "real"
+
+
+def test_calendar_skips_types_that_do_not_notify():
+    todos = {str(t.todo_id): t for t in [_due_today("real"), _due_today("hidden", "list")]}
+    text = ics.build_calendar(todos)
+    assert "SUMMARY:real" in text and "hidden" not in text
+
+
+def test_heads_up_task_not_scheduled_for_containers():
+    now = dt.datetime(2026, 9, 19, 12, 0, tzinfo=dt.UTC)
+    due = dt.datetime(2026, 9, 19, 20, 0)                       # 13:00 in Los Angeles: timed, 6h out
+    made = []
+    create = lambda *a: made.append(a) or True  # noqa: E731
+    assert tasks.schedule_heads_up("id1", due, False, False, now, "America/Los_Angeles", create) is True
+    assert tasks.schedule_heads_up("id2", due, False, False, now, "America/Los_Angeles", create,
+                                   item_type="list") is False
+    assert len(made) == 1
+
+
+def test_run_heads_up_stays_silent_for_a_todo_switched_to_a_list(db_setup):
+    t = client.post("/todos", json={"title": "x", "due_date": "2026-09-19T20:00:00"}).json()
+    client.patch(f"/todos/{t['todo_id']}", json={"type": "list"})
+    got = push.run_heads_up(t["todo_id"], "2026-09-19T20:00:00", dt.datetime(2026, 9, 19, 12, tzinfo=dt.UTC),
+                            send=lambda *a: None)
+    assert got == {"sent": 0, "skipped": "stale"}

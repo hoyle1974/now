@@ -18,7 +18,7 @@ import logging
 import os
 from collections.abc import Callable
 
-from app import push
+from app import push, types
 
 log = logging.getLogger(__name__)
 
@@ -92,9 +92,10 @@ def create_task(todo_id: str, due_iso: str, fire_at: datetime.datetime) -> bool:
 
 def schedule_heads_up(todo_id: str, due: datetime.datetime | None, done: bool, deleted: bool,
                       now_utc: datetime.datetime | None = None, tz: str | None = None,
-                      create: Callable[[str, str, datetime.datetime], bool] | None = None) -> bool:
+                      create: Callable[[str, str, datetime.datetime], bool] | None = None,
+                      item_type: str = "todo") -> bool:
     """Make the heads-up task for one todo if it needs one. True when a task now exists."""
-    if done or deleted or due is None:
+    if done or deleted or due is None or not types.can_type(item_type, "notifies"):
         return False
     now_utc = now_utc or datetime.datetime.now(_UTC)
     # Cheap filter before any read: no timezone puts a todo outside this range within a day.
@@ -122,6 +123,7 @@ def schedule_from_body(body: dict | None) -> None:
         if not body or not body.get("due_date"):
             return
         schedule_heads_up(str(body["todo_id"]), datetime.datetime.fromisoformat(body["due_date"]),
-                          bool(body.get("done")), bool(body.get("deleted")))
+                          bool(body.get("done")), bool(body.get("deleted")),
+                          item_type=body.get("type", "todo"))
     except Exception:
         log.exception("heads-up scheduling skipped")
