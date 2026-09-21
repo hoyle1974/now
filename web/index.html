@@ -4,11 +4,33 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
-  <link rel="stylesheet" href="/style.css?v=69">
-  <link rel="stylesheet" href="/fields.css?v=69">
+  <meta name="description" content="A personal todo list: nested, offline-first, with reminders.">
+  <link rel="stylesheet" href="/style.css?v=70">
+  <link rel="stylesheet" href="/fields.css?v=70">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/440x956@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 440px) and (device-height: 956px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/440x956@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/402x874@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 402px) and (device-height: 874px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/402x874@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/430x932@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/430x932@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/393x852@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/393x852@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/428x926@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/428x926@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/390x844@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/390x844@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/375x812@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/375x812@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/414x896@3-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/414x896@3-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/414x896@2-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/414x896@2-dark.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: light)" href="/splash/375x667@2-light.png">
+  <link rel="apple-touch-startup-image" media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait) and (prefers-color-scheme: dark)" href="/splash/375x667@2-dark.png">
+  <link rel="preconnect" href="https://www.gstatic.com" crossorigin>
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
@@ -132,41 +154,41 @@
     <pre id="event-log-text"></pre>
   </section>
 
-  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
-<script src="/config.js?v=69"></script>
-<script src="/auth.js?v=69"></script>
-<script src="/eventlog.js?v=69"></script>
-  <script src="/sync.js?v=69"></script>
-  <script src="/fields.js?v=69"></script>
-  <script src="/attachments.js?v=69"></script>
-  <script src="/fields-ui.js?v=69"></script>
-  <script src="/attachments-ui.js?v=69"></script>
-  <script src="/idb-store.js?v=69"></script>
-  <script src="/remote-diff.js?v=69"></script>
-  <script src="/freshness.js?v=69"></script>
-  <script src="/badge.js?v=69"></script>
-  <script src="/push.js?v=69"></script>
-  <script src="/due.js?v=69"></script>
-  <script src="/autodone.js?v=69"></script>
-<script src="/outline.js?v=69"></script>
-  <script src="/reorder.js?v=69"></script>
-  <script src="/search.js?v=69"></script>
-  <script src="/themes.js?v=69"></script>
-<script src="/mascot.js?v=69"></script>
-<script src="/sparkle.js?v=69"></script>
-<script src="/app.js?v=69"></script>
-<script src="/ui-helpers.js?v=69"></script>
-<script src="/row-interactions.js?v=69"></script>
-<script src="/render-node.js?v=69"></script>
-<script src="/editors.js?v=69"></script>
-<script src="/tree-view.js?v=69"></script>
-<script src="/composer.js?v=69"></script>
-<script src="/next-up-ui.js?v=69"></script>
-<script src="/pull-refresh.js?v=69"></script>
-<script src="/more-panel.js?v=69"></script>
-  <script src="/trash.js?v=69"></script>
-  <script src="/search-ui.js?v=69"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+<script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
+<script defer src="/config.js?v=70"></script>
+<script defer src="/auth.js?v=70"></script>
+<script defer src="/eventlog.js?v=70"></script>
+  <script defer src="/sync.js?v=70"></script>
+  <script defer src="/fields.js?v=70"></script>
+  <script defer src="/attachments.js?v=70"></script>
+  <script defer src="/fields-ui.js?v=70"></script>
+  <script defer src="/attachments-ui.js?v=70"></script>
+  <script defer src="/idb-store.js?v=70"></script>
+  <script defer src="/remote-diff.js?v=70"></script>
+  <script defer src="/freshness.js?v=70"></script>
+  <script defer src="/badge.js?v=70"></script>
+  <script defer src="/push.js?v=70"></script>
+  <script defer src="/due.js?v=70"></script>
+  <script defer src="/autodone.js?v=70"></script>
+<script defer src="/outline.js?v=70"></script>
+  <script defer src="/reorder.js?v=70"></script>
+  <script defer src="/search.js?v=70"></script>
+  <script defer src="/themes.js?v=70"></script>
+<script defer src="/mascot.js?v=70"></script>
+<script defer src="/sparkle.js?v=70"></script>
+<script defer src="/app.js?v=70"></script>
+<script defer src="/ui-helpers.js?v=70"></script>
+<script defer src="/row-interactions.js?v=70"></script>
+<script defer src="/render-node.js?v=70"></script>
+<script defer src="/editors.js?v=70"></script>
+<script defer src="/tree-view.js?v=70"></script>
+<script defer src="/composer.js?v=70"></script>
+<script defer src="/next-up-ui.js?v=70"></script>
+<script defer src="/pull-refresh.js?v=70"></script>
+<script defer src="/more-panel.js?v=70"></script>
+  <script defer src="/trash.js?v=70"></script>
+  <script defer src="/search-ui.js?v=70"></script>
 </body>
 </html>

@@ -1,0 +1,10 @@
+# Direct dependencies. requirements.txt is the compiled lock (what the Dockerfile installs):
+#   uv pip compile requirements.in -o requirements.txt --python-version 3.13 --universal
+fastapi==0.141.1
+uvicorn==0.53.0
+python-multipart==0.0.32
+firebase-admin==7.6.0
+google-cloud-firestore==2.31.0
+google-cloud-storage==3.14.1
+google-cloud-tasks==2.24.0
+

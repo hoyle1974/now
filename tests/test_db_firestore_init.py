@@ -12,7 +12,7 @@ def test_init_creates_connection(mock_firestore_client):
     mock_firestore_client.return_value = mock_client
     mock_client.collection.return_value = mock_collection
 
-    db.init(memory=False)
+    db.init()
 
     mock_firestore_client.assert_called_once()
     mock_client.collection.assert_called_once_with("todos")
@@ -26,7 +26,7 @@ def test_get_conn_returns_client(mock_firestore_client):
     mock_firestore_client.return_value = mock_client
     mock_client.collection.return_value = mock_collection
 
-    db.init(memory=False)
+    db.init()
     conn = db.get_conn()
     assert conn is mock_client
     db.teardown()

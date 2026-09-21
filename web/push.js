@@ -40,8 +40,11 @@
   const tz = () => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
   const platform = () => (/iPhone|iPad|iPod/.test(root.navigator.userAgent) ? "ios" : "web");
 
+  // Same URL app.js registers at launch (one worker per app version; see sw.js).
+  const swUrl = () => "/sw.js?v=" + (typeof APP_VERSION === "string" ? APP_VERSION : "");
+
   async function token() {
-    const reg = await root.navigator.serviceWorker.register("/sw.js");
+    const reg = await root.navigator.serviceWorker.register(swUrl());
     await root.navigator.serviceWorker.ready;
     const opts = { serviceWorkerRegistration: reg };
     if (VAPID_KEY) opts.vapidKey = VAPID_KEY;

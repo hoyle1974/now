@@ -76,7 +76,7 @@ def _update(ref, data: dict):
         tx.update(ref, data)
 
 
-def init(memory: bool = False):
+def init():
     """Initialize Firestore connection"""
     global _client, _todos_collection, _tree_cache, _archive_checked
     _tree_cache = None

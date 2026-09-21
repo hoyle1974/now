@@ -297,6 +297,8 @@ svg {
   padding: 4px 4px 4px calc(6px + var(--shift));
   user-select: none;
   -webkit-user-select: none;
+  /* No iOS long-press callout: a long press starts a drag (see render-node.js). */
+  -webkit-touch-callout: none;
 }
 
 /* Hairline between rows inside a card, inset to the text column the way
@@ -1044,6 +1046,7 @@ body:has(#error:not([hidden])) {
 
 .chip {
   position: relative;
+  /* Visible height stays compact; the invisible ::after grows the hit area to 44pt. */
   display: inline-flex;
   align-items: center;
   min-height: 34px;
@@ -1076,6 +1079,8 @@ body:has(#error:not([hidden])) {
   flex-wrap: nowrap;
   gap: 6px;
 }
+
+.sheet .chip::after { inset: -6px -2px; }
 
 .sheet .chip {
   min-height: 32px;
@@ -1116,6 +1121,12 @@ body:has(#error:not([hidden])) {
   max-width: 640px;
   margin: 0 auto;
   padding: 8px max(16px, env(safe-area-inset-right, 0px)) 8px max(16px, env(safe-area-inset-left, 0px));
+}
+
+.chip::after {
+  content: "";
+  position: absolute;
+  inset: -5px -2px;
 }
 
 .segmented {
@@ -1661,7 +1672,7 @@ li.search-hit { cursor: default; }
 
 .sync-status { padding: 5px 12px; }
 
-.segmented-btn { min-height: 40px; }
+.segmented-btn { min-height: 44px; }
 
 .composer-send {
   width: 40px;

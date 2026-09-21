@@ -3,7 +3,7 @@ type: Backlog
 title: Roadmap and open items
 description: What is left to do for fork-friendliness and the zilch-gcp connection, and known loose ends.
 tags: [roadmap, fork, zilch, todo]
-timestamp: 2026-09-20T23:30:00Z
+timestamp: 2026-09-21T03:00:00Z
 ---
 Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Ordered roughly by value.
 
@@ -16,6 +16,6 @@ Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Order
 6. **History was rewritten on 2026-09-20** (git filter-repo, `main` and `optimistic-sync`) to replace the project id/number, Firebase web config, old Cloud Run URL and the owner's email with placeholders. Still true: commit author emails are the owner's; GitHub may keep old SHAs reachable until it garbage-collects (support can purge); local-only branches (`track-*`, `worktree-agent-*`) still hold the old history. No credential was ever committed.
 
 **Loose ends found during the review**
-- `db.init(memory=...)` parameter is vestigial. `requirements.txt` pins direct dependencies only (no lockfile).
+- Firebase still loads as the compat SDK (about 200 KB, cached by the service worker after the first launch); moving `auth.js`/`push.js` to the modular SDK would shrink cold start.
 - Every tree read after a write scans the whole `todos` collection (cached per revision); revisit past a few thousand todos.
 - zilch `tfplan` file is an untracked leftover in `../zilch-gcp`.

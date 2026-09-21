@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "69";
+const APP_VERSION = "70";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -34,6 +34,13 @@ function isStandalone() {
 
 logEvent("load", `page #${nextPageNumber()} v${APP_VERSION} ${document.visibilityState} ` +
   `online=${navigator.onLine} standalone=${isStandalone()}`);
+
+// Offline app shell + push worker (web/sw.js). Registered at every launch, not just
+// when reminders are on. Never let a failure here break the app.
+if ("serviceWorker" in navigator) {
+  navigator.serviceWorker.register(`/sw.js?v=${APP_VERSION}`)
+    .catch((e) => logEvent("sw", "register failed: " + (e && e.message)));
+}
 
 // True while the toast shows an apiFetch failure (the only thing apiFetch may clear).
 let apiErrorShown = false;
