@@ -4,6 +4,8 @@ in-memory dict in tests and local dev (when ATTACHMENTS_BUCKET is unset).
 Keys look like todos/{todo_id}/{attachment_id}. Metadata is kept on the todo,
 so this layer only moves bytes."""
 from __future__ import annotations
+
+import contextlib
 import datetime
 import os
 
@@ -15,7 +17,7 @@ class MemoryStore:
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
         self._objects[key] = (data, content_type)
-        self._times[key] = datetime.datetime.now(datetime.timezone.utc)
+        self._times[key] = datetime.datetime.now(datetime.UTC)
 
     def get(self, key: str) -> tuple[bytes, str] | None:
         return self._objects.get(key)
@@ -54,10 +56,8 @@ class GcsStore:
 
     def delete(self, key: str) -> None:
         from google.cloud.exceptions import NotFound
-        try:
+        with contextlib.suppress(NotFound):
             self._bucket.blob(key).delete()
-        except NotFound:
-            pass
 
     def delete_prefix(self, prefix: str) -> None:
         for blob in self._bucket.list_blobs(prefix=prefix):

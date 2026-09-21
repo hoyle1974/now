@@ -1,30 +1,33 @@
 # Firestore implementation of todo database
 from __future__ import annotations
-from app import models
-from app import blobstore
-from app import db_firestore_helpers
-from app import recurrence
+
+import contextlib
 import contextvars
-import threading
-import datetime
 import copy
+import datetime
 import json
 import logging
+import threading
 import time
 import uuid
-from typing import Callable
-from google.cloud import firestore
+from collections.abc import Callable
+from typing import Any
+
+from google.cloud import firestore  # type: ignore[attr-defined]
+
+from app import blobstore, db_firestore_helpers, models, recurrence
 
 log = logging.getLogger(__name__)
 
-_client = None
-_todos_collection = None
+_client: Any = None
+_todos_collection: Any = None  # set by init(); Any because it is None before then
 
 # Todos deleted for ARCHIVE_AFTER_DAYS move (subtree and all) out of "todos", so
 # the live collection, which every tree read scans, stays small.
 ARCHIVE_COLLECTION = "todos_archive"
 ARCHIVE_AFTER_DAYS = 30
-ARCHIVE_DOC = "archive"  # in REV_COLLECTION: {"last_success": iso, "lease_until": iso}, so instances don't repeat the sweep
+# In REV_COLLECTION: {"last_success": iso, "lease_until": iso}, so instances don't repeat the sweep.
+ARCHIVE_DOC = "archive"
 _ARCHIVE_CHECK_SECONDS = 24 * 3600
 _ARCHIVE_RETRY_SECONDS = 15 * 60  # in-process backoff after a failed run
 _ARCHIVE_LEASE = datetime.timedelta(minutes=15)  # how long a run may hold the claim
@@ -102,7 +105,7 @@ def teardown():
 
 
 def _now_utc() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(datetime.UTC)
 
 
 def get_rev() -> int:
@@ -155,7 +158,7 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) ->
                     "response_json": None if body is None else json.dumps(body),
                     "prev_rev": prev,
                     "rev": rev,
-                    "created_at": datetime.datetime.now(datetime.timezone.utc),
+                    "created_at": datetime.datetime.now(datetime.UTC),
                 })
             return status, body, prev, rev
         finally:
@@ -171,7 +174,7 @@ def prune_txn_log(hours: int = 24 * 30) -> int:
     (same txn_id kept in IndexedDB) for days; if the record were gone by the
     time it reconnects, the replay would run again and duplicate todos. 30 days
     is far past any realistic offline stretch and the records are tiny."""
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=hours)
+    cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
     removed = 0
     for doc in get_conn().collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
         doc.reference.delete()
@@ -198,7 +201,7 @@ def _child_ids(parent_id: str, include_deleted: bool = False) -> list[models.Tod
 
 def _next_order_idx(parent_id: str | None) -> int:
     docs = _child_docs(parent_id)
-    return max([d.get("order_idx") if d.get("order_idx") is not None else -1 for d in docs] or [-1]) + 1
+    return max((d["order_idx"] if d.get("order_idx") is not None else -1 for d in docs), default=-1) + 1
 
 
 def create_todo(todo: models.Todo):
@@ -341,7 +344,7 @@ def clear_completed() -> list[tuple[str, int]]:
         if tid not in all_done:
             all_done[tid] = False  # cycle guard
             all_done[tid] = live[tid].get("done", False) and all(
-                [check(c) for c in children.get(tid, [])])
+                check(c) for c in children.get(tid, []))
         return all_done[tid]
 
     cleared = []
@@ -405,6 +408,7 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
         pending.extend(d["todo_id"] for d in tree[node])
     siblings = _sorted_by_order(_child_docs(parent))
 
+    assert todo.repeat is not None  # callers check before spawning
     new_due = recurrence.next_due(todo.due_date, todo.repeat, today)
     shift = None if todo.due_date is None else new_due - todo.due_date
 
@@ -451,8 +455,8 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
     for i, sid in enumerate(ids):
         if sid != str(root.todo_id) and old_idx.get(sid) != i:
             _update(_todos_collection.document(sid), {"order_idx": i})
-    for copy in copies:
-        _set(_todos_collection.document(str(copy.todo_id)), db_firestore_helpers.todo_to_doc(copy))
+    for spawned in copies:
+        _set(_todos_collection.document(str(spawned.todo_id)), db_firestore_helpers.todo_to_doc(spawned))
 
     todo.spawned_id = root.todo_id
     todo.version += 1
@@ -612,7 +616,8 @@ def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
 
     return _doc_to_todo_with_children(doc.to_dict(), include_deleted_children=True)
 
-def split_into_children(todo: models.Todo, descriptions: list[str], due_date=None) -> tuple[models.Todo, list[tuple[str, int]]]:
+def split_into_children(todo: models.Todo, descriptions: list[str],
+                        due_date=None) -> tuple[models.Todo, list[tuple[str, int]]]:
     """Create child todos from descriptions.
 
     Returns the parent (child_ids and version updated) and the affected
@@ -651,7 +656,7 @@ def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
 def is_ancestor(ancestor_id: str, todo_id: str) -> bool:
     """True if ancestor_id is somewhere above todo_id in the tree (deleted included)."""
     seen: set[str] = set()
-    cur = todo_id
+    cur: str | None = todo_id
     while cur and cur not in seen:
         seen.add(cur)
         doc = get_links_graph_docs([cur])[cur]
@@ -680,7 +685,7 @@ def blocked_by_would_cycle(todo_id: str, new_blockers: list[str]) -> bool:
 
 def _aware(dt: datetime.datetime) -> datetime.datetime:
     """Stored timestamps should carry an offset; a naive one is taken as UTC."""
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=datetime.UTC)
 
 
 def _parse_aware(stamp: str) -> datetime.datetime:
@@ -824,10 +829,8 @@ def maybe_archive_expired() -> int:
             sweep_orphan_blobs()
         except Exception:
             _archive_checked = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
-            try:
+            with contextlib.suppress(Exception):  # the lease expires by itself
                 _finish_archive_run(started, ok=False)
-            except Exception:
-                pass  # the lease expires by itself
             raise
         _finish_archive_run(_now_utc(), ok=True)
         return moved

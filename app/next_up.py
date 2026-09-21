@@ -43,7 +43,7 @@ def _due(todo: models.Todo) -> datetime.datetime | None:
         due = due.replace(hour=23, minute=59, second=59)
     # _NO_DATE is naive, so an offset-aware due is compared as UTC wall time.
     if due.tzinfo is not None:
-        due = due.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+        due = due.astimezone(datetime.UTC).replace(tzinfo=None)
     return due
 
 
@@ -91,7 +91,8 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
     def open_blockers(todo: models.Todo) -> list[models.Todo]:
         """Open todos this one waits on: its own blocked_by plus its ancestors'."""
         found: dict[str, models.Todo] = {}
-        node, seen = todo, set()
+        node: models.Todo | None = todo
+        seen: set[str] = set()
         while node is not None and str(node.todo_id) not in seen:
             seen.add(str(node.todo_id))
             for bid in node.blocked_by:
@@ -102,7 +103,8 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
         return list(found.values())
 
     def under(todo: models.Todo, ancestor: models.Todo) -> bool:
-        node, seen = todo, set()
+        node: models.Todo | None = todo
+        seen: set[str] = set()
         while node is not None and str(node.todo_id) not in seen:
             if node.todo_id == ancestor.todo_id:
                 return True

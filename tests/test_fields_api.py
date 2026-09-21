@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app import db
+from app import db, models
 from app.auth import require_user
 
 app.dependency_overrides[require_user] = lambda: None
@@ -25,7 +25,11 @@ def patch(t, **body):
 
 def test_defaults():
     t = mk()
-    assert t["color"] is None and t["links"] == [] and t["blocked_by"] == [] and t["references"] == []
+    assert t["color"] in models.COLORS and t["links"] == [] and t["blocked_by"] == [] and t["references"] == []
+
+def test_new_root_gets_random_color():
+    root = mk()
+    assert root["color"] in models.COLORS
 
 def test_color_set_clear_invalid():
     t = mk()

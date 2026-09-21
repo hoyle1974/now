@@ -1,6 +1,8 @@
-from app import models
-import uuid
 import datetime
+import uuid
+
+from app import models
+
 
 def doc_to_todo(doc_dict: dict) -> models.Todo:
     """Convert Firestore document dict to Todo model"""
@@ -13,14 +15,15 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         order_idx=doc_dict.get("order_idx"),
         parent_id=None if doc_dict.get("parent_id") is None else models.TodoId(uuid.UUID(doc_dict["parent_id"])),
         deleted=doc_dict.get("deleted", False),
-        deleted_at=None if doc_dict.get("deleted_at") is None else datetime.datetime.fromisoformat(doc_dict["deleted_at"]),
+        deleted_at=(None if doc_dict.get("deleted_at") is None
+                    else datetime.datetime.fromisoformat(doc_dict["deleted_at"])),
         collapsed=doc_dict.get("collapsed", False),
         repeat=doc_dict.get("repeat"),
         spawned_id=None if doc_dict.get("spawned_id") is None else models.TodoId(uuid.UUID(doc_dict["spawned_id"])),
         # Docs written before versioning existed have no field: treat as version 1.
         version=doc_dict.get("version", 1),
         color=doc_dict.get("color"),
-        links=[models.Link(**l) for l in doc_dict.get("links") or []],
+        links=[models.Link(**link) for link in doc_dict.get("links") or []],
         blocked_by=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("blocked_by") or []],
         references=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("references") or []],
         attachments=[models.Attachment(**a) for a in doc_dict.get("attachments") or []],
@@ -44,7 +47,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "spawned_id": None if todo.spawned_id is None else str(todo.spawned_id),
         "version": todo.version,
         "color": todo.color,
-        "links": [{"url": l.url, "label": l.label} for l in todo.links],
+        "links": [{"url": link.url, "label": link.label} for link in todo.links],
         "blocked_by": [str(i) for i in todo.blocked_by],
         "references": [str(i) for i in todo.references],
         "attachments": [a.model_dump() for a in todo.attachments],

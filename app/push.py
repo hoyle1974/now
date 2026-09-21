@@ -1,15 +1,19 @@
 """Push reminders: decide what to send (pure) and send it (thin)."""
 from __future__ import annotations
+
 import base64
 import datetime
 import hashlib
 import json
 import logging
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
+from typing import Protocol
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
 from pydantic import BaseModel, Field
+
 from app import models
 
 MAX_TITLES = 3
@@ -63,8 +67,13 @@ def _zone(name: str) -> ZoneInfo:
     return ZoneInfo(name) if valid_tz(name) else ZoneInfo("UTC")
 
 
-def _local_due(todo: models.Todo, zone: ZoneInfo) -> datetime.datetime:
+class _HasDue(Protocol):
+    due_date: datetime.datetime | None
+
+
+def _local_due(todo: _HasDue, zone: ZoneInfo) -> datetime.datetime:
     due = todo.due_date
+    assert due is not None  # callers only pass timed todos
     return due.astimezone(zone).replace(tzinfo=None) if due.tzinfo else due
 
 
@@ -205,9 +214,11 @@ def budget_push(payload: dict) -> Push | None:
     kind = "forecast" if actual is None else "actual"
     month = str(payload.get("costIntervalStart", ""))[:7]
     if kind == "forecast":
-        body = f"Forecast to reach {fraction:.0%} of the {cur}{budget:.2f} budget this month (spent {cur}{cost:.2f} so far). Run scripts/cost-check.sh."
+        body = (f"Forecast to reach {fraction:.0%} of the {cur}{budget:.2f} budget this month "
+                f"(spent {cur}{cost:.2f} so far). Run scripts/cost-check.sh.")
     else:
-        body = f"{cur}{cost:.2f} spent of the {cur}{budget:.2f} budget ({fraction:.0%}) this month. Run scripts/cost-check.sh."
+        body = (f"{cur}{cost:.2f} spent of the {cur}{budget:.2f} budget ({fraction:.0%}) this month. "
+                "Run scripts/cost-check.sh.")
     return Push(f"budget:{month}:{kind}:{fraction:g}", "GCP COST ALERT", body)
 
 

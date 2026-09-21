@@ -1,7 +1,9 @@
 """Render the open, dated todos as an iCalendar (RFC 5545) feed for calendar apps
 to subscribe to. Read-only; see docs/okf/features/calendar-feed.md."""
 from __future__ import annotations
+
 import datetime
+
 from app import models
 
 TIMED_MINUTES = 30
@@ -9,7 +11,7 @@ _MIDNIGHT = datetime.time(0, 0)
 
 
 def escape_text(value: str) -> str:
-    return (value.replace("\\", "\\\\").replace(";", "\;").replace(",", "\\,")
+    return (value.replace("\\", "\\\\").replace(";", r"\;").replace(",", "\\,")
             .replace("\r\n", "\\n").replace("\n", "\\n").replace("\r", "\\n"))
 
 
@@ -31,6 +33,7 @@ def fold(line: str) -> str:
 
 def _event(todo: models.Todo, parent_title: str | None, stamp: str) -> list[str]:
     due = todo.due_date
+    assert due is not None  # callers only pass dated todos
     lines = ["BEGIN:VEVENT", f"UID:{todo.todo_id}@now", f"DTSTAMP:{stamp}", f"SEQUENCE:{todo.version}"]
     if due.time() == _MIDNIGHT:  # all-day (see docs/okf/features/due-time.md)
         lines.append(f"DTSTART;VALUE=DATE:{due:%Y%m%d}")

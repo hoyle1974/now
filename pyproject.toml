@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003", "RUF005"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's Depends()/Header()/Query()/File() defaults are the framework's idiom.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Header", "fastapi.Query", "fastapi.File"]
+
+[tool.mypy]
+python_version = "3.13"
+plugins = ["pydantic.mypy"]
+ignore_missing_imports = true
+files = ["app"]
+disable_error_code = ["attr-defined"]  # google.cloud namespace packages ship no stubs
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,11 +1,13 @@
 """Single-user gate: every API request must carry a Firebase ID token for
 ALLOWED_EMAIL. Static files stay public (they hold no data)."""
 from __future__ import annotations
+
 import hmac
 import os
 import re
-from fastapi import HTTPException, Request
+
 import firebase_admin
+from fastapi import HTTPException, Request
 from firebase_admin import auth as fb_auth
 
 # The one Google account allowed in. No default: an unset value denies everyone
@@ -48,7 +50,9 @@ def calendar_feed_path() -> str | None:
 
 # Cloud Scheduler calls these with a Google-signed OIDC token. Read at call time
 # so the deployed env vars (and tests) decide; either unset turns the route off.
-_SCHEDULER_PATHS = {"/internal/notify", "/internal/notify-todo", "/internal/budget-alert"}  # Scheduler (daily digest), Cloud Tasks (heads-ups), Pub/Sub (budget alerts)
+# Callers: Scheduler (daily digest), Cloud Tasks (heads-ups), Pub/Sub (budget alerts).
+_SCHEDULER_PATHS = {"/internal/notify", "/internal/notify-todo", "/internal/budget-alert"}
+
 
 def _verify_oidc(token: str, audience: str) -> dict:
     from google.auth.transport import requests as google_requests
@@ -66,7 +70,7 @@ def verify_scheduler(request: Request) -> None:
     try:
         claims = _verify_oidc(header[7:].strip(), audience)
     except Exception:
-        raise HTTPException(401, "Invalid scheduler token")
+        raise HTTPException(401, "Invalid scheduler token") from None
     if not claims.get("email_verified") or (claims.get("email") or "").lower() != caller:
         raise HTTPException(403, "Not the scheduler")
 
@@ -86,7 +90,7 @@ def require_user(request: Request) -> None:
     try:
         claims = fb_auth.verify_id_token(header[7:].strip())
     except Exception:
-        raise HTTPException(401, "Invalid or expired token")
+        raise HTTPException(401, "Invalid or expired token") from None
     email = (claims.get("email") or "").lower()
     if not ALLOWED_EMAIL or not claims.get("email_verified") or email != ALLOWED_EMAIL:
         raise HTTPException(403, "Not allowed")

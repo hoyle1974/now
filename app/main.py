@@ -1,24 +1,20 @@
 from __future__ import annotations
-from fastapi import BackgroundTasks, Depends, FastAPI, File, HTTPException, Header, Query, Response, UploadFile
-from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
+
 import contextlib
 import datetime
 import logging
+import random
 import re
-from pathlib import Path
-from typing import Callable
 import uuid
-from app import attachments
-from app import blobstore
-from app import db
-from app import ics
-from app import models
-from app import next_up
-from app import push
-from app import tasks
-from app import auth
+from collections.abc import Callable
+from pathlib import Path
+
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Response, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from app import attachments, auth, blobstore, db, ics, models, next_up, push, tasks
 from app.auth import require_user
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -75,7 +71,7 @@ def _parse_if_match(value: str | None) -> int | None:
     try:
         return int(value.strip().strip('"'))
     except ValueError:
-        raise HTTPException(400, "If-Match must be an integer version")
+        raise HTTPException(400, "If-Match must be an integer version") from None
 
 def _reply(status: int, body: dict | None, prev: int | None = None, rev: int | None = None) -> Response:
     # X-Rev-Prev / X-Rev let the client notice writes made elsewhere: if
@@ -129,18 +125,18 @@ def unregister_push_device(body: push.TokenOnly) -> dict:
 @app.post("/internal/notify")
 def notify() -> dict:
     """Cloud Scheduler tick (OIDC-verified in require_user): send due reminders."""
-    return push.run_notify(datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
+    return push.run_notify(datetime.datetime.now(datetime.UTC), send=push.send_fcm)
 
 @app.post("/internal/budget-alert")
 def budget_alert(body: push.PubSubEnvelope) -> dict:
     """Pub/Sub push of a Cloud Billing budget notification (OIDC-verified in require_user):
     tell the owner's devices immediately (rule #1: zero GCP cost)."""
-    return push.run_budget_alert(body.message.data, datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
+    return push.run_budget_alert(body.message.data, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
 
 @app.post("/internal/notify-todo")
 def notify_todo(body: push.HeadsUp) -> dict:
     """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user)."""
-    return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
+    return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
 
 def _saved(result: tuple, background: BackgroundTasks, todo_of: Callable[[dict], dict | None] = lambda body: body,
            schedule: bool = True) -> Response:
@@ -156,7 +152,8 @@ def _saved(result: tuple, background: BackgroundTasks, todo_of: Callable[[dict],
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
     def create() -> tuple[int, dict | None]:
-        todo = models.Todo(title = body.title)
+        # A new top-level project gets a random colour so projects are told apart at a glance.
+        todo = models.Todo(title=body.title, color=random.choice(models.COLORS))
         if body.due_date:
             todo.due_date = body.due_date
         db.create_todo(todo)
@@ -210,7 +207,8 @@ def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo]
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
     # on Cloud Run with request-based billing (what we deploy; always-on CPU costs
     # about $30/month) CPU may be throttled once the response is out, so the sweep
-    # can crawl until the next request (the daily reminder job, or your next visit); the claim is a 15-minute lease, so a stalled run is simply retaken.
+    # can crawl until the next request (the daily reminder job, or your next visit);
+    # the claim is a 15-minute lease, so a stalled run is simply retaken.
     background.add_task(_housekeeping)
     return db.get_tree(rev)
 
@@ -321,11 +319,11 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
 
 @app.post("/todos/{todo_id}/repeat", response_model=None)
 def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
-                body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
+                body: models.TodoRepeatRequest | None = None,
                 x_txn_id: str | None = Header(None)) -> Response:
     """Create the next occurrence of a repeating todo (call it after completing
     the original). A todo spawns at most once: later calls return the same copy."""
-    today = body.today or datetime.datetime.now(datetime.timezone.utc).date()
+    today = (body and body.today) or datetime.datetime.now(datetime.UTC).date()
 
     def action(todo: models.Todo) -> dict:
         if todo.repeat is None:
@@ -348,8 +346,8 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
             moved = db.reparent_todo(todo, body.parent_id, body.index)
         except db.ReparentError as e:
             if e.kind == "cycle":
-                raise HTTPException(400, "cycle")
-            raise HTTPException(404, "parent not found")
+                raise HTTPException(400, "cycle") from e
+            raise HTTPException(404, "parent not found") from e
         return jsonable_encoder(moved)
 
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
@@ -465,7 +463,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
     result = db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action))
     if result[0] == 200 and body.due_date:
         # The new children (affected[1:]) all carry the split's due date; the parent is unchanged.
-        for child in result[1]["affected"][1:]:
+        for child in result[1]["affected"][1:]:  # type: ignore[index]
             background.add_task(tasks.schedule_from_body,
                                 {"todo_id": child["todo_id"], "due_date": jsonable_encoder(body.due_date)})
     return _reply(*result)
@@ -481,7 +479,8 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except db.MoveError as e:  # only the deliberate refusals; real failures propagate
-            raise HTTPException(404 if e.kind == "missing" else 400, f"Cannot move: {e}" if e.kind != "missing" else "todo not found")
+            detail = "todo not found" if e.kind == "missing" else f"Cannot move: {e}"
+            raise HTTPException(404 if e.kind == "missing" else 400, detail) from e
         return jsonable_encoder(moved)
 
     return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))

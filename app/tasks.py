@@ -9,13 +9,15 @@ moved since. Everything here is best-effort and never raises: a Cloud Tasks outa
 fail a save. Off unless REMINDER_QUEUE (plus NOTIFY_AUDIENCE / NOTIFY_CALLER) is set.
 """
 from __future__ import annotations
+
+import contextlib
 import datetime
 import hashlib
 import json
 import logging
 import os
-from typing import Callable
-from zoneinfo import ZoneInfo
+from collections.abc import Callable
+
 from app import push
 
 log = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ log = logging.getLogger(__name__)
 LEAD = datetime.timedelta(hours=1)
 HORIZON = datetime.timedelta(hours=24)  # tasks are made at most this far ahead of their fire time
 HEADS_UP_PATH = "/internal/notify-todo"
-_UTC = datetime.timezone.utc
+_UTC = datetime.UTC
 _client = None
 
 
@@ -83,10 +85,8 @@ def create_task(todo_id: str, due_iso: str, fire_at: datetime.datetime) -> bool:
             headers={"Content-Type": "application/json"},
             body=json.dumps({"todo_id": todo_id, "due": due_iso}).encode(),
             oidc_token=tasks_v2.OidcToken(service_account_email=caller, audience=url)))
-    try:
+    with contextlib.suppress(exceptions.AlreadyExists):
         _client.create_task(request={"parent": queue, "task": task}, timeout=5)
-    except exceptions.AlreadyExists:
-        pass
     return True
 
 

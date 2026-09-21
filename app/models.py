@@ -1,17 +1,19 @@
 from __future__ import annotations
-from pydantic import BaseModel, Field, RootModel, field_serializer, field_validator
-from typing import Annotated, Literal, get_args
-from uuid import uuid4
-import uuid
+
 import datetime
+import uuid
+from typing import Annotated, Literal, get_args
 from urllib.parse import urlparse
+from uuid import uuid4
+
+from pydantic import BaseModel, Field, RootModel, field_serializer, field_validator
 
 
 def utc_now() -> datetime.datetime:
     """Now in UTC as a naive datetime: the form every stored timestamp already
     has (a server clock in another timezone must not leak into the data), and
     naive and aware values can't be compared, so the form must not change."""
-    return datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+    return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 
 class TodoId(RootModel[uuid.UUID]):
