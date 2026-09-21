@@ -9,8 +9,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from pydantic import BaseModel, Field
 from app import models
 
-DIGEST_HOUR = 9
-LEAD = datetime.timedelta(hours=1)
 MAX_TITLES = 3
 MARKER_TTL = datetime.timedelta(days=3)
 
@@ -61,45 +59,23 @@ def _local_due(todo: models.Todo, zone: ZoneInfo) -> datetime.datetime:
     return due.astimezone(zone).replace(tzinfo=None) if due.tzinfo else due
 
 
-def _is_timed(due: datetime.datetime) -> bool:
-    return due.time() != datetime.time(0, 0)
-
-
 def plan_device(dev_id: str, tz: str, now_utc: datetime.datetime,
                 todos: list[models.Todo], sent: Callable[[str], list[str] | None]) -> list[Push]:
-    """What to send this device right now. `sent(key)` returns the todo ids stored
+    """What to send this device right now: at most one digest per device-local day
+    (due today or overdue). The Scheduler decides *when* the tick runs; the device's
+    timezone only decides which day "today" is. `sent(key)` returns the todo ids stored
     with an existing marker, or None when there is none."""
     zone = _zone(tz)
-    now = now_utc.astimezone(zone).replace(tzinfo=None)
-    if now.hour < DIGEST_HOUR:
-        return []
-    today = now.date()
-    nine = datetime.datetime.combine(today, datetime.time(DIGEST_HOUR))
-    open_ = [(t, _local_due(t, zone)) for t in todos if not t.done and not t.deleted and t.due_date]
-    out: list[Push] = []
-
+    today = now_utc.astimezone(zone).date()
     dkey = f"digest:{today.isoformat()}:{dev_id}"
-    prior = sent(dkey)
-    digest_ids = set(prior or [])
-    if prior is None:
-        due = sorted(((d, t) for t, d in open_ if d.date() <= today), key=lambda p: p[0])
-        ids = tuple(str(t.todo_id) for _, t in due)
-        titles = ", ".join(t.title for _, t in due[:MAX_TITLES])
-        if len(due) > MAX_TITLES:
-            titles += f" +{len(due) - MAX_TITLES} more"
-        out.append(Push(dkey, f"{len(due)} due today", titles, ids, silent=not due))
-        digest_ids = set(ids)
-
-    for t, d in open_:
-        if not _is_timed(d) or not datetime.timedelta(0) < d - now <= LEAD:
-            continue
-        key = f"soon:{t.todo_id}:{t.due_date.isoformat()}:{dev_id}"
-        if sent(key) is not None:
-            continue
-        if d - LEAD < nine and str(t.todo_id) in digest_ids:
-            continue  # its window opened overnight: the digest already covers it
-        out.append(Push(key, t.title, f"Due at {d.strftime('%-I:%M %p')}, in about an hour"))
-    return out
+    if sent(dkey) is not None:
+        return []
+    due = sorted(((d, t) for t in todos if not t.done and not t.deleted and t.due_date
+                  for d in [_local_due(t, zone)] if d.date() <= today), key=lambda p: p[0])
+    titles = ", ".join(t.title for _, t in due[:MAX_TITLES])
+    if len(due) > MAX_TITLES:
+        titles += f" +{len(due) - MAX_TITLES} more"
+    return [Push(dkey, f"{len(due)} due today", titles, tuple(str(t.todo_id) for _, t in due), silent=not due)]
 
 
 def send_fcm(token: str, p: Push) -> None:
@@ -120,7 +96,7 @@ def send_fcm(token: str, p: Push) -> None:
 
 
 def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | None = None) -> dict:
-    """One scheduler tick. Reads only todos due within two days (or overdue), and
+    """One scheduler tick (once a day). Reads only todos due within two days (or overdue), and
     nothing at all when no device is registered. The marker is written before the
     send, so a failure loses one push rather than repeating it."""
     from app import db

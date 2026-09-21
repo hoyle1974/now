@@ -185,10 +185,9 @@ def _housekeeping() -> None:
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
-    # on Cloud Run with request-based billing (the default) CPU may be throttled
-    # once the response is out, so the sweep can crawl until the next request;
-    # the claim is a 15-minute lease, so a stalled run is simply retaken. Deploy
-    # with --no-cpu-throttling for it to finish promptly.
+    # on Cloud Run with request-based billing (what we deploy; always-on CPU costs
+    # about $30/month) CPU may be throttled once the response is out, so the sweep
+    # can crawl until the next request (the daily reminder job, or your next visit); the claim is a 15-minute lease, so a stalled run is simply retaken.
     background.add_task(_housekeeping)
     return db.get_tree(rev)
 

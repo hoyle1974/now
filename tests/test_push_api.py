@@ -133,12 +133,15 @@ def test_run_notify_deletes_dead_device():
     assert db.list_push_devices() == []
 
 
-def test_run_notify_sends_heads_up_for_timed_todo():
+def test_run_notify_sends_one_digest_to_each_device_and_no_heads_up():
     register()
-    add_todo("dentist", "2026-09-19T15:00:00")
+    db.upsert_push_device(push.device_id("tok2"), "tok2", "America/New_York", "web")
+    add_todo("dentist", "2026-09-19T15:00:00")  # timed, later today: listed in the digest, no extra heads-up
     fake = Fake()
-    push.run_notify(dt.datetime(2026, 9, 19, 21, 30, tzinfo=UTC), send=fake)  # 14:30 LA
-    assert ("tok", "dentist") in fake.sent
+    assert push.run_notify(dt.datetime(2026, 9, 19, 21, 30, tzinfo=UTC), send=fake) == {"devices": 2, "sent": 2}
+    assert sorted(fake.sent) == [("tok", "1 due today"), ("tok2", "1 due today")]
+    push.run_notify(dt.datetime(2026, 9, 19, 22, 30, tzinfo=UTC), send=fake)
+    assert len(fake.sent) == 2
 
 
 # ---- scheduler auth ----

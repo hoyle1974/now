@@ -34,7 +34,7 @@ async function copyText(text) {
   return ok;
 }
 
-// Reminders (push): a morning digest and a heads-up an hour before timed todos.
+// Reminders (push): one morning digest of what is due today or overdue.
 // See push.js; every failure is logged and swallowed, never shown as a break.
 (() => {
   const btn = document.getElementById("push-toggle");

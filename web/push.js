@@ -1,6 +1,6 @@
 // Reminders: web push through Firebase Cloud Messaging. The pure helpers run
 // under `node --test`; enable/refresh/disable need a browser. The server sends
-// a 9am digest and 1-hour heads-ups (see app/push.py); this only registers the
+// one daily digest (see app/push.py); this only registers the
 // device. Nothing here may break the app: callers catch every failure.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {

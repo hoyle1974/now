@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T01:00:00Z
+timestamp: 2026-09-21T02:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -21,7 +21,7 @@ timestamp: 2026-09-21T01:00:00Z
 - **Sync:** `sync.js` (outbox), `idb-store.js` (IndexedDB), `freshness.js` (remote-change checks).
 - **Domain helpers:** `due.js` ([due time](../features/due-time.md)), `autodone.js` ([auto-done](../features/auto-done.md)), `badge.js` (icon badge), `trash.js` ([trash](../features/trash-archive.md)), `fields.js` / `fields-ui.js` / `fields.css` ([fields](../features/fields.md)), `attachments.js` / `attachments-ui.js` ([attachments](../features/attachments.md)), `search.js` / `search-ui.js`, `reorder.js` (drag-drop → reparent, [ordering](../features/ordering-nesting.md)), `outline.js`, `eventlog.js` ([event log](../features/event-log.md)).
 - **Platform:** `auth.js` (sign-in), `config.js` (git-ignored, from `config.example.js`; [forking](../ops/forking.md)), `push.js` + `sw.js` ([push reminders](../features/push-reminders.md); `sw.js` does no caching), `manifest.json`, `style.css`.
-- **Look and feel:** `themes.js` (per-device accent themes, opt-in completion sound), `sparkle.js` (confetti on completion; no-op under reduced motion), `mascot.js` (idle mascot "Nudge", tinted by `--accent`).
+- **Look and feel:** `themes.js` (per-device accent themes, opt-in completion sound), `sparkle.js` (confetti on completion; no-op under reduced motion), `mascot.js` (idle mascot "Nudge", tinted by `--accent`; `react(text, {force})` for announcements), `remote-diff.js` (what changed between two trees, for the remote-change announcement in [sync](../features/sync-model.md)).
 
 **Client behaviours worth knowing**
 - Toast (`#error`): `apiFetch` only clears an error it showed itself (`apiErrorShown`), never sync notices or the Undo toast; `claimToast` owns the shared element.

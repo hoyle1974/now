@@ -242,12 +242,20 @@
   // busy (sheet/menu/typing), away, or while he's already up.
   const lastReact = {};
   let lastAny = 0;
-  function react(text, { key = text, cooldown = 60000, delay = 900, happy = true } = {}) {
+  // force: for news the user asked to hear about (another device wrote). It skips
+  // the polite limits above and interrupts a bubble that is already up, but still
+  // keeps quiet when the page is hidden, the mascot is off or motion is reduced.
+  function react(text, { key = text, cooldown = 60000, delay = 900, happy = true, force = false } = {}) {
     setTimeout(() => {
-      if (!enabled() || reduced() || up || document.hidden || quiet()) return;
-      const now = Date.now();
-      if (now - lastAny < 10000 || now - (lastReact[key] || 0) < cooldown) return;
-      lastAny = lastReact[key] = now;
+      if (!enabled() || reduced() || document.hidden) return;
+      if (force) {
+        if (up) hide();
+      } else {
+        if (up || quiet()) return;
+        const now = Date.now();
+        if (now - lastAny < 10000 || now - (lastReact[key] || 0) < cooldown) return;
+      }
+      lastAny = lastReact[key] = Date.now();
       show({ text, happy });
     }, delay);
   }

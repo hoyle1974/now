@@ -3,13 +3,15 @@
 # service (ALLOWED_EMAIL, ATTACHMENTS_BUCKET, WIDGET_TOKEN, NOTIFY_*) are kept.
 # PROJECT / REGION / SERVICE come from scripts/lib/config.sh (.now.env, .zilch.config).
 #
-# --no-cpu-throttling: the archive sweep runs after a response is sent (see
-# _load_tree in app/main.py) and would crawl if CPU were throttled between requests.
+# --cpu-throttling (request-based billing): CPU is billed only while a request is being
+# served. Never use --no-cpu-throttling: an always-allocated instance is billed around the
+# clock (about $30/month; it was measured while the reminder job still ran every 10 minutes). The archive sweep that runs
+# after a response (see _load_tree in app/main.py) simply finishes on the next request.
 set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/lib/config.sh
 
-args=(--source . --project "$PROJECT" --region "$REGION" --no-cpu-throttling)
+args=(--source . --project "$PROJECT" --region "$REGION" --cpu-throttling)
 # Set these only when exporting them, e.g. ALLOWED_EMAIL=me@example.com ./deploy.sh
 ALLOWED_EMAIL="${ALLOWED_EMAIL:-$(_cfg .now.env ALLOWED_EMAIL)}"
 env_vars=""

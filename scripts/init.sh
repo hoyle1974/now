@@ -7,6 +7,7 @@
 #   scripts/init.sh --push       # also set up push reminders (Scheduler job, IAM)
 #   scripts/init.sh --widget     # also create the lock screen widget token (Secret Manager)
 #   scripts/init.sh --calendar   # also create the private calendar feed (scripts/setup-calendar.sh)
+# Cost guards (image cleanup policy + monthly budget alert, scripts/setup-cost-guards.sh) always run.
 #
 # Prerequisites: gcloud and firebase logged in; a project with billing and a Firestore
 # database (zilch creates both); a Firebase project on it (console: "Add Firebase").
@@ -132,6 +133,9 @@ if [ "$CALENDAR" = 1 ]; then
   say "5d Calendar feed (secret calendar-token; unlocks only GET /calendar/<token>.ics)"
   run scripts/setup-calendar.sh
 fi
+
+say "5e Cost guards (Artifact Registry cleanup policy, monthly budget alert)"
+run scripts/setup-cost-guards.sh || echo "   cost guards incomplete (see above); rerun scripts/setup-cost-guards.sh" >&2
 
 say "6/6 Firebase Hosting (serves the app on $HOSTING_SITE.web.app)"
 run firebase deploy --only hosting --project "$PROJECT"

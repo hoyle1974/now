@@ -46,12 +46,25 @@ else
   has NOTIFY_AUDIENCE && has NOTIFY_CALLER && ok "env NOTIFY_* (reminders)" || warn "NOTIFY_* unset (reminders off: scripts/setup-push.sh)"
   url="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format='value(status.url)' 2>/dev/null)"
   code="$(curl -s -o /dev/null -w '%{http_code}' "$url/health" 2>/dev/null || true)"
+  [ "$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format="value(spec.template.metadata.annotations['run.googleapis.com/cpu-throttling'])" 2>/dev/null)" = "true" ] \
+    && ok "request-based billing (CPU throttled between requests)" \
+    || fail "always-on CPU is on: about \$30/month with the reminder job (gcloud run services update $SERVICE --cpu-throttling)"
   [ "$code" = "200" ] && ok "GET /health 200" || fail "GET /health returned ${code:-no response}"
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/todos/root" 2>/dev/null || true)" = "401" ] \
     && ok "API refuses unauthenticated requests" || fail "API did not answer 401 without a token"
 fi
 bucket="$(gcloud storage buckets list --project "$PROJECT" --filter="name:${PROJECT}-attachments" --format='value(name)' 2>/dev/null)"
 [ -n "$bucket" ] && ok "attachments bucket" || warn "no ${PROJECT}-attachments bucket (scripts/create-bucket.sh)"
+
+echo "cost"
+ACCOUNT="$(gcloud billing projects describe "$PROJECT" --format='value(billingAccountName)' 2>/dev/null | sed 's|billingAccounts/||')"
+if [ -n "$ACCOUNT" ] && gcloud billing budgets list --billing-account "$ACCOUNT" --project "$PROJECT" --format='value(displayName)' 2>/dev/null | grep -q .; then
+  ok "a budget exists on the billing account"
+else
+  warn "no budget visible (scripts/setup-cost-guards.sh)"
+fi
+gcloud artifacts repositories describe cloud-run-source-deploy --project "$PROJECT" --location "$REGION" --format='value(cleanupPolicies)' 2>/dev/null | grep -q . \
+  && ok "Artifact Registry cleanup policy" || warn "no image cleanup policy on cloud-run-source-deploy (scripts/setup-cost-guards.sh)"
 
 echo "client config"
 if [ -f web/config.js ]; then

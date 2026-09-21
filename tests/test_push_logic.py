@@ -22,10 +22,6 @@ def plan(now_utc, todos, tz=LA, sent=None):
 NINE_LA = "2026-09-19T16:00:00"
 
 
-def test_nothing_before_nine_local():
-    assert plan("2026-09-19T15:59:00", [todo("a", "2026-09-19")]) == []
-
-
 def test_digest_lists_today_and_overdue_with_count():
     todos = [todo("today", "2026-09-19"), todo("late", "2026-09-17T10:00:00"),
              todo("later", "2026-09-20"), todo("done", "2026-09-19", done=True), todo("none", None)]
@@ -50,45 +46,21 @@ def test_no_second_digest_when_marker_exists():
     assert plan(NINE_LA, [todo("a", "2026-09-19")], sent={"digest:2026-09-19:dev": ["x"]}) == []
 
 
-def test_heads_up_within_the_hour_only():
-    # 12:00 LA on the 19th is 19:00 UTC; a 12:45 todo is 45 min away, 13:30 is 90 min away.
-    out = plan("2026-09-19T19:00:00", [todo("soon", "2026-09-19T12:45:00"), todo("far", "2026-09-19T13:30:00")],
-               sent={"digest:2026-09-19:dev": []})
-    assert [p.title for p in out] == ["soon"]
-    assert out[0].key == "soon:" + str(out[0].key.split(":")[1]) + ":2026-09-19T12:45:00:dev"
-
-
-def test_date_only_never_gets_a_heads_up():
-    assert plan("2026-09-19T19:00:00", [todo("allday", "2026-09-19")], sent={"digest:2026-09-19:dev": []}) == []
-
-
-def test_heads_up_not_repeated_once_marked():
-    t = todo("soon", "2026-09-19T12:45:00")
-    key = f"soon:{t.todo_id}:2026-09-19T12:45:00:dev"
-    assert plan("2026-09-19T19:00:00", [t], sent={"digest:2026-09-19:dev": [], key: []}) == []
-
-
-def test_overnight_window_folds_into_the_digest():
-    # Due 09:30 LA: its window opened at 08:30, before the digest hour, and the digest lists it.
-    t = todo("early", "2026-09-19T09:30:00")
-    out = plan(NINE_LA, [t])
-    assert [p.key for p in out] == ["digest:2026-09-19:dev"]
-
-
-def test_afternoon_todo_in_the_digest_still_gets_its_heads_up():
-    t = todo("three", "2026-09-19T15:00:00")
-    digest = {"digest:2026-09-19:dev": [str(t.todo_id)]}
-    out = plan("2026-09-19T21:30:00", [t], sent=digest)  # 14:30 LA
-    assert [p.title for p in out] == ["three"]
-
-
 def test_timezone_is_respected():
     # The same instant: 09:00 in Los Angeles, 12:00 in New York.
     la = plan(NINE_LA, [todo("a", "2026-09-19")], tz=LA)
     ny = plan(NINE_LA, [todo("a", "2026-09-19")], tz="America/New_York")
     assert la[0].key == ny[0].key == "digest:2026-09-19:dev"
-    assert plan("2026-09-19T15:30:00", [todo("a", "2026-09-19")], tz="America/New_York")  # 11:30 NY: after nine
-    assert plan("2026-09-19T15:30:00", [todo("a", "2026-09-19")], tz=LA) == []          # 08:30 LA: before nine
+    # 02:00 UTC on the 20th is still the 19th in LA but already the 20th in Tokyo.
+    late = "2026-09-20T02:00:00"
+    assert plan(late, [todo("a", "2026-09-19")], tz=LA)[0].key == "digest:2026-09-19:dev"
+    assert plan(late, [todo("a", "2026-09-19")], tz="Asia/Tokyo")[0].key == "digest:2026-09-20:dev"
+
+
+def test_no_hour_gate_and_no_heads_up():
+    # A manual or retried tick at any hour still sends the day's digest; timed todos get nothing extra.
+    out = plan("2026-09-19T15:59:00", [todo("t", "2026-09-19T15:00:00")])
+    assert [p.key for p in out] == ["digest:2026-09-19:dev"]
 
 
 def test_bad_timezone_falls_back_to_utc():

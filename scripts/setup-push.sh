@@ -8,9 +8,9 @@ set -euo pipefail
 source "$(dirname "$0")/lib/config.sh"   # PROJECT, REGION, SERVICE
 JOB="${JOB:-now-notify}"
 CALLER_NAME="${CALLER_NAME:-now-notify}"
-# Daytime only, every 10 minutes; the 9:00 rule itself uses each device's own timezone.
-SCHEDULE="${SCHEDULE:-*/10 6-23 * * *}"
-# Timezone of the schedule window: SCHEDULE_TZ, else .now.env, else this machine'"'"'s, else UTC.
+# One digest a day at 9:00. Each device's own timezone only decides which day "today" is.
+SCHEDULE="${SCHEDULE:-0 9 * * *}"
+# Timezone the 9:00 is in: SCHEDULE_TZ, else .now.env, else this machine'"'"'s, else UTC.
 SCHEDULE_TZ="${SCHEDULE_TZ:-$(_cfg .now.env SCHEDULE_TZ)}"
 SCHEDULE_TZ="${SCHEDULE_TZ:-$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')}"
 SCHEDULE_TZ="${SCHEDULE_TZ:-UTC}"

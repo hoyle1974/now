@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "68";
+const APP_VERSION = "69";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -203,15 +203,20 @@ function setPhase(next) {
     phaseTimer = setTimeout(() => setPhase("idle"), MIN_PHASE_MS - held);
     return;
   }
-  const wasRefreshing = phase === "refreshing";
   phase = next;
   phaseSince = performance.now();
   renderSyncStatus();
-  // The list was re-downloaded because another device changed it (not the
-  // routine refresh at launch): let the mascot mention it.
-  if (wasRefreshing && next === "idle" && performance.now() > 15000 && window.Mascot) {
-    window.Mascot.react("Fresh changes from your other device \u2728", { key: "remote", cooldown: 120000 });
-  }
+}
+
+// The freshness check found that another window or device wrote: re-download the
+// tree, and have the mascot say what changed (not for our own writes: the sync
+// engine already knows those).
+async function refreshFromRemote() {
+  const before = RemoteDiff.snapshot(model.todosById);
+  await loadAndRender();
+  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)));
+  logEvent("remote", said || "refreshed, nothing visible changed");
+  if (said && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
 }
 
 const model = Sync.createModel();
@@ -270,7 +275,7 @@ const freshness = Freshness.create({
     get: () => { try { return sessionStorage.getItem("reloaded-for-version"); } catch (e) { return null; } },
     set: (v) => { try { sessionStorage.setItem("reloaded-for-version", v); } catch (e) { /* private mode: no guard */ } },
   },
-  refresh: () => loadAndRender(),
+  refresh: refreshFromRemote,
   editorOpen: editingInTree,
   onPhase: setPhase,
   onLog: logEvent,
