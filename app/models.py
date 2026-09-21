@@ -67,6 +67,7 @@ class Attachment(BaseModel):
 
 class TodoCreate(BaseModel):
     title: str = Field(max_length=MAX_TITLE_LEN)
+    color: Color | None = Field(None)  # the client picks one so it can show it at once; omitted = server picks
     due_date: datetime.datetime | None = Field(None)
 
 class TodoUpdate(BaseModel):

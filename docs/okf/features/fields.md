@@ -6,7 +6,7 @@ resource: app/models.py
 tags: [fields, model]
 timestamp: 2026-09-21T12:00:00Z
 ---
-A new top-level todo (`POST /todos`, no parent) is given a random color; children and split/repeat copies are not. A todo without its own color inherits the nearest colored ancestor's (client-side, `Fields.effectiveColor`), in the list and in Next up.
+A new top-level todo gets a random color: the composer picks one and sends it in `POST /todos` (`color`, optional) so it shows at once, even offline; if omitted the server picks one; children and split/repeat copies are not. A todo without its own color inherits the nearest colored ancestor's (client-side, `Fields.effectiveColor`), in the list and in Next up.
 
 Set via `PATCH /todos/{id}`: lists replace the whole value, `color: null` clears. All are content edits (`If-Match`, version bump) and default to empty on old docs. Colors: red, orange, yellow, green, teal, blue, purple, pink. `links`: ≤20 `{url, label|null}`, http/https. `blocked_by`, `references`: ≤50 todo ids; newly added ids must exist and not be the todo itself (400); an id the todo already holds is kept even after its target was archived; `blocked_by` must stay acyclic (400). Deleted todos' ids are kept (trash is restorable) and ignored when computing `blocked`, which `GET /todos/tree` adds: true if any `blocked_by` todo is live and not done. See [Todo](../data/todo.md).
 

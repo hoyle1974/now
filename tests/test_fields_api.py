@@ -114,3 +114,8 @@ def test_archived_link_ids_stay_editable():
     assert patch(a, references=[gone["todo_id"], a["todo_id"]]).status_code == 400
     # Dropping the dead id works.
     assert patch(a, blocked_by=[b["todo_id"]]).json()["blocked_by"] == [b["todo_id"]]
+
+def test_new_root_keeps_a_color_the_client_sends():
+    t = c.post("/todos", json={"title": "t", "color": "teal"}).json()
+    assert t["color"] == "teal"
+    assert c.post("/todos", json={"title": "t", "color": "chartreuse"}).status_code == 422

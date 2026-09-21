@@ -133,6 +133,7 @@
       case "create": {
         if (model.todosById.has(id)) return false;
         const node = newNode(id, payload.title, payload.due_date, null, null);
+        if (payload.color) node.color = payload.color;
         model.todosById.set(id, node);
         model.roots.push(node);
         return true;
@@ -248,6 +249,7 @@
     switch (op.kind) {
       case "create": {
         const body = { title: p.title };
+        if (p.color) body.color = p.color;
         if (p.due_date) body.due_date = p.due_date;
         return { method: "POST", path: "/todos", headers, body };
       }

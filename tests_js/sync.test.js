@@ -1041,3 +1041,9 @@ test("a recent sent create is never treated as suspect", async () => {
   const h = await staleHarness(oldCreate({ queued_at: Date.UTC(2026, 8, 19) - 2 * DAY }), treeOf(dup));
   assert.equal(h.engine.pending(), 1);
 });
+
+test("applyOp create keeps the color it is given", () => {
+  const model = Sync.createModel();
+  Sync.applyOp(model, { kind: "create", target_id: "tmp:1", payload: { title: "a", color: "teal" } });
+  assert.equal(model.todosById.get("tmp:1").color, "teal");
+});

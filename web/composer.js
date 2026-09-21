@@ -68,7 +68,8 @@ addForm.addEventListener("submit", (event) => {
   const input = document.getElementById("add-title");
   const title = input.value.trim();
   if (!title) return;
-  const payload = { title };
+  // A new top-level todo gets a random color; the server stores the one we send.
+  const payload = { title, color: Fields.COLORS[Math.floor(Math.random() * Fields.COLORS.length)] };
   if (addDue.value) {
     payload.due_date = addDue.value;
   }

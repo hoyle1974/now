@@ -79,3 +79,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-21: New top-level todos get a random color (`POST /todos`). Python hygiene: `pyproject.toml` (ruff/mypy/pytest config), explicit imports in `app/db.py`, mypy clean, narrower lint fixes.
 - 2026-09-21: `app/main.py` split into `app/routes/` routers (todos, attachments, calendar, notifications, system, common); no behaviour change.
 - 2026-09-21: `app/db_firestore.py` keeps its client, todos collection, tree cache and archive timer in one `_state` object instead of module globals; no behaviour change.
+- 2026-09-21: Random color for new todos moved to the client (app v74): the composer sends `color` on create and the local model applies it, since the client ignored the server-chosen color until a reload. `TodoCreate.color` is optional; the server still picks one if omitted.

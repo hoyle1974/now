@@ -20,7 +20,7 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
     def create() -> tuple[int, dict | None]:
         # A new top-level project gets a random colour so projects are told apart at a glance.
-        todo = models.Todo(title=body.title, color=random.choice(models.COLORS))
+        todo = models.Todo(title=body.title, color=body.color or random.choice(models.COLORS))
         if body.due_date:
             todo.due_date = body.due_date
         db.create_todo(todo)
