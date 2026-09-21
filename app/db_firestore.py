@@ -415,17 +415,22 @@ def _trash_entries():
     trashed_at when it went to the trash (its own delete date, or its parent's). An item
     deleted on its own earlier is its own entry, not repeated under a later parent. A todo
     with no delete date (deleted before it was kept; the archive sweep stamps these) sorts
-    after the dated ones, newest created first. A generator: a page only reads as much of
-    the trash as it needs.
+    after the dated ones, newest created first.
     """
-    roots = [db_firestore_helpers.doc_to_todo(d.to_dict())
-             for d in _state.todos.where("deleted", "==", True).stream()]
+    # One read of the collection, then a walk in memory: a query per item (one round trip
+    # each, in sequence) took ~150 ms per trashed item, 8 s for a page. The tree load already
+    # reads the whole collection the same way.
+    docs = [d.to_dict() for d in _state.todos.stream()]
+    children: dict[str | None, list[dict]] = {}
+    for data in docs:
+        children.setdefault(data.get("parent_id"), []).append(data)
+    roots = [db_firestore_helpers.doc_to_todo(d) for d in docs if d.get("deleted", False)]
     roots.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
                               str(t.todo_id)), reverse=True)
     seen = {str(t.todo_id) for t in roots}
 
     def inside(parent_id: str, title: str, when: datetime.datetime | None):
-        for data in _sorted_by_order(_child_docs(parent_id, include_deleted=True)):
+        for data in _sorted_by_order(children.get(parent_id, [])):
             if data["todo_id"] in seen:
                 continue  # its own entry (flagged) or already listed
             seen.add(data["todo_id"])
