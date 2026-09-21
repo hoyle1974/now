@@ -194,3 +194,15 @@ def test_container_does_not_block(db_setup):
     client.patch(f"/todos/{x}", json={"blocked_by": [lst]})
     tree = client.get("/todos/tree").json()
     assert tree["todosById"][x]["blocked"] is False
+
+
+# ---- generated client data --------------------------------------------------
+
+def test_generated_client_data_is_current():
+    import importlib.util
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("gen_types", root / "scripts" / "gen_types.py")
+    gen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(gen)
+    assert (root / "web" / "types-data.js").read_text() == gen.render(), "run: python scripts/gen_types.py"
