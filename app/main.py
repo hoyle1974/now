@@ -57,6 +57,20 @@ async def _limit_upload_size(request, call_next):
 for _router in (system.router, notifications.router, calendar.router, todos.router, attachments.router):
     app.include_router(_router)
 
+_API_PREFIXES = ("/todos", "/push", "/calendar")
+
+
+@app.middleware("http")
+async def _no_store_api_reads(request, call_next):
+    """API JSON has no validators, so a browser (iOS home-screen apps especially) may
+    reuse an old answer, e.g. a Next up list without the todo just added. Routes that
+    set their own Cache-Control (attachments, the calendar feed) keep it."""
+    response = await call_next(request)
+    if request.url.path.startswith(_API_PREFIXES) and "cache-control" not in response.headers:
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 class RevalidatingStaticFiles(StaticFiles):
     """Static files with ETags but no Cache-Control let iOS home-screen apps
     heuristically reuse a stale page for days; no-cache forces a revalidation."""

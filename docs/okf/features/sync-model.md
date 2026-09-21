@@ -4,7 +4,7 @@ title: Sync model
 description: Optimistic local-first writes, outbox, idempotency, versions, freshness checks.
 resource: web/sync.js
 tags: [sync, client, core]
-timestamp: 2026-09-21T02:00:00Z
+timestamp: 2026-09-21T12:00:00Z
 ---
 Every action applies locally first and syncs in the background. Design spec:
 `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
@@ -19,3 +19,4 @@ Every action applies locally first and syncs in the background. Design spec:
 - **Server instants:** `create_date` arrives with a `Z`; `parseServerInstant` in `web/sync.js` also reads bare strings from trees cached before that as UTC (the old-outbox duplicate check compares them with `queued_at`).
 - **App version:** `/todos/rev` returns `version` from `APP_VERSION` in `web/app.js`, which must equal the `?v=` on assets in `web/index.html` (**bump both on release**). Mismatch → page reloads (holds during edits; once per target version via `sessionStorage`).
 - **Collapse state:** `collapsed` patch skips `If-Match` and version bump (last write wins) but still bumps rev.
+- **No HTTP caching of API reads:** a middleware in `app/main.py` adds `Cache-Control: no-store` to `/todos`, `/push` and `/calendar` responses that don't set their own (attachments and the calendar feed do), and the client's `apiFetch`, Next up and rev-check fetches pass `cache: "no-store"`. Otherwise a browser could serve an old Next up list without a just-added todo.

@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "79";
+const APP_VERSION = "80";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -61,7 +61,7 @@ function claimToast(errorDiv) {
 async function apiFetch(path, options = {}) {
   const errorDiv = document.getElementById("error");
   try {
-    const response = await fetch(path, options);
+    const response = await fetch(path, { cache: "no-store", ...options });
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }
@@ -274,7 +274,7 @@ function editingInTree() {
 const freshness = Freshness.create({
   engine,
   fetchRev: async () => {
-    const response = await fetch(`${API_BASE}/rev`);
+    const response = await fetch(`${API_BASE}/rev`, { cache: "no-store" });
     if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
     return response.json(); // { rev, version }
   },

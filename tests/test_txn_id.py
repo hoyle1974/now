@@ -41,3 +41,9 @@ def test_txn_log_retention_outlasts_offline_devices():
     assert db.prune_txn_log() == 0
     ref.update({"created_at": datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=31)})
     assert db.prune_txn_log() == 1
+
+
+def test_api_reads_are_never_cached_by_the_browser():
+    for path in ("/todos/next", "/todos/tree", "/todos/rev"):
+        r = c.get(path)
+        assert r.headers.get("cache-control") == "no-store", path
