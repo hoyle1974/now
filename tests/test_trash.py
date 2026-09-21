@@ -122,13 +122,66 @@ def test_an_item_deleted_earlier_is_not_repeated_under_a_later_parent(db_setup):
     assert [t["deleted_with"] for t in items if t["title"] == "task"] == [None]
 
 
-def test_an_item_inside_a_deleted_parent_can_be_restored_alone(db_setup):
-    work = _mk("Work")
-    task = _mk("task", parent=work)
-    client.delete(f"/todos/{work}")
-    assert client.patch(f"/todos/{task}/undelete").status_code == 200
-    assert task in _live_ids()
-    assert [t["title"] for t in client.get("/todos/trash").json()["items"]] == ["Work"]
+def test_restoring_an_inner_item_restores_its_parent_chain_and_leaves_siblings_in_trash(db_setup):
+    top = _mk("top")
+    mid = _mk("mid", parent=top)
+    leaf = _mk("leaf", parent=mid)
+    other = _mk("other", parent=mid)          # sibling of leaf, deleted with the chain
+    aunt = _mk("aunt", parent=top)            # sibling of mid
+    client.delete(f"/todos/{top}")
+    res = client.patch(f"/todos/{leaf}/undelete")
+    assert res.status_code == 200
+    assert {a["todo_id"] for a in res.json()["affected"]} == {leaf, top}   # mid was never flagged
+    by_id = client.get("/todos/tree").json()["todosById"]
+    assert {top, mid, leaf} <= set(by_id) and other not in by_id and aunt not in by_id
+    assert by_id[leaf]["parent_id"] == mid and by_id[mid]["parent_id"] == top   # still nested
+    assert sorted(t["title"] for t in client.get("/todos/trash").json()["items"]) == ["aunt", "other"]
+
+
+def test_restoring_the_top_of_a_deleted_subtree_brings_everything_back(db_setup):
+    top = _mk("top")
+    a = _mk("a", parent=top)
+    client.delete(f"/todos/{top}")
+    assert client.patch(f"/todos/{top}/undelete").status_code == 200
+    assert {top, a} <= set(client.get("/todos/tree").json()["todosById"])
+    assert client.get("/todos/trash").json()["items"] == []
+
+
+def test_restoring_under_an_archived_ancestor_goes_to_the_top_level(db_setup):
+    top = _mk("top")
+    leaf = _mk("leaf", parent=top)
+    client.delete(f"/todos/{top}")
+    db.get_conn().collection("todos").document(top).delete()      # as if archived
+    assert client.patch(f"/todos/{leaf}/undelete").status_code == 200
+    by_id = client.get("/todos/tree").json()["todosById"]
+    assert by_id[leaf]["parent_id"] is None
+
+
+def test_trash_is_paged_with_a_hard_cap(db_setup):
+    ids = [_mk(f"t{i}") for i in range(5)]
+    for i in ids:
+        client.delete(f"/todos/{i}")
+    first = client.get("/todos/trash?limit=2").json()
+    assert len(first["items"]) == 2 and first["has_more"] is True and first["next_offset"] == 2
+    second = client.get("/todos/trash?limit=2&offset=2").json()
+    last = client.get("/todos/trash?limit=2&offset=4").json()
+    assert len(second["items"]) == 2 and second["has_more"] is True
+    assert len(last["items"]) == 1 and last["has_more"] is False
+    everyone = [t["title"] for r in (first, second, last) for t in r["items"]]
+    assert sorted(everyone) == [f"t{i}" for i in range(5)] and len(set(everyone)) == 5
+    assert client.get("/todos/trash?limit=101").status_code == 422      # hard cap
+    assert client.get("/todos/trash?limit=0").status_code == 422
+
+
+def test_trash_search_matches_title_case_and_accents_across_pages(db_setup):
+    for title in ("Caf\u00e9 plans", "Submit PR", "more cafe stuff"):
+        client.delete(f"/todos/{_mk(title)}")
+    hits = client.get("/todos/trash?q=CAFE").json()
+    assert sorted(t["title"] for t in hits["items"]) == ["Caf\u00e9 plans", "more cafe stuff"]
+    assert [t["title"] for t in client.get("/todos/trash?q=submit pr").json()["items"]] == ["Submit PR"]
+    assert client.get("/todos/trash?q=nothing").json()["items"] == []
+    paged = client.get("/todos/trash?q=cafe&limit=1").json()
+    assert len(paged["items"]) == 1 and paged["has_more"] is True
 
 
 def test_undelete_of_cleared_parent_brings_its_done_subtree_back(db_setup):
@@ -140,25 +193,27 @@ def test_undelete_of_cleared_parent_brings_its_done_subtree_back(db_setup):
     assert _live_ids() == {c, c1}
 
 
-def test_undelete_with_deleted_parent_goes_to_top_level(db_setup):
+def test_undelete_with_deleted_parent_restores_the_parent_too(db_setup):
     p = _mk("p")
     k = _mk("k", parent=p)
     client.delete(f"/todos/{k}")
     client.delete(f"/todos/{p}")
     r = client.patch(f"/todos/{k}/undelete")
-    assert r.status_code == 200 and r.json()["parent_id"] is None
-    assert [t["todo_id"] for t in client.get("/todos/tree").json()["roots"]] == [k]
+    assert r.status_code == 200 and r.json()["parent_id"] == p
+    assert [t["todo_id"] for t in client.get("/todos/tree").json()["roots"]] == [p]
+    assert client.get("/todos/trash").json()["items"] == []
 
 
-def test_undelete_with_deleted_grandparent_goes_to_top_level(db_setup):
+def test_undelete_with_deleted_grandparent_restores_the_whole_chain(db_setup):
     g = _mk("g")
     p = _mk("p", parent=g)
     k = _mk("k", parent=p)
     client.delete(f"/todos/{k}")
+    client.delete(f"/todos/{p}")
     client.delete(f"/todos/{g}")
     r = client.patch(f"/todos/{k}/undelete")
-    assert r.json()["parent_id"] is None
-    assert k in _live_ids()
+    assert r.json()["parent_id"] == p
+    assert {g, p, k} <= _live_ids()
 
 
 def test_undelete_with_live_parent_keeps_parent(db_setup):

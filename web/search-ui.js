@@ -45,8 +45,11 @@
   results.setAttribute("aria-live", "polite");
   main.appendChild(results);
 
-  let trash = null; // null = not fetched (or failed); array once loaded
+  // Trashed items matching the current query, from the server (paged, so never the whole
+  // trash): { q, items }. Only shown while q is what is typed.
+  let trash = null;
   let trashRequest = 0;
+  let trashTimer = null;
 
   function isOpen() { return !bar.hidden; }
 
@@ -56,7 +59,6 @@
     results.hidden = false;
     document.body.classList.add("searching");
     trash = null;
-    fetchTrash();
     render();
     input.focus();
   }
@@ -68,21 +70,34 @@
     document.body.classList.remove("searching");
     input.value = "";
     trashRequest++;
+    clearTimeout(trashTimer);
+    trash = null;
     openBtn.focus();
   }
 
-  async function fetchTrash() {
+  const TRASH_HITS = 10; // one page of matches is enough for a search box
+
+  async function fetchTrash(q) {
     const mine = ++trashRequest;
     try {
-      const response = await fetch(`${API_BASE}/trash`);
+      const response = await fetch(`${API_BASE}/trash?limit=${TRASH_HITS}&q=${encodeURIComponent(q)}`);
       if (!response.ok) throw new Error(String(response.status));
       const data = await response.json();
       if (mine !== trashRequest) return;
-      trash = data.items || [];
+      trash = { q, items: data.items || [] };
       render();
     } catch (e) {
       // Offline or failed: search just goes without the trash section.
     }
+  }
+
+  // The trash is searched on the server, a moment after typing stops.
+  function scheduleTrashSearch() {
+    clearTimeout(trashTimer);
+    const q = input.value.trim();
+    trashRequest++; // an answer for an older query is stale
+    if (!q) { trash = null; return; }
+    trashTimer = setTimeout(() => fetchTrash(q), 250);
   }
 
   function el(tag, cls, text) {
@@ -101,7 +116,7 @@
       return;
     }
     const hits = Search.search(model.todosById, q);
-    const trashed = Search.matchTrashed(trash, q);
+    const trashed = trash && trash.q === q.trim() ? trash.items : [];
     if (!hits.length && !trashed.length) {
       results.appendChild(el("p", "next-note", `No todos match “${q.trim()}”.`));
       return;
@@ -128,9 +143,17 @@
       results.appendChild(el("p", "next-caption search-section", "In Trash"));
       const list = el("ul", "search-list search-list--trash");
       for (const t of trashed) {
-        const li = el("li", "search-hit is-done");
-        li.appendChild(el("span", "search-title", t.title));
-        li.appendChild(el("span", "search-path", "Deleted · restore from Trash"));
+        const li = el("li");
+        const btn = el("button", "search-hit is-done");
+        btn.type = "button";
+        btn.appendChild(el("span", "search-title", t.title));
+        btn.appendChild(el("span", "search-path",
+          `${Types.get(t).label} \u00b7 ${t.deleted_with ? `deleted with ${t.deleted_with}` : "deleted"} \u00b7 open in Trash`));
+        btn.addEventListener("click", () => {
+          close();
+          window.Trash.open(t);
+        });
+        li.appendChild(btn);
         list.appendChild(li);
       }
       results.appendChild(list);
@@ -139,8 +162,8 @@
 
   openBtn.addEventListener("click", open);
   closeBtn.addEventListener("click", close);
-  clearBtn.addEventListener("click", () => { input.value = ""; render(); input.focus(); });
-  input.addEventListener("input", render);
+  clearBtn.addEventListener("click", () => { input.value = ""; scheduleTrashSearch(); render(); input.focus(); });
+  input.addEventListener("input", () => { scheduleTrashSearch(); render(); });
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && isOpen()) { event.preventDefault(); close(); }
   });

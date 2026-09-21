@@ -66,8 +66,3 @@ test("open items rank before done, title hits before other-field hits", () => {
   assert.deepEqual(Search.search(m, "milk").map((r) => r.todo.todo_id), ["t", "l", "d"]);
 });
 
-test("matchTrashed filters flat trash items", () => {
-  const items = [todo("x", "Old Idea"), todo("y", "Other")];
-  assert.deepEqual(Search.matchTrashed(items, "idea").map((t) => t.todo_id), ["x"]);
-  assert.deepEqual(Search.matchTrashed(null, "idea"), []);
-});

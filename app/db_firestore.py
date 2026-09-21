@@ -5,10 +5,12 @@ import contextlib
 import contextvars
 import copy
 import datetime
+import itertools
 import json
 import logging
 import threading
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -282,44 +284,73 @@ def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
     return moved
 
 def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, int]]]:
-    """Restore a soft-deleted todo.
+    """Restore a soft-deleted todo, and every deleted ancestor above it.
 
-    Deleting only flags the todo itself; its descendants keep their own state
-    and just become unreachable. So undo flips that one flag back. Touching the
-    descendants would resurrect children the user had deleted earlier.
+    Deleting flags only the top of a subtree; what is beneath stays unflagged but
+    unreachable. Restoring a todo brings back what is beneath it, unchanged (children
+    the user had deleted earlier stay deleted). If it sits inside a deleted parent the
+    parent chain is restored too, or the todo would stay invisible. Restoring one
+    inner todo must not bring the whole parent's contents back, so the other children of
+    each restored ancestor are flagged deleted (with the ancestor's delete date) and
+    stay in the trash. If an ancestor is gone (archived), the highest surviving one goes
+    to the top level.
 
-    Returns the restored todo and [(todo_id, version)] for the row it touched.
+    Returns the restored todo and [(todo_id, version)] for every todo restored (the
+    todo first, then its ancestors upward).
     """
-
-    root_ref = _state.todos.document(str(todo_id))
-    root_data = _get(root_ref).to_dict()
-
-    # If any ancestor is deleted (or gone) the restored todo would stay
-    # invisible, so it goes to the top level instead.
-    parent_id = root_data.get("parent_id")
-    cursor, seen = parent_id, set()
+    target = _get(_state.todos.document(str(todo_id))).to_dict()
+    path = [target]  # the todo, then each ancestor upward
+    seen = {str(todo_id)}
+    cursor, orphaned = target.get("parent_id"), False
     while cursor is not None:
-        snap = _get(_state.todos.document(cursor))
-        if not snap.exists or snap.to_dict().get("deleted", False) or cursor in seen:
-            parent_id = None
+        if cursor in seen:
+            orphaned = True
             break
         seen.add(cursor)
-        cursor = snap.to_dict().get("parent_id")
+        snap = _get(_state.todos.document(cursor))
+        if not snap.exists:
+            orphaned = True
+            break
+        path.append(snap.to_dict())
+        cursor = path[-1].get("parent_id")
 
-    order_idx = root_data.get("order_idx")
-    if order_idx is None or parent_id != root_data.get("parent_id"):
-        order_idx = _next_order_idx(parent_id)
+    # All reads before any write (transactions).
+    # `top_deleted` is the highest ancestor that is flagged deleted: everything under it was
+    # trashed with it. Below it, each ancestor's other children are hidden again.
+    flagged = [i for i in range(1, len(path)) if path[i].get("deleted", False)]
+    stay_deleted: list[tuple[dict, str | None]] = []
+    if flagged:
+        when = path[flagged[-1]].get("deleted_at")
+        for i in range(1, flagged[-1] + 1):
+            for sibling in _child_docs(path[i]["todo_id"], include_deleted=True):
+                if sibling["todo_id"] != path[i - 1]["todo_id"] and not sibling.get("deleted", False):
+                    stay_deleted.append((sibling, when))
+    top_order = _next_order_idx(None) if orphaned else None
+    child_ids = _child_ids(str(todo_id))
 
-    child_ids = _child_ids(str(todo_id))  # reads must precede the write
+    now = _now_utc().isoformat()
+    affected: list[tuple[str, int]] = []
+    restored_fields: dict = {}
+    for i, node in enumerate(path):
+        is_top = i == len(path) - 1
+        if i and not node.get("deleted", False) and not (is_top and orphaned):
+            continue  # a live ancestor needs nothing
+        fields: dict = {"version": node.get("version", 1) + 1}
+        if i == 0 or node.get("deleted", False):
+            fields.update({"deleted": False, "deleted_at": None})
+        if is_top and orphaned:
+            fields.update({"parent_id": None, "order_idx": top_order})
+        _update(_state.todos.document(node["todo_id"]), fields)
+        affected.append((node["todo_id"], fields["version"]))
+        if i == 0:
+            restored_fields = fields
+    for sibling, when in stay_deleted:
+        _update(_state.todos.document(sibling["todo_id"]),
+                {"deleted": True, "deleted_at": when or now, "version": sibling.get("version", 1) + 1})
 
-    version = root_data.get("version", 1) + 1
-    fields = {"deleted": False, "deleted_at": None, "version": version, "order_idx": order_idx,
-              "parent_id": parent_id}
-    _update(root_ref, fields)
-
-    restored = db_firestore_helpers.doc_to_todo({**root_data, **fields})
+    restored = db_firestore_helpers.doc_to_todo({**target, **restored_fields})
     restored.child_ids = child_ids
-    return restored, [(str(todo_id), version)]
+    return restored, affected
 
 def _stream_all():
     tx = _tx.get()
@@ -370,38 +401,56 @@ def clear_completed() -> list[tuple[str, int]]:
             pending.extend(children.get(tid, []))
     return cleared
 
-def get_trash(limit: int = 200) -> list[tuple[models.Todo, str | None, datetime.datetime | None]]:
-    """Every item in the trash, most recently deleted first, as (todo, deleted_with, trashed_at).
+def _fold(text: str) -> str:
+    """Lowercase and strip accents, for matching (same idea as web/search.js `normalize`)."""
+    return "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c)).lower()
+
+
+def _trash_entries():
+    """Every item in the trash as (todo, deleted_with, trashed_at), most recently deleted first.
 
     Deleting flags only the top of a subtree, so what is inside a deleted parent is
     trashed too but not flagged. Each such item gets its own entry, right after the
     parent it went with; deleted_with is that parent's title (None for a flagged one) and
-    trashed_at when it went to the trash (its own delete date, or its parent's).
-    An item deleted on its own earlier is its own entry, not repeated under a later
-    parent. A todo with no delete date (deleted before it was kept; the archive sweep
-    stamps these) sorts after the dated ones, newest created first.
+    trashed_at when it went to the trash (its own delete date, or its parent's). An item
+    deleted on its own earlier is its own entry, not repeated under a later parent. A todo
+    with no delete date (deleted before it was kept; the archive sweep stamps these) sorts
+    after the dated ones, newest created first. A generator: a page only reads as much of
+    the trash as it needs.
     """
     roots = [db_firestore_helpers.doc_to_todo(d.to_dict())
              for d in _state.todos.where("deleted", "==", True).stream()]
     roots.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
                               str(t.todo_id)), reverse=True)
     seen = {str(t.todo_id) for t in roots}
-    items: list[tuple[models.Todo, str | None, datetime.datetime | None]] = []
 
-    def inside(parent_id: str, title: str, when: datetime.datetime | None) -> None:
+    def inside(parent_id: str, title: str, when: datetime.datetime | None):
         for data in _sorted_by_order(_child_docs(parent_id, include_deleted=True)):
             if data["todo_id"] in seen:
                 continue  # its own entry (flagged) or already listed
             seen.add(data["todo_id"])
-            items.append((db_firestore_helpers.doc_to_todo(data), title, when))
-            inside(data["todo_id"], title, when)
+            yield db_firestore_helpers.doc_to_todo(data), title, when
+            yield from inside(data["todo_id"], title, when)
 
     for root in roots:
-        items.append((root, None, root.deleted_at))
-        if len(items) >= limit:
-            break
-        inside(str(root.todo_id), root.title, root.deleted_at)
-    return items[:limit]
+        yield root, None, root.deleted_at
+        yield from inside(str(root.todo_id), root.title, root.deleted_at)
+
+
+def get_trash(limit: int = 50, offset: int = 0, query: str = "") -> tuple[list[tuple], bool]:
+    """One page of the trash (see _trash_entries): ([(todo, deleted_with, trashed_at)], has_more).
+    `query` keeps only items whose title, colour or links contain every word (accents and case
+    ignored)."""
+    words = _fold(query).split()
+
+    def wanted(entry: tuple) -> bool:
+        todo = entry[0]
+        text = _fold(" ".join([todo.title, todo.color or "", *(f"{link.url} {link.label}" for link in todo.links)]))
+        return all(w in text for w in words)
+
+    entries = (e for e in _trash_entries() if wanted(e)) if words else _trash_entries()
+    page = list(itertools.islice(entries, offset, offset + limit + 1))
+    return page[:limit], len(page) > limit
 
 def update_todo(todo: models.Todo, bump_version: bool = True):
     """Update a todo and bump its version in place. Done state is per-todo; it

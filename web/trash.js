@@ -64,10 +64,15 @@
   list.className = "trash-list";
   const note = document.createElement("p");
   note.className = "next-note";
-  view.append(bar, list, note);
+  const more = DOM.button("Load more", "footer-btn trash-more");
+  more.hidden = true;
+  view.append(bar, list, note, more);
   main.appendChild(view);
 
+  const PAGE = 50; // items per request (the server caps a page at 100)
   let items = null;
+  let hasMore = false;
+  let nextOffset = 0;
   let request = 0;
   let viewer = null;
 
@@ -80,6 +85,7 @@
     }
     note.hidden = items.length > 0;
     note.textContent = "Trash is empty.";
+    more.hidden = !hasMore;
     for (const item of items) {
       const done = item.done && Types.can(item, "hasCheckbox");
       const kind = Types.get(item).label;
@@ -104,11 +110,11 @@
     // Unsent deletes aren't on the server yet: let them land first.
     await Promise.race([engine.flush(), new Promise((resolve) => setTimeout(resolve, 4000))]);
     try {
-      const response = await fetch(`${API_BASE}/trash`);
-      if (!response.ok) throw new Error(`${response.status}`);
-      const data = await response.json();
+      const data = await fetchPage(0);
       if (mine !== request) return;
       items = data.items;
+      hasMore = data.has_more;
+      nextOffset = data.next_offset;
       note.textContent = "Trash is empty.";
     } catch (err) {
       logEvent("trash-fail", err.message);
@@ -118,6 +124,32 @@
     }
     renderTrash();
   }
+
+  async function fetchPage(offset) {
+    const response = await fetch(`${API_BASE}/trash?limit=${PAGE}&offset=${offset}`);
+    if (!response.ok) throw new Error(`${response.status}`);
+    return response.json();
+  }
+
+  async function loadMore() {
+    const mine = request;
+    more.disabled = true;
+    try {
+      const data = await fetchPage(nextOffset);
+      if (mine !== request) return;
+      const have = new Set(items.map((i) => i.todo_id));
+      items = items.concat(data.items.filter((i) => !have.has(i.todo_id)));
+      hasMore = data.has_more;
+      nextOffset = data.next_offset;
+    } catch (err) {
+      logEvent("trash-fail", err.message);
+      showNotice({ level: "info", message: "Couldn't load more. Are you offline?" });
+    } finally {
+      more.disabled = false;
+    }
+    renderTrash();
+  }
+  more.addEventListener("click", loadMore);
 
   // A deleted item opens read-only, as it was when deleted; Undelete is there too.
   function openViewer(item) {
@@ -140,18 +172,28 @@
 
   function undelete(item) {
     if (!engine.enqueue({ kind: "undelete", target_id: item.todo_id })) return;
-    items = items.filter((i) => i.todo_id !== item.todo_id);
+    if (items) items = items.filter((i) => i.todo_id !== item.todo_id);
     renderTrash();
     showNotice({ level: "info", message: "Restored" });
-    // The restored subtree isn't in the local model (it was deleted before this
-    // page loaded), so reload the tree once the restore has been sent.
-    reportedFailure(engine.flush().then(() => loadAndRender()));
+    // The restored subtree isn't in the local model (it was deleted before this page loaded),
+    // so reload the tree once the restore has been sent. Restoring an item inside a deleted
+    // parent restores the parent chain too, so the trash list is reloaded as well.
+    reportedFailure(engine.flush().then(() => loadAndRender()).then(() => {
+      if (!view.hidden) return refreshTrash();
+      return undefined;
+    }));
   }
 
   back.addEventListener("click", () => setTab("list"));
   trashLink.addEventListener("click", () => setTab("trash"));
 
   window.Trash = {
+    // Show the Trash page with one item open (a search hit): the item is already in hand,
+    // so it does not depend on which page of the trash it would be on.
+    open(item) {
+      setTab("trash");
+      openViewer(item);
+    },
     onTab(tab) {
       view.hidden = tab !== "trash";
       closeViewer();

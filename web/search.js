@@ -61,15 +61,5 @@
     );
   }
 
-  // Trashed todos come from GET /todos/trash as a flat list.
-  function matchTrashed(items, query) {
-    const ws = words(query);
-    if (!ws.length || !Array.isArray(items)) return [];
-    return items.filter((t) => {
-      const all = normalize(t.title) + " " + extraText(t);
-      return ws.every((w) => all.includes(w));
-    });
-  }
-
-  return { normalize, search, matchTrashed };
+  return { normalize, search };
 });

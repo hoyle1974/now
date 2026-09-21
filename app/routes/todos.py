@@ -71,13 +71,20 @@ def get_tree(background: BackgroundTasks) -> dict:
         "todosById": todosById
     }
 
+TRASH_PAGE_MAX = 100  # a hard cap on one page, whatever the client asks for
+
 @router.get("/todos/trash", response_model=None)
-def get_trash() -> dict:
-    """Everything in the trash, one entry per item (see db.get_trash), for the Trash view.
-    `deleted_with` is the title of the deleted parent an item went with, else null;
-    `trashed_at` is when it went to the trash (an item inside a parent has no delete date of its own)."""
+def get_trash(limit: int = Query(50, ge=1, le=TRASH_PAGE_MAX), offset: int = Query(0, ge=0),
+              q: str = Query("", max_length=200)) -> dict:
+    """One page of the trash, one entry per trashed item (see db.get_trash), most recently
+    deleted first. `deleted_with` is the title of the deleted parent an item went with, else
+    null; `trashed_at` is when it went to the trash (an item inside a parent has no delete date
+    of its own). `q` filters by title, colour and links. `has_more` says whether a next page
+    (offset + len(items)) exists."""
+    entries, has_more = db.get_trash(limit, offset, q)
     return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with, "trashed_at": jsonable_encoder(trashed_at)}
-                      for todo, deleted_with, trashed_at in db.get_trash()]}
+                      for todo, deleted_with, trashed_at in entries],
+            "has_more": has_more, "next_offset": offset + len(entries)}
 
 @router.post("/todos/clear-completed", response_model=None)
 def clear_completed(x_txn_id: str | None = Header(None)) -> Response:
