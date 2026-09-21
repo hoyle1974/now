@@ -371,10 +371,13 @@ def clear_completed() -> list[tuple[str, int]]:
     return cleared
 
 def get_trash(limit: int = 200) -> list[models.Todo]:
-    """Soft-deleted todos, newest created first (no delete timestamp is kept)."""
+    """Soft-deleted todos, most recently deleted first. A todo with no delete date (deleted
+    before it was kept; the archive sweep stamps these) sorts after the dated ones, newest
+    created first."""
     items = [db_firestore_helpers.doc_to_todo(d.to_dict())
              for d in _state.todos.where("deleted", "==", True).stream()]
-    items.sort(key=lambda t: (t.create_date, str(t.todo_id)), reverse=True)
+    items.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
+                              str(t.todo_id)), reverse=True)
     return items[:limit]
 
 def update_todo(todo: models.Todo, bump_version: bool = True):

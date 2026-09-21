@@ -3,9 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 
+from app.auth import require_user
 from app.main import app
 from app import db
 
+app.dependency_overrides[require_user] = lambda: None
 client = TestClient(app)
 
 
@@ -83,6 +85,14 @@ def test_trash_lists_deleted_and_undelete_restores(db_setup):
     assert client.patch(f"/todos/{a}/undelete").status_code == 200
     assert client.get("/todos/trash").json()["items"] == []
     assert _live_ids() == {a, b}
+
+
+def test_trash_lists_most_recently_deleted_first(db_setup):
+    a, b, c = _mk("a"), _mk("b"), _mk("c")      # created a, b, c
+    for todo in (b, c, a):                        # deleted b, then c, then a
+        client.delete(f"/todos/{todo}")
+    items = client.get("/todos/trash").json()["items"]
+    assert [t["title"] for t in items] == ["a", "c", "b"]
 
 
 def test_undelete_of_cleared_parent_brings_its_done_subtree_back(db_setup):
