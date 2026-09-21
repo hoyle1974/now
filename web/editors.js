@@ -124,7 +124,9 @@ function renderTypePanel(todo) {
 }
 
 // Full-screen read-only look at one todo; Edit hands off to the edit sheet.
-function renderViewer(todo, counts) {
+// trashed ({ deleted_with, trashed_at, onClose, onRestore }): the item is in the trash, so it is
+// shown as it was (no editing, no live links or images) with Undelete instead of Edit.
+function renderViewer(todo, counts, trashed = null) {
   const add = (parent, tag, className, text) => {
     const node = document.createElement(tag);
     node.className = className;
@@ -132,7 +134,7 @@ function renderViewer(todo, counts) {
     parent.appendChild(node);
     return node;
   };
-  const close = () => {
+  const close = trashed ? trashed.onClose : () => {
     setActivePanel(null);
     renderTree();
   };
@@ -152,17 +154,23 @@ function renderViewer(todo, counts) {
   if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? Due.format(todo.due_date) : "No due date");
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
-  if (Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
+  if (!trashed && Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
+  if (trashed) {
+    fact("Deleted", new Date(trashed.trashed_at).toLocaleString(undefined,
+      { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }));
+    if (trashed.deleted_with) fact("Deleted with", trashed.deleted_with);
+  }
   body.appendChild(facts);
-  body.appendChild(FieldsUI.renderDetail(todo));
+  body.appendChild(FieldsUI.renderDetail(todo, { trashed: Boolean(trashed) }));
 
   const buttons = DOM.actionBar(
     DOM.sheetButton("Close", "plain", close),
-    DOM.sheetButton("Edit", "primary", () => {
-      setActivePanel("edit", todo.todo_id);
-      viewerOrigin = todo.todo_id;
-      renderTree();
-    })
+    trashed ? DOM.sheetButton("Undelete", "primary", trashed.onRestore)
+      : DOM.sheetButton("Edit", "primary", () => {
+        setActivePanel("edit", todo.todo_id);
+        viewerOrigin = todo.todo_id;
+        renderTree();
+      })
   );
 
   const screen = renderSheet(body, buttons);

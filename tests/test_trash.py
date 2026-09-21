@@ -1,5 +1,7 @@
 """Tests for "Clear completed" and the trash (list + undelete)."""
 
+import datetime as dt
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -93,6 +95,40 @@ def test_trash_lists_most_recently_deleted_first(db_setup):
         client.delete(f"/todos/{todo}")
     items = client.get("/todos/trash").json()["items"]
     assert [t["title"] for t in items] == ["a", "c", "b"]
+
+
+def test_trash_lists_every_item_including_those_inside_a_deleted_parent(db_setup):
+    work = _mk("Work")
+    task = _mk("Submit PR", parent=work, done=True)
+    sub = _mk("sub", parent=task)
+    other = _mk("other")
+    client.delete(f"/todos/{other}")
+    client.delete(f"/todos/{work}")
+    items = client.get("/todos/trash").json()["items"]
+    assert [(t["title"], t["deleted_with"]) for t in items] == [
+        ("Work", None), ("Submit PR", "Work"), ("sub", "Work"), ("other", None)]
+    assert items[1]["type"] == "todo" and items[1]["done"] is True
+    parse = dt.datetime.fromisoformat
+    assert parse(items[1]["trashed_at"]) == parse(items[0]["deleted_at"])   # inside a parent: the parent's date
+
+
+def test_an_item_deleted_earlier_is_not_repeated_under_a_later_parent(db_setup):
+    work = _mk("Work")
+    task = _mk("task", parent=work)
+    client.delete(f"/todos/{task}")
+    client.delete(f"/todos/{work}")
+    items = client.get("/todos/trash").json()["items"]
+    assert sorted(t["title"] for t in items) == ["Work", "task"]
+    assert [t["deleted_with"] for t in items if t["title"] == "task"] == [None]
+
+
+def test_an_item_inside_a_deleted_parent_can_be_restored_alone(db_setup):
+    work = _mk("Work")
+    task = _mk("task", parent=work)
+    client.delete(f"/todos/{work}")
+    assert client.patch(f"/todos/{task}/undelete").status_code == 200
+    assert task in _live_ids()
+    assert [t["title"] for t in client.get("/todos/trash").json()["items"]] == ["Work"]
 
 
 def test_undelete_of_cleared_parent_brings_its_done_subtree_back(db_setup):

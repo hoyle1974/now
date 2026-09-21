@@ -73,8 +73,11 @@ def get_tree(background: BackgroundTasks) -> dict:
 
 @router.get("/todos/trash", response_model=None)
 def get_trash() -> dict:
-    """Soft-deleted todos, for the Trash view."""
-    return {"items": jsonable_encoder(db.get_trash())}
+    """Everything in the trash, one entry per item (see db.get_trash), for the Trash view.
+    `deleted_with` is the title of the deleted parent an item went with, else null;
+    `trashed_at` is when it went to the trash (an item inside a parent has no delete date of its own)."""
+    return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with, "trashed_at": jsonable_encoder(trashed_at)}
+                      for todo, deleted_with, trashed_at in db.get_trash()]}
 
 @router.post("/todos/clear-completed", response_model=None)
 def clear_completed(x_txn_id: str | None = Header(None)) -> Response:

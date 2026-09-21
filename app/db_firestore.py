@@ -370,14 +370,37 @@ def clear_completed() -> list[tuple[str, int]]:
             pending.extend(children.get(tid, []))
     return cleared
 
-def get_trash(limit: int = 200) -> list[models.Todo]:
-    """Soft-deleted todos, most recently deleted first. A todo with no delete date (deleted
-    before it was kept; the archive sweep stamps these) sorts after the dated ones, newest
-    created first."""
-    items = [db_firestore_helpers.doc_to_todo(d.to_dict())
+def get_trash(limit: int = 200) -> list[tuple[models.Todo, str | None, datetime.datetime | None]]:
+    """Every item in the trash, most recently deleted first, as (todo, deleted_with, trashed_at).
+
+    Deleting flags only the top of a subtree, so what is inside a deleted parent is
+    trashed too but not flagged. Each such item gets its own entry, right after the
+    parent it went with; deleted_with is that parent's title (None for a flagged one) and
+    trashed_at when it went to the trash (its own delete date, or its parent's).
+    An item deleted on its own earlier is its own entry, not repeated under a later
+    parent. A todo with no delete date (deleted before it was kept; the archive sweep
+    stamps these) sorts after the dated ones, newest created first.
+    """
+    roots = [db_firestore_helpers.doc_to_todo(d.to_dict())
              for d in _state.todos.where("deleted", "==", True).stream()]
-    items.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
+    roots.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
                               str(t.todo_id)), reverse=True)
+    seen = {str(t.todo_id) for t in roots}
+    items: list[tuple[models.Todo, str | None, datetime.datetime | None]] = []
+
+    def inside(parent_id: str, title: str, when: datetime.datetime | None) -> None:
+        for data in _sorted_by_order(_child_docs(parent_id, include_deleted=True)):
+            if data["todo_id"] in seen:
+                continue  # its own entry (flagged) or already listed
+            seen.add(data["todo_id"])
+            items.append((db_firestore_helpers.doc_to_todo(data), title, when))
+            inside(data["todo_id"], title, when)
+
+    for root in roots:
+        items.append((root, None, root.deleted_at))
+        if len(items) >= limit:
+            break
+        inside(str(root.todo_id), root.title, root.deleted_at)
     return items[:limit]
 
 def update_todo(todo: models.Todo, bump_version: bool = True):

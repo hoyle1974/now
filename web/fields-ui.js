@@ -37,7 +37,8 @@ const FieldsUI = (() => {
     return btn;
   }
 
-  function renderDetail(todo) {
+  // opts.trashed: the item is deleted, so show what it holds but offer no way to change it.
+  function renderDetail(todo, opts = {}) {
     const { todosById } = deps.model;
     const panel = el("div", "todo-detail");
     let any = false;
@@ -66,8 +67,8 @@ const FieldsUI = (() => {
       panel.appendChild(el("p", "detail-heading", "References"));
       refs.forEach((t) => panel.appendChild(todoButton(t)));
     }
-    if (!any) panel.appendChild(el("p", "detail-empty", "No links or related todos. Add them from Edit."));
-    panel.appendChild(AttachmentsUI.renderSection(todo));
+    if (!any) panel.appendChild(el("p", "detail-empty", opts.trashed ? "No links or related todos." : "No links or related todos. Add them from Edit."));
+    if (!opts.trashed) panel.appendChild(AttachmentsUI.renderSection(todo));
     return panel;
   }
 

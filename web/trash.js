@@ -69,6 +69,7 @@
 
   let items = null;
   let request = 0;
+  let viewer = null;
 
   function renderTrash() {
     list.innerHTML = "";
@@ -80,17 +81,20 @@
     note.hidden = items.length > 0;
     note.textContent = "Trash is empty.";
     for (const item of items) {
-      const li = document.createElement("li");
-      li.className = "trash-row";
-      const title = document.createElement("span");
-      title.className = "trash-title" + (item.done ? " is-done" : "");
-      title.textContent = item.title;
-      const restore = document.createElement("button");
-      restore.type = "button";
-      restore.className = "trash-restore";
-      restore.textContent = "Undelete";
-      restore.addEventListener("click", () => undelete(item));
-      li.append(title, restore);
+      const done = item.done && Types.can(item, "hasCheckbox");
+      const kind = Types.get(item).label;
+      const open = DOM.button("", "trash-open", () => openViewer(item));
+      open.append(
+        DOM.el("span", "trash-type", null),
+        DOM.el("span", "trash-text", null)
+      );
+      open.firstChild.appendChild(icon(Types.get(item).icon));
+      open.lastChild.append(
+        DOM.el("span", "trash-title" + (done ? " is-done" : ""), item.title),
+        DOM.el("span", "trash-note", item.deleted_with ? `${kind} \u00b7 in ${item.deleted_with}` : kind)
+      );
+      const li = DOM.el("li", "trash-row");
+      li.append(open, DOM.button("Undelete", "trash-restore", () => undelete(item)));
       list.appendChild(li);
     }
   }
@@ -115,6 +119,25 @@
     renderTrash();
   }
 
+  // A deleted item opens read-only, as it was when deleted; Undelete is there too.
+  function openViewer(item) {
+    closeViewer();
+    viewer = renderViewer(item, null, {
+      deleted_with: item.deleted_with,
+      trashed_at: item.trashed_at,
+      onClose: closeViewer,
+      onRestore: () => { closeViewer(); undelete(item); },
+    });
+    view.appendChild(viewer);
+    document.body.style.overflow = "hidden";
+  }
+
+  function closeViewer() {
+    if (viewer) viewer.remove();
+    viewer = null;
+    document.body.style.overflow = "";
+  }
+
   function undelete(item) {
     if (!engine.enqueue({ kind: "undelete", target_id: item.todo_id })) return;
     items = items.filter((i) => i.todo_id !== item.todo_id);
@@ -131,6 +154,7 @@
   window.Trash = {
     onTab(tab) {
       view.hidden = tab !== "trash";
+      closeViewer();
       if (tab === "trash") {
         items = null;
         renderTrash();
