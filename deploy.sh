@@ -26,5 +26,8 @@ fi
 
 gcloud run deploy "$SERVICE" "${args[@]}"
 
+# Old images pile up ~70 MB per deploy (free tier 512 MB): keep only the one now serving.
+scripts/prune-images.sh || echo "warning: image prune failed; the cost check below will say if it matters" >&2
+
 # Rule #1 is zero GCP cost: verify (read-only) that this deploy did not break it.
 scripts/cost-check.sh || { echo "deploy finished, but the cost check FAILED. Fix it now." >&2; exit 1; }
