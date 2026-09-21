@@ -38,6 +38,16 @@
   background: color-mix(in srgb, var(--tc) 9%, transparent);
 }
 
+/* Root rows sit 2px inside a rounded card: match its corners so the tint and
+   bar don't poke out square. */
+.todo-tree > .todo-node > .todo-row[data-color] {
+  border-radius: calc(var(--radius-card) - 2px);
+}
+.todo-tree > .todo-node:has(> .todo-children) > .todo-row[data-color] {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
 .todo-chip--blocked {
   padding: 1px 7px;
   border-radius: 999px;
@@ -161,11 +171,17 @@
 .picker-list[hidden] { display: none; }
 
 .picker-list {
-  max-height: 132px;
+  max-height: 176px;
   overflow-y: auto;
   margin: 6px 0 8px;
   border-radius: 10px;
   background: var(--card);
+  box-shadow: var(--shadow-card);
+  border: 1px solid var(--separator);
+}
+
+.picker-option + .picker-option {
+  border-top: 1px solid var(--separator);
 }
 
 .picker-option {

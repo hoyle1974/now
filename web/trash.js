@@ -40,6 +40,7 @@
     clearTimeout(undoTimer);
     lastDeleted = token; // keeps apiFetch from wiping the toast
     errorDiv.onclick = null;
+    errorDiv.classList.add("toast--calm");
     errorDiv.hidden = false;
     errorDiv.textContent = message + " · ";
     const btn = document.createElement("button");

@@ -39,13 +39,20 @@ function renderSheet(...children) {
 }
 
 // Full-screen sheet: a heading and the fields scroll, the action bar stays put.
-function renderFullSheet(title, nodes, buttons) {
+function renderFullSheet(title, nodes, buttons, subtitle) {
   const heading = document.createElement("h2");
   heading.className = "sheet-title";
   heading.textContent = title;
   const body = document.createElement("div");
   body.className = "sheet-body";
-  body.append(heading, ...nodes);
+  body.append(heading);
+  if (subtitle) {
+    const sub = document.createElement("p");
+    sub.className = "sheet-subtitle";
+    sub.textContent = subtitle;
+    body.append(sub);
+  }
+  body.append(...nodes);
   const screen = renderSheet(body, buttons);
   screen.classList.add("sheet-full");
   return screen;
@@ -75,7 +82,7 @@ function renderSplitEditor(todo) {
   }, "Split");
 
   textarea.rows = 8;
-  return renderFullSheet("Split into subtasks", [textarea], buttons);
+  return renderFullSheet("Split into subtasks", [textarea], buttons, todo.title);
 }
 
 function renderAddChildEditor(todo) {

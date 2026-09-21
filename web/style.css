@@ -163,13 +163,13 @@ svg {
 
 .sync-status {
   margin-top: 8px;
-  padding: 3px 10px;
+  padding: 6px 14px;
   border: none;
   border-radius: 999px;
   background: var(--fill, rgba(118, 118, 128, 0.12));
   color: var(--label-2);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -193,7 +193,7 @@ svg {
   background: none;
   color: var(--label-2);
   font: inherit;
-  font-size: 12px;
+  font-size: 14px;
   cursor: pointer;
 }
 
@@ -307,7 +307,7 @@ svg {
   content: "";
   position: absolute;
   top: 0;
-  left: calc(98px + var(--shift));
+  left: calc(54px + var(--shift));
   right: 0;
   height: 1px;
   background: var(--separator);
@@ -690,7 +690,15 @@ body.menu-room {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: max(16px, env(safe-area-inset-top)) 16px 16px;
+  padding: max(16px, env(safe-area-inset-top)) max(16px, calc((100% - 640px) / 2)) 16px;
+}
+
+/* Which todo the sheet is about (title sits tight under the heading). */
+.sheet-subtitle {
+  margin: -10px 0 16px;
+  font-size: 15px;
+  color: var(--label-2);
+  overflow-wrap: anywhere;
 }
 
 .sheet-title {
@@ -704,7 +712,7 @@ body.menu-room {
   flex: none;
   width: 100%;
   box-sizing: border-box;
-  padding: 12px 16px max(12px, env(safe-area-inset-bottom));
+  padding: 12px max(16px, calc((100% - 640px) / 2)) max(12px, env(safe-area-inset-bottom));
   border-top: 1px solid var(--separator);
   background: var(--bg);
 }
@@ -725,6 +733,9 @@ body.menu-room {
 
 .sheet-full .todo-detail {
   margin: 0;
+  padding: 8px 16px 12px;
+  background: var(--card);
+  box-shadow: var(--shadow-card);
 }
 
 .sheet-label {
@@ -998,6 +1009,7 @@ body:has(#error:not([hidden])) {
   left: 50%;
   bottom: calc(var(--composer-h, 84px) + 12px);
   z-index: 120;
+  width: max-content;
   max-width: calc(100% - 32px);
   padding: 12px 18px;
   transform: translateX(-50%);
@@ -1537,11 +1549,22 @@ body[data-tab="trash"] .composer {
   color: var(--label-2);
 }
 
+/* Trash is its own screen: no List / Next up control to leave unselected. */
+body[data-tab="trash"] .tabs {
+  display: none;
+}
+
 .trash-bar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin: 8px 0;
+}
+
+.trash-bar .footer-btn {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .trash-bar .next-caption {
@@ -1681,6 +1704,10 @@ li.search-hit { cursor: default; }
 }
 
 /* Undo in a toast is a real button, not link text. */
+.toast--calm {
+  background: #2b2b30;
+}
+
 .toast-action {
   min-height: 36px;
   margin-left: 6px;
@@ -1921,3 +1948,8 @@ li.search-hit { cursor: default; }
 }
 
 .list-footer { margin-bottom: 24px; }
+
+/* A blocked Next-up row isn't actionable yet: quiet its title. */
+.next-row--blocked .next-title {
+  color: var(--label-2);
+}

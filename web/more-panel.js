@@ -155,6 +155,17 @@ document.getElementById("event-log-copy").addEventListener("click", async (event
     tools.hidden = !tools.hidden;
     toggle.setAttribute("aria-expanded", String(!tools.hidden));
   });
+  // Tapping anywhere outside the panel (or Escape) folds it away again, so it
+  // never leaves the list pushed down.
+  const close = () => {
+    if (tools.hidden) return;
+    tools.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+  };
+  document.addEventListener("pointerdown", (ev) => {
+    if (!tools.contains(ev.target) && !toggle.contains(ev.target)) close();
+  });
+  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") close(); });
 })();
 
 // Look & feel controls inside the header's "More" panel: completion sound and

@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "70";
+const APP_VERSION = "71";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -55,6 +55,7 @@ function claimToast(errorDiv) {
   lastDeleted = null;
   errorDiv.onclick = null;
   delete errorDiv.dataset.kind;
+  errorDiv.classList.remove("toast--calm");
 }
 
 async function apiFetch(path, options = {}) {
@@ -128,6 +129,7 @@ function showNotice({ level, message }) {
   claimToast(errorDiv);
   errorDiv.hidden = false;
   errorDiv.textContent = message;
+  errorDiv.classList.toggle("toast--calm", level !== "error");
   if (level === "error") {
     // Permanent failures stay until dismissed.
     errorDiv.onclick = () => { errorDiv.hidden = true; };
@@ -354,6 +356,7 @@ function showUndo(todoId) {
   const errorDiv = document.getElementById("error");
   claimToast(errorDiv);
   lastDeleted = todoId;
+  errorDiv.classList.add("toast--calm");
   errorDiv.hidden = false;
   errorDiv.textContent = "Deleted · ";
   const undoBtn = document.createElement("button");

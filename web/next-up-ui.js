@@ -95,6 +95,7 @@ function renderNextRow(item) {
   if (item.blocked_by && item.blocked_by.length) {
     const blocked = document.createElement("span");
     blocked.className = "next-blocked";
+    row.classList.add("next-row--blocked");
     const more = item.blocked_by.length - 1;
     blocked.textContent = `Blocked by ${item.blocked_by[0]}` + (more ? ` +${more}` : "");
     body.appendChild(blocked);
