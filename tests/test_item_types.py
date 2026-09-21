@@ -6,10 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import db, ics, models, push, tasks, types
+from app.auth import require_user
 from app.db_firestore_helpers import doc_to_todo, todo_to_doc
 from app.main import app
 from app.next_up import rank_next_up
 
+app.dependency_overrides[require_user] = lambda: None
 client = TestClient(app)
 
 
@@ -67,3 +69,53 @@ def test_patch_type_keeps_other_fields(db_setup):
     assert r.json()["due_date"] == "2026-09-30T00:00:00"      # kept, just inactive
     assert client.get(f"/todos/{tid}").json()["type"] == "list"
     assert client.patch(f"/todos/{tid}", json={"type": "bogus"}).status_code == 422
+
+
+# ---- next up ----------------------------------------------------------------
+
+_ALL: list[models.Todo] = []
+
+
+def _mk(title, type="todo", due=None, done=False, kids=(), blocked_by=()):
+    t = models.Todo(title=title, type=type, due_date=due, done=done, blocked_by=[b.todo_id for b in blocked_by])
+    t.child_ids = [k.todo_id for k in kids]
+    for i, k in enumerate(kids):
+        k.parent_id, k.order_idx = t.todo_id, i
+    _ALL.append(t)
+    return t
+
+
+def _rank(*roots):
+    by_id = {str(t.todo_id): t for t in _ALL}
+    return [i["title"] for i in rank_next_up(list(roots), by_id, 10)]
+
+
+def test_containers_are_walked_through_but_never_listed():
+    _ALL.clear()
+    a, b = _mk("a"), _mk("b")
+    proj = _mk("proj", "project", kids=[a, b])
+    empty = _mk("empty list", "list")
+    assert _rank(proj, empty) == ["a", "b"]
+
+
+def test_container_done_is_ignored_and_dormant_due_does_not_inherit():
+    _ALL.clear()
+    a = _mk("a")
+    lst = _mk("list", "list", due=dt.datetime(2026, 9, 1), done=True, kids=[a])
+    other = _mk("other", due=dt.datetime(2026, 9, 10))
+    assert _rank(lst, other) == ["other", "a"]      # a inherits no due from the list
+
+
+def test_todo_holding_only_an_empty_container_is_a_leaf():
+    _ALL.clear()
+    inner = _mk("inner list", "list")
+    parent = _mk("parent", kids=[inner])
+    assert _rank(parent) == ["parent"]
+
+
+def test_container_is_never_an_open_blocker():
+    _ALL.clear()
+    lst = _mk("list", "list")
+    x = _mk("x", blocked_by=[lst])
+    by_id = {str(t.todo_id): t for t in _ALL}
+    assert rank_next_up([x], by_id, 10)[0]["blocked_by"] == []

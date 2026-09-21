@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import datetime
 
-from app import models
+from app import models, types
 
 DEFAULT_LIMIT = 10
 _NO_DATE = datetime.datetime.max
@@ -47,6 +47,12 @@ def _due(todo: models.Todo) -> datetime.datetime | None:
     return due
 
 
+def _open(todo: models.Todo) -> bool:
+    """Still to be walked: live, and (for a type with a done state) not done. A container's
+    own `done` means nothing, so the todos beneath it stay reachable."""
+    return not todo.deleted and (not todo.done or not types.can(todo, "hasCheckbox"))
+
+
 def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
                  limit: int = DEFAULT_LIMIT,
                  today: datetime.date | None = None) -> list[dict]:
@@ -54,36 +60,38 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
 
     def open_children(todo: models.Todo) -> list[models.Todo]:
         kids = [by_id[str(cid)] for cid in todo.child_ids if str(cid) in by_id]
-        kids = [k for k in kids if not k.done and not k.deleted]
+        kids = [k for k in kids if _open(k)]
         # Same ordering the client uses for a parent's children.
         return sorted(kids, key=lambda k: k.order_idx if k.order_idx is not None else 999999)
 
     def walk(todo: models.Todo, index_path: tuple[int, ...], titles: list[str],
-             inherited: tuple[datetime.datetime, models.Todo] | None) -> None:
-        own = _due(todo)
+             inherited: tuple[datetime.datetime, models.Todo] | None) -> bool:
+        """Emits the candidates at or beneath `todo`; True when it emitted any."""
+        own = _due(todo) if types.has_field(todo, "due_date") else None
         best = inherited
         if own is not None and (best is None or own < best[0]):
             best = (own, todo)
 
-        kids = open_children(todo)
-        if not kids:
-            source = best[1] if best else None
-            candidates.append((
-                best[0] if best else _NO_DATE,
-                own or _NO_DATE,
-                index_path,
-                todo,
-                titles,
-                # A datetime, like due_date, so the client parses both the same way.
-                source.due_date if source else None,
-                "self" if source is todo else ("parent" if source else None),
-            ))
-            return
-        for i, kid in enumerate(kids):
-            walk(kid, index_path + (i,), titles + [todo.title], best)
+        emitted = False
+        for i, kid in enumerate(open_children(todo)):
+            emitted = walk(kid, index_path + (i,), titles + [todo.title], best) or emitted
+        if emitted or not types.can(todo, "appearsInNextUp"):
+            return emitted
+        source = best[1] if best else None
+        candidates.append((
+            best[0] if best else _NO_DATE,
+            own or _NO_DATE,
+            index_path,
+            todo,
+            titles,
+            # A datetime, like due_date, so the client parses both the same way.
+            source.due_date if source else None,
+            "self" if source is todo else ("parent" if source else None),
+        ))
+        return True
 
     for i, root in enumerate(roots):
-        if not root.done and not root.deleted:
+        if _open(root):
             walk(root, (i,), [], None)
 
     candidates.sort(key=lambda c: (c[0], c[1], c[2]))
@@ -97,7 +105,7 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
             seen.add(str(node.todo_id))
             for bid in node.blocked_by:
                 b = by_id.get(str(bid))
-                if b is not None and not b.done and not b.deleted:
+                if b is not None and _open(b) and types.can(b, "hasCheckbox"):
                     found.setdefault(str(b.todo_id), b)
             node = by_id.get(str(node.parent_id)) if node.parent_id else None
         return list(found.values())
