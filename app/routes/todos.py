@@ -138,6 +138,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
             todo.repeat = body.repeat
         if "color" in body.model_fields_set:
             todo.color = body.color
+        if body.type is not None:
+            todo.type = body.type  # only the label changes; due_date, repeat and done stay as they are
         if body.links is not None:
             todo.links = body.links
         for name in ("blocked_by", "references"):

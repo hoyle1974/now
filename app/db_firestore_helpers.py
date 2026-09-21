@@ -1,7 +1,7 @@
 import datetime
 import uuid
 
-from app import models
+from app import models, types
 
 
 def doc_to_todo(doc_dict: dict) -> models.Todo:
@@ -23,6 +23,8 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         # Docs written before versioning existed have no field: treat as version 1.
         version=doc_dict.get("version", 1),
         color=doc_dict.get("color"),
+        # Documents from before types have none; an unknown value must never break a read.
+        type=doc_dict["type"] if doc_dict.get("type") in types.NAMES else types.DEFAULT,
         links=[models.Link(**link) for link in doc_dict.get("links") or []],
         blocked_by=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("blocked_by") or []],
         references=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("references") or []],
@@ -47,6 +49,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "spawned_id": None if todo.spawned_id is None else str(todo.spawned_id),
         "version": todo.version,
         "color": todo.color,
+        "type": todo.type,
         "links": [{"url": link.url, "label": link.label} for link in todo.links],
         "blocked_by": [str(i) for i in todo.blocked_by],
         "references": [str(i) for i in todo.references],

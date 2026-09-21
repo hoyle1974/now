@@ -26,6 +26,7 @@ class Repeat(BaseModel):
     every: int = Field(1, ge=1, le=999)
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
 COLORS = get_args(Color)
+ItemType = Literal["todo", "list", "project"]  # keep in step with app/types.json
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
 MAX_LABEL_LEN = 200
@@ -78,6 +79,7 @@ class TodoUpdate(BaseModel):
     collapsed: bool | None = Field(None)
     repeat: Repeat | None = Field(None)  # an explicit null clears the rule
     color: Color | None = Field(None)          # explicit null clears
+    type: ItemType | None = Field(None)        # only the label changes; due_date, repeat and done stay
     links: list[Link] | None = Field(None)     # replaces the whole list
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
     references: list[TodoId] | None = Field(None)  # replaces the whole list
@@ -129,6 +131,7 @@ class Todo(BaseModel):
     spawned_id: TodoId | None = Field(None)
     version: int = Field(1)
     color: Color | None = Field(None)
+    type: ItemType = Field("todo")
     links: list[Link] = Field([])
     blocked_by: list[TodoId] = Field([])
     references: list[TodoId] = Field([])

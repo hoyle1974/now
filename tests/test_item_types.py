@@ -39,3 +39,31 @@ def test_unknown_or_missing_type_falls_back_to_todo():
     assert types.can_type("todo", "hasCheckbox") is True
     assert types.can_type("list", "hasCheckbox") is False
     assert types.can_type("project", "showsProgress") is True
+
+
+# ---- model, storage, PATCH --------------------------------------------------
+
+def test_model_literal_matches_registry():
+    assert set(get_args(models.ItemType)) == set(types.NAMES)
+
+
+def test_doc_round_trip_and_defaults():
+    t = models.Todo(title="x", type="project")
+    assert todo_to_doc(t)["type"] == "project"
+    assert doc_to_todo(todo_to_doc(t)).type == "project"
+    old = todo_to_doc(models.Todo(title="old"))
+    del old["type"]
+    assert doc_to_todo(old).type == "todo"          # documents from before types
+    old["type"] = "from-the-future"
+    assert doc_to_todo(old).type == "todo"          # unknown never breaks a read
+
+
+def test_patch_type_keeps_other_fields(db_setup):
+    r = client.post("/todos", json={"title": "a", "due_date": "2026-09-30T00:00:00"})
+    tid, v = r.json()["todo_id"], r.json()["version"]
+    assert r.json()["type"] == "todo"
+    r = client.patch(f"/todos/{tid}", json={"type": "list"}, headers={"If-Match": str(v)})
+    assert r.status_code == 200 and r.json()["type"] == "list"
+    assert r.json()["due_date"] == "2026-09-30T00:00:00"      # kept, just inactive
+    assert client.get(f"/todos/{tid}").json()["type"] == "list"
+    assert client.patch(f"/todos/{tid}", json={"type": "bogus"}).status_code == 422
