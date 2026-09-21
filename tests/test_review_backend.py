@@ -155,7 +155,7 @@ def test_archive_bumps_rev_when_it_moves_something():
 
 
 def _reset_archive_state():
-    db_firestore._archive_checked = None
+    db_firestore._state.archive_checked = None
     db.get_conn().collection("meta").document("archive").delete()
 
 
@@ -195,11 +195,11 @@ def test_maybe_archive_expired_failure_retries_and_success_sticks(monkeypatch):
     with pytest.raises(RuntimeError):
         db_firestore.maybe_archive_expired()
     # the lease was released, so another attempt may run (in-process backoff aside)
-    db_firestore._archive_checked = None
+    db_firestore._state.archive_checked = None
     monkeypatch.setattr(db_firestore, "archive_expired", lambda now=None: calls.append(2) or 0)
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
-    db_firestore._archive_checked = None
+    db_firestore._state.archive_checked = None
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
 
