@@ -202,8 +202,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Offline launch with edits waiting: the list stays empty and the outbox is
   // held (sync.js needsTree) until a tree loads, so say so and keep trying.
   if (engine.needsTree()) {
-    showNotice({ level: "error", message: `Offline — couldn't load your list. Your ${engine.pending()} unsent edit(s) are saved and will sync once it loads.` });
-    document.getElementById("error").dataset.kind = "offline";
+    showNotice({ level: "error", kind: "offline",
+      message: `Offline — couldn't load your list. Your ${engine.pending()} unsent edit(s) are saved and will sync once it loads.` });
     const timer = setInterval(() => (engine.needsTree() ? retryFirstLoad() : clearInterval(timer)), 15000);
   }
   engine.kick();
@@ -216,8 +216,7 @@ function retryFirstLoad() {
   if (firstLoadRetry || !engine.needsTree()) return;
   firstLoadRetry = reportedFailure(loadAndRender()).then(() => {
     firstLoadRetry = null;
-    const errorDiv = document.getElementById("error");
-    if (!engine.needsTree() && errorDiv.dataset.kind === "offline") errorDiv.hidden = true;
+    if (!engine.needsTree()) toast.hideKind("offline");
   });
 }
 

@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "81";
+const APP_VERSION = "82";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -42,50 +42,24 @@ if ("serviceWorker" in navigator) {
     .catch((e) => logEvent("sw", "register failed: " + (e && e.message)));
 }
 
-// True while the toast shows an apiFetch failure (the only thing apiFetch may clear).
-let apiErrorShown = false;
-
-// Every writer of the shared #error toast starts here: it stops the other
-// writers' timers and handlers so none can clobber (or later clear) the new one.
-function claimToast(errorDiv) {
-  clearTimeout(apiFetch.hideTimer);
-  clearTimeout(noticeTimer);
-  clearTimeout(undoTimer);
-  apiErrorShown = false;
-  lastDeleted = null;
-  errorDiv.onclick = null;
-  delete errorDiv.dataset.kind;
-  errorDiv.classList.remove("toast--calm");
-}
+// The one toast (#error). Its owners are showNotice, apiFetch's failures and the Undo toasts.
+const toast = Toast.create(document.getElementById("error"));
 
 async function apiFetch(path, options = {}) {
-  const errorDiv = document.getElementById("error");
   try {
     const response = await fetch(path, { cache: "no-store", ...options });
     if (!response.ok) {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }
-    // Only clear a failure apiFetch itself showed; never a sync-engine notice
-    // or the Undo toast.
-    if (apiErrorShown) {
-      apiErrorShown = false;
-      clearTimeout(apiFetch.hideTimer);
-      errorDiv.hidden = true;
-      errorDiv.textContent = "";
-    }
+    // Only clear a failure apiFetch itself showed; never a sync-engine notice or an Undo.
+    toast.hideSource("api");
     if (response.status === 204) {
       return null;
     }
     return await response.json();
   } catch (err) {
     logEvent("fetch-fail", `${path}: ${err.message}`);
-    claimToast(errorDiv);
-    errorDiv.hidden = false;
-    errorDiv.textContent = "Something went wrong — " + err.message;
-    apiErrorShown = true;
-    apiFetch.hideTimer = setTimeout(() => {
-      if (apiErrorShown) { apiErrorShown = false; errorDiv.hidden = true; }
-    }, 5000);
+    toast.show({ message: "Something went wrong \u2014 " + err.message, level: "error", ttl: 5000, source: "api" });
     throw err;
   }
 }
@@ -122,21 +96,7 @@ async function sendRequest(req) {
   }
 }
 
-let noticeTimer = null;
-
-function showNotice({ level, message }) {
-  const errorDiv = document.getElementById("error");
-  claimToast(errorDiv);
-  errorDiv.hidden = false;
-  errorDiv.textContent = message;
-  errorDiv.classList.toggle("toast--calm", level !== "error");
-  if (level === "error") {
-    // Permanent failures stay until dismissed.
-    errorDiv.onclick = () => { errorDiv.hidden = true; };
-  } else {
-    noticeTimer = setTimeout(() => { errorDiv.hidden = true; }, 5000);
-  }
-}
+const showNotice = (notice) => toast.show(notice);
 
 // What the pill shows combines two things: the outbox (Syncing / Offline /
 // Error) and, when the outbox is empty, what the freshness check is doing.
@@ -247,7 +207,6 @@ const engine = Sync.createEngine({
   onRemap: (tmp, real) => {
     // Ids the UI keeps state under change when the server assigns real ones.
     if (activePanel && activePanel.todoId === tmp) activePanel.todoId = real;
-    if (lastDeleted === tmp) lastDeleted = real;
   },
 });
 
@@ -348,34 +307,10 @@ async function deleteTodo(todoId) {
   }
 }
 
-// Soft-delete undo: restore a deleted todo within 5 seconds
-let lastDeleted = null;
-let undoTimer = null;
-
+// Soft-delete undo: restore a deleted todo within 5 seconds.
 function showUndo(todoId) {
-  const errorDiv = document.getElementById("error");
-  claimToast(errorDiv);
-  lastDeleted = todoId;
-  errorDiv.classList.add("toast--calm");
-  errorDiv.hidden = false;
-  errorDiv.textContent = "Deleted · ";
-  const undoBtn = document.createElement("button");
-  undoBtn.textContent = "Undo";
-  undoBtn.className = "toast-action";
-  undoBtn.onclick = () => {
-    clearTimeout(undoTimer);
-    errorDiv.hidden = true;
-    lastDeleted = null;
-    engine.enqueue({ kind: "undelete", target_id: todoId });
-  };
-  errorDiv.appendChild(undoBtn);
-
-  undoTimer = setTimeout(() => {
-    if (lastDeleted === todoId) {
-      errorDiv.hidden = true;
-      lastDeleted = null;
-    }
-  }, 5000);
+  toast.show({ message: "Deleted", action: { label: "Undo", run: () =>
+    engine.enqueue({ kind: "undelete", target_id: todoId }) } });
 }
 
 // dueDate undefined = rename only (leave due date/time and repeat alone).
@@ -388,21 +323,8 @@ async function setType(todoId, type) {
 }
 
 function showTypeUndo(todoId, previous, type) {
-  const errorDiv = document.getElementById("error");
-  claimToast(errorDiv);
-  errorDiv.classList.add("toast--calm");
-  errorDiv.hidden = false;
-  errorDiv.textContent = `Now ${TypeUI.withArticle(TypeUI.labelOf(type))} · `;
-  const undoBtn = document.createElement("button");
-  undoBtn.textContent = "Undo";
-  undoBtn.className = "toast-action";
-  undoBtn.onclick = () => {
-    clearTimeout(undoTimer);
-    errorDiv.hidden = true;
-    engine.enqueue({ kind: "patch", target_id: todoId, payload: { type: previous } });
-  };
-  errorDiv.appendChild(undoBtn);
-  undoTimer = setTimeout(() => { errorDiv.hidden = true; }, 5000);
+  toast.show({ message: `Now ${TypeUI.withArticle(TypeUI.labelOf(type))}`, action: { label: "Undo", run: () =>
+    engine.enqueue({ kind: "patch", target_id: todoId, payload: { type: previous } }) } });
 }
 
 async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {

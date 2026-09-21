@@ -127,28 +127,84 @@
     return out;
   }
 
-  // Apply an op to the local model. Returns false when it can't apply
-  // (unknown target, move off the end of the list, ...).
-  function applyOp(model, op) {
-    const { kind, target_id: id, payload = {} } = op;
-    switch (kind) {
-      case "create": {
+  // ---- ops --------------------------------------------------------------
+  // One entry per op kind: everything about it in one place. To add an op, add an entry.
+  //   apply(model, op)          optimistic local effect; false = can't apply (target gone, ...)
+  //   request(op)               { method, path, body? } for the wire (headers are added around it)
+  //   versioned                 true, or (op) => bool: send If-Match with the target's version
+  //   ack(op, body, ctx)        after a 2xx: adopt the server's ids/versions. ctx: { model, remapId, nodeOf }
+  //   retryOn409                a version conflict is retried with the server's version, local wins
+  //   onConflict(node, op, body)  patch only: adopt fields we did not edit before the retry
+  //   reloadAfterAck            reload the tree after the ack (the server made things we can't derive)
+  //   on400 / on404             { log, notice? }: drop the op and reload instead of the generic handling
+  //   mintsTarget               enqueue mints a temporary target id (create)
+  //   mayCommitUnacked          a very old sent op may already be committed (create, split); then
+  //   alreadyCommitted(op, todosById, fresh)  says whether the server tree already holds it
+  //   prepare(op, uuid)         fill in payload ids at enqueue time
+  //   coalesce(prev, op)        "merge" (prev absorbed op), "cancel" (op and prev cancel out) or null
+  //   queueEvenIfUnapplied      keep the op although apply() said no (undelete of an already-restored item)
+  const OPS = {
+    create: {
+      mintsTarget: true,
+      mayCommitUnacked: true,
+      alreadyCommitted(op, todosById, fresh) {
+        for (const t of todosById.values()) {
+          if (!t.parent_id && t.title === op.payload.title && fresh(t)) return true;
+        }
+        return false;
+      },
+      apply(model, { target_id: id, payload = {} }) {
         if (model.todosById.has(id)) return false;
         const node = newNode(id, payload.title, payload.due_date, null, null, payload.type);
         if (payload.color) node.color = payload.color;
         model.todosById.set(id, node);
         model.roots.push(node);
         return true;
-      }
-      case "patch": {
+      },
+      request({ payload: p = {} }) {
+        const body = { title: p.title };
+        if (p.color) body.color = p.color;
+        if (p.due_date) body.due_date = p.due_date;
+        if (p.type) body.type = p.type;
+        return { method: "POST", path: "/todos", body };
+      },
+      ack(op, body, { model, remapId }) {
+        if (!body || !body.todo_id) throw new Error("create reply had no todo_id");
+        remapId(op.target_id, body.todo_id);
+        const node = model.todosById.get(body.todo_id);
+        if (node) Object.assign(node, { version: body.version, create_date: body.create_date, order_idx: body.order_idx });
+      },
+    },
+    patch: {
+      retryOn409: true,
+      // Collapsing is view state: last write wins, so it carries no version.
+      versioned: (op) => Object.keys(patchBody(op.payload || {})).some((f) => f !== "collapsed"),
+      apply(model, { target_id: id, payload = {} }) {
         const node = model.todosById.get(id);
         if (!node) return false;
         for (const f of PATCH_FIELDS) {
           if (f in payload) node[f] = f === "due_date" ? normalizeDue(payload[f]) : payload[f];
         }
         return true;
-      }
-      case "delete": {
+      },
+      request(op) {
+        return { method: "PATCH", path: `/todos/${op.target_id}`, body: patchBody(op.payload || {}) };
+      },
+      ack: ackVersion,
+      onConflict(node, op, body) {
+        for (const f of PATCH_FIELDS) {
+          if (!(f in op.payload) && f in body) node[f] = f === "due_date" ? normalizeDue(body[f]) : body[f];
+        }
+      },
+      coalesce(prev, op) {
+        if (prev.kind !== "patch") return null;
+        Object.assign(prev.payload, op.payload);
+        return "merge";
+      },
+    },
+    delete: {
+      versioned: true,
+      apply(model, { target_id: id }) {
         const node = model.todosById.get(id);
         if (!node) return false;
         const nodes = subtreeNodes(model, id);
@@ -156,14 +212,22 @@
         model.trash.set(id, { nodes, parent_id: node.parent_id, index });
         nodes.forEach((n) => model.todosById.delete(n.todo_id));
         return true;
-      }
-      case "clear_completed": {
+      },
+      request: (op) => ({ method: "DELETE", path: `/todos/${op.target_id}` }),
+    },
+    clear_completed: {
+      apply(model) {
         const ids = clearableIds(model);
         if (!ids.length) return false;
-        ids.forEach((cid) => applyOp(model, { kind: "delete", target_id: cid }));
+        ids.forEach((cid) => OPS.delete.apply(model, { target_id: cid }));
         return true;
-      }
-      case "undelete": {
+      },
+      request: () => ({ method: "POST", path: "/todos/clear-completed" }),
+    },
+    undelete: {
+      queueEvenIfUnapplied: true,
+      // Undo of a delete we just made: nothing to be stale against, so not versioned.
+      apply(model, { target_id: id }) {
         const snap = model.trash.get(id);
         if (!snap) return false;
         model.trash.delete(id);
@@ -177,8 +241,31 @@
         const item = parent ? id : node;
         list.splice(Math.min(Math.max(snap.index, 0), list.length), 0, item);
         return true;
-      }
-      case "split": {
+      },
+      request: (op) => ({ method: "PATCH", path: `/todos/${op.target_id}/undelete` }),
+      ack(op, body, { model }) {
+        for (const a of (body && body.affected) || []) {
+          const node = model.todosById.get(a.todo_id);
+          if (node) node.version = a.version;
+        }
+      },
+      coalesce(prev) {
+        return prev.kind === "delete" ? "cancel" : null;
+      },
+    },
+    split: {
+      versioned: true,
+      mayCommitUnacked: true,
+      alreadyCommitted(op, todosById, fresh) {
+        const parent = todosById.get(op.target_id);
+        if (!parent) return false;
+        const kids = parent.child_ids.map((c) => todosById.get(c)).filter((c) => c && fresh(c));
+        return op.payload.descriptions.every((d) => kids.some((k) => k.title === d));
+      },
+      prepare(op, uuid) {
+        if (!op.payload.child_tmp_ids) op.payload.child_tmp_ids = op.payload.descriptions.map(() => "tmp:" + uuid());
+      },
+      apply(model, { target_id: id, payload = {} }) {
         const parent = model.todosById.get(id);
         if (!parent) return false;
         const tmpIds = payload.child_tmp_ids || [];
@@ -190,8 +277,29 @@
           parent.child_ids.push(child.todo_id);
         });
         return true;
-      }
-      case "move": {
+      },
+      request({ target_id: id, payload: p = {} }) {
+        const body = { descriptions: p.descriptions };
+        if (p.due_date) body.due_date = p.due_date;
+        if (p.type) body.type = p.type;
+        return { method: "POST", path: `/todos/${id}/split`, body };
+      },
+      ack(op, body, { model, remapId }) {
+        const aff = (body && body.affected) || [];
+        const parent = model.todosById.get(op.target_id);
+        if (parent && aff[0]) parent.version = aff[0].version;
+        (op.payload.child_tmp_ids || []).forEach((tmp, i) => {
+          if (!aff[i + 1]) return;
+          remapId(tmp, aff[i + 1].todo_id);
+          const child = model.todosById.get(aff[i + 1].todo_id);
+          if (child) child.version = aff[i + 1].version;
+        });
+      },
+    },
+    move: {
+      versioned: true,
+      retryOn409: true,
+      apply(model, { target_id: id, payload = {} }) {
         const node = model.todosById.get(id);
         if (!node) return false;
         const parent = node.parent_id ? model.todosById.get(node.parent_id) : null;
@@ -207,16 +315,32 @@
         if (parent) parent.child_ids = sibs.map((s) => s.todo_id);
         else model.roots = sibs;
         return true;
-      }
-      case "repeat": {
+      },
+      request: (op) => ({ method: "PATCH", path: `/todos/${op.target_id}/move/${op.payload.direction}` }),
+      ack: ackVersion,
+    },
+    repeat: {
+      // Not versioned: the server spawns at most once per todo, whatever its version.
+      reloadAfterAck: true, // the new occurrence (a whole subtree with server ids) exists only there
+      // The rule was cleared on another device: nothing to spawn.
+      on400: { log: "repeat: 400, no longer repeating; reloading" },
+      apply(model, { target_id: id }) {
         // The copy is made by the server; locally we only remember that this
         // todo is already spawning, so completing it again queues nothing.
         const node = model.todosById.get(id);
         if (!node) return false;
         if (!node.spawned_id) node.spawned_id = "pending";
         return true;
-      }
-      case "reparent": {
+      },
+      request: (op) => ({ method: "POST", path: `/todos/${op.target_id}/repeat`, body: { today: op.payload.today } }),
+    },
+    reparent: {
+      versioned: true,
+      retryOn409: true,
+      // Either the todo or its new parent is gone; the local model can't tell
+      // which, so reload rather than guess.
+      on404: { log: "reparent: 404, reloading from the server", notice: "Couldn't move that; reloaded." },
+      apply(model, { target_id: id, payload = {} }) {
         const node = model.todosById.get(id);
         if (!node) return false;
         const newParentId = payload.parent_id ?? null;
@@ -233,64 +357,43 @@
         if (newParent) newParent.child_ids = sibs.map((s) => s.todo_id);
         else model.roots = sibs;
         return true;
-      }
-      default:
-        return false;
-    }
+      },
+      request: (op) => ({
+        method: "PATCH", path: `/todos/${op.target_id}/reparent`,
+        body: { parent_id: op.payload.parent_id ?? null, index: op.payload.index ?? null },
+      }),
+      ack: ackVersion,
+    },
+  };
+
+  function patchBody(payload) {
+    const body = {};
+    for (const f of PATCH_FIELDS) if (f in payload) body[f] = payload[f];
+    return body;
+  }
+
+  // 2xx for an op that only moves the target's version forward.
+  function ackVersion(op, body, { nodeOf }) {
+    const node = nodeOf(op.target_id);
+    if (node && body) node.version = body.version;
+  }
+
+  // Apply an op to the local model. Returns false when it can't apply
+  // (unknown target, move off the end of the list, ...).
+  function applyOp(model, op) {
+    const spec = OPS[op.kind];
+    return spec ? spec.apply(model, op) : false;
   }
 
   // ---- requests ---------------------------------------------------------
 
   function buildRequest(op, version) {
+    const spec = OPS[op.kind];
+    if (!spec) throw new Error("unknown op kind " + op.kind);
     const headers = { "Content-Type": "application/json", "X-Txn-Id": op.txn_id };
-    const id = op.target_id;
-    const p = op.payload || {};
-    const conditional = () => {
-      if (version != null && version > 0) headers["If-Match"] = String(version);
-    };
-    switch (op.kind) {
-      case "create": {
-        const body = { title: p.title };
-        if (p.color) body.color = p.color;
-        if (p.due_date) body.due_date = p.due_date;
-        if (p.type) body.type = p.type;
-        return { method: "POST", path: "/todos", headers, body };
-      }
-      case "patch": {
-        const body = {};
-        for (const f of PATCH_FIELDS) if (f in p) body[f] = p[f];
-        // Collapsing is view state: last write wins, so it carries no version.
-        if (Object.keys(body).some((f) => f !== "collapsed")) conditional();
-        return { method: "PATCH", path: `/todos/${id}`, headers, body };
-      }
-      case "delete":
-        conditional();
-        return { method: "DELETE", path: `/todos/${id}`, headers };
-      case "clear_completed":
-        return { method: "POST", path: "/todos/clear-completed", headers };
-      case "undelete":
-        // Undo of a delete we just made: nothing to be stale against.
-        return { method: "PATCH", path: `/todos/${id}/undelete`, headers };
-      case "split": {
-        conditional();
-        const body = { descriptions: p.descriptions };
-        if (p.due_date) body.due_date = p.due_date;
-        if (p.type) body.type = p.type;
-        return { method: "POST", path: `/todos/${id}/split`, headers, body };
-      }
-      case "move":
-        conditional();
-        return { method: "PATCH", path: `/todos/${id}/move/${p.direction}`, headers };
-      case "repeat":
-        // Not conditional: the server spawns at most once per todo, whatever its version.
-        return { method: "POST", path: `/todos/${id}/repeat`, headers, body: { today: p.today } };
-      case "reparent":
-        conditional();
-        return { method: "PATCH", path: `/todos/${id}/reparent`, headers,
-                 body: { parent_id: p.parent_id ?? null, index: p.index ?? null } };
-      default:
-        throw new Error("unknown op kind " + op.kind);
-    }
+    const versioned = typeof spec.versioned === "function" ? spec.versioned(op) : Boolean(spec.versioned);
+    if (versioned && version != null && version > 0) headers["If-Match"] = String(version);
+    return { ...spec.request(op), headers };
   }
 
   // ---- engine -----------------------------------------------------------
@@ -472,14 +575,9 @@
         // outbox) and would replay its logged answer under the same txn_id, so
         // a merged change would never apply. Queue a new op instead.
         if (prev.state !== "pending" || prev.sent) return false;
-        if (op.kind === "patch" && prev.kind === "patch") {
-          Object.assign(prev.payload, op.payload);
-          return true;
-        }
-        if (op.kind === "undelete" && prev.kind === "delete") {
-          ops.splice(i, 1);
-          return true;
-        }
+        const result = OPS[op.kind].coalesce && OPS[op.kind].coalesce(prev, op);
+        if (result === "cancel") ops.splice(i, 1);
+        if (result) return true;
         return false;
       }
       return false;
@@ -490,7 +588,7 @@
     function enqueue({ kind, target_id, payload = {} }) {
       const op = {
         txn_id: uuid(), kind,
-        target_id: kind === "create" ? "tmp:" + uuid() : resolve(target_id),
+        target_id: OPS[kind]?.mintsTarget ? "tmp:" + uuid() : resolve(target_id),
         payload: { ...payload }, state: "pending", attempts: 0, conflicts: 0, sent: false, queued_at: now(),
       };
       // Callers may still hold a temporary id whose create has since been acked.
@@ -498,11 +596,9 @@
       for (const f of LINK_FIELDS) {
         if (Array.isArray(op.payload[f])) op.payload[f] = op.payload[f].map(resolve);
       }
-      if (kind === "split" && !op.payload.child_tmp_ids) {
-        op.payload.child_tmp_ids = op.payload.descriptions.map(() => "tmp:" + uuid());
-      }
+      if (OPS[kind] && OPS[kind].prepare) OPS[kind].prepare(op, uuid);
       const applied = applyOp(model, op);
-      if (!applied && kind !== "undelete") return false;
+      if (!applied && !(OPS[kind] && OPS[kind].queueEvenIfUnapplied)) return false;
       const merged = tryCoalesce(op);
       if (!merged) ops.push(op);
       log("enqueue", `${kind}${merged ? " (merged)" : ""}, ${ops.length} pending`);
@@ -561,42 +657,8 @@
     function ackSuccess(op, body) {
       lastError = false;
       authBlocked = false;
-      switch (op.kind) {
-        case "create": {
-          if (!body || !body.todo_id) throw new Error("create reply had no todo_id");
-          remapId(op.target_id, body.todo_id);
-          const node = model.todosById.get(body.todo_id);
-          if (node) Object.assign(node, { version: body.version, create_date: body.create_date, order_idx: body.order_idx });
-          break;
-        }
-        case "patch":
-        case "move":
-        case "reparent": {
-          const node = nodeOf(op.target_id);
-          if (node && body) node.version = body.version;
-          break;
-        }
-        case "split": {
-          const aff = (body && body.affected) || [];
-          const parent = model.todosById.get(op.target_id);
-          if (parent && aff[0]) parent.version = aff[0].version;
-          (op.payload.child_tmp_ids || []).forEach((tmp, i) => {
-            if (!aff[i + 1]) return;
-            remapId(tmp, aff[i + 1].todo_id);
-            const child = model.todosById.get(aff[i + 1].todo_id);
-            if (child) child.version = aff[i + 1].version;
-          });
-          break;
-        }
-        case "undelete":
-          for (const a of (body && body.affected) || []) {
-            const node = model.todosById.get(a.todo_id);
-            if (node) node.version = a.version;
-          }
-          break;
-        default:
-          break;
-      }
+      const spec = OPS[op.kind];
+      if (spec && spec.ack) spec.ack(op, body, { model, remapId, nodeOf });
     }
 
     async function handle(op, res) {
@@ -606,18 +668,18 @@
         dropHead(op);
         // The new occurrence (a whole subtree with server ids) exists only on
         // the server, so reload to bring it in.
-        if (op.kind === "repeat") await refetchAndRebuild();
+        if (OPS[op.kind]?.reloadAfterAck) await refetchAndRebuild();
         return true;
       }
-      if (code === 400 && op.kind === "repeat") {
-        // The rule was cleared on another device: nothing to spawn.
+      const spec = OPS[op.kind] || {};
+      if (code === 400 && spec.on400) {
         dropHead(op);
-        log("drop", "repeat: 400, no longer repeating; reloading");
+        log("drop", spec.on400.log);
         await refetchAndRebuild();
         return true;
       }
       if (code === 409) {
-        if (op.kind === "patch" || op.kind === "move" || op.kind === "reparent") {
+        if (spec.retryOn409) {
           op.conflicts += 1;
           log("conflict", `${op.kind} #${op.conflicts}, server v${body && body.version}`);
           const node = model.todosById.get(op.target_id);
@@ -625,11 +687,7 @@
             return failPermanently(op, "kept conflicting with changes from another device");
           }
           // Local wins: adopt the server's version and any fields we did not edit.
-          if (op.kind === "patch") {
-            for (const f of PATCH_FIELDS) {
-              if (!(f in op.payload) && f in body) node[f] = f === "due_date" ? normalizeDue(body[f]) : body[f];
-            }
-          }
+          if (spec.onConflict) spec.onConflict(node, op, body);
           node.version = body.version;
           op.txn_id = uuid();
           op.state = "pending";
@@ -643,12 +701,10 @@
         await refetchAndRebuild();
         return true;
       }
-      if (code === 404 && op.kind === "reparent") {
-        // Either the todo or its new parent is gone; the local model can't tell
-        // which, so reload rather than guess.
+      if (code === 404 && spec.on404) {
         dropHead(op);
-        log("drop", "reparent: 404, reloading from the server");
-        notice("info", "Couldn't move that; reloaded.");
+        log("drop", spec.on404.log);
+        if (spec.on404.notice) notice("info", spec.on404.notice);
         await refetchAndRebuild();
         return true;
       }
@@ -730,7 +786,7 @@
           }
           parked = false;
           const op = ops[0];
-          if (op.kind !== "create" && isTmp(op.target_id)) {
+          if (!OPS[op.kind]?.mintsTarget && isTmp(op.target_id)) {
             // Its parent create/split never landed, so there is nothing to target.
             dropHead(op);
             continue;
@@ -802,7 +858,7 @@
     // committed but unacked; replaying it would duplicate it, so rebuild()
     // checks it against the server tree first.
     const isSuspect = (op) =>
-      op.sent && (op.kind === "create" || op.kind === "split") &&
+      op.sent && OPS[op.kind]?.mayCommitUnacked &&
       typeof op.queued_at === "number" && now() - op.queued_at > SUSPECT_AGE_MS;
 
     // The server sends instants with a "Z"; trees cached before that have bare
@@ -814,16 +870,7 @@
     function alreadyCommitted(op, todosById) {
       const since = op.queued_at - 60000;
       const fresh = (t) => !t.deleted && parseServerInstant(t.create_date) >= since;
-      if (op.kind === "create") {
-        for (const t of todosById.values()) {
-          if (!t.parent_id && t.title === op.payload.title && fresh(t)) return true;
-        }
-        return false;
-      }
-      const parent = todosById.get(op.target_id);
-      if (!parent) return false;
-      const kids = parent.child_ids.map((c) => todosById.get(c)).filter((c) => c && fresh(c));
-      return op.payload.descriptions.every((d) => kids.some((k) => k.title === d));
+      return OPS[op.kind].alreadyCommitted(op, todosById, fresh);
     }
 
     // Replace the model with a fresh server tree and re-apply everything still
@@ -870,5 +917,5 @@
     };
   }
 
-  return { createModel, applyOp, clearableIds, buildRequest, createEngine, normalizeDue, isTmp };
+  return { createModel, applyOp, clearableIds, buildRequest, createEngine, normalizeDue, isTmp, OPS };
 });

@@ -1,0 +1,354 @@
+{
+ "_doc": "Shared by tests/test_tree_rules.py (server) and tests_js/tree-rules.test.js (client): the same tree must give the same clearable and blocked ids on both sides. Nodes are listed in sibling order; 'parent' and 'blocked_by' use node ids; ids in blocked_by that are not nodes are missing todos. 'clearable' = the ids Clear completed would delete (topmost of each cleared subtree); 'blocked' = ids shown as Blocked.",
+ "cases": [
+  {
+   "name": "a done leaf is cleared",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true
+    }
+   ],
+   "clearable": [
+    "a"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "an open leaf is kept",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": false
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a done parent with an open child is kept",
+   "nodes": [
+    {
+     "id": "p",
+     "type": "todo",
+     "done": true
+    },
+    {
+     "id": "c",
+     "type": "todo",
+     "done": false,
+     "parent": "p"
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a done subtree is cleared at its top only",
+   "nodes": [
+    {
+     "id": "p",
+     "type": "todo",
+     "done": true
+    },
+    {
+     "id": "c",
+     "type": "todo",
+     "done": true,
+     "parent": "p"
+    },
+    {
+     "id": "g",
+     "type": "todo",
+     "done": true,
+     "parent": "c"
+    }
+   ],
+   "clearable": [
+    "p"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "a project whose todos are all done is cleared, whatever its own done says",
+   "nodes": [
+    {
+     "id": "proj",
+     "type": "project",
+     "done": false
+    },
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true,
+     "parent": "proj"
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": true,
+     "parent": "proj"
+    }
+   ],
+   "clearable": [
+    "proj"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "a project with an open todo is kept but its done todos are cleared",
+   "nodes": [
+    {
+     "id": "proj",
+     "type": "project",
+     "done": true
+    },
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true,
+     "parent": "proj"
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "parent": "proj"
+    }
+   ],
+   "clearable": [
+    "a"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "an empty container is never cleared",
+   "nodes": [
+    {
+     "id": "l",
+     "type": "list",
+     "done": true
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a container holding only empty containers is never cleared",
+   "nodes": [
+    {
+     "id": "proj",
+     "type": "project",
+     "done": false
+    },
+    {
+     "id": "l",
+     "type": "list",
+     "done": true,
+     "parent": "proj"
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a nested container with all todos done is cleared with its parent",
+   "nodes": [
+    {
+     "id": "proj",
+     "type": "project",
+     "done": false
+    },
+    {
+     "id": "l",
+     "type": "list",
+     "done": false,
+     "parent": "proj"
+    },
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true,
+     "parent": "l"
+    }
+   ],
+   "clearable": [
+    "proj"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "a deleted open child does not hold back its parent",
+   "nodes": [
+    {
+     "id": "p",
+     "type": "todo",
+     "done": true
+    },
+    {
+     "id": "c",
+     "type": "todo",
+     "done": false,
+     "parent": "p",
+     "deleted": true
+    }
+   ],
+   "clearable": [
+    "p"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "blocked while a blocker todo is open",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": false
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "a"
+     ]
+    }
+   ],
+   "clearable": [],
+   "blocked": [
+    "b"
+   ]
+  },
+  {
+   "name": "not blocked once the blocker is done",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "a"
+     ]
+    }
+   ],
+   "clearable": [
+    "a"
+   ],
+   "blocked": []
+  },
+  {
+   "name": "a container is never an open blocker",
+   "nodes": [
+    {
+     "id": "proj",
+     "type": "project",
+     "done": false
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "proj"
+     ]
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a deleted blocker blocks nothing",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": false,
+     "deleted": true
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "a"
+     ]
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a blocker id that no longer exists blocks nothing",
+   "nodes": [
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "ghost"
+     ]
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "a container's own blocked_by is dormant",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": false
+    },
+    {
+     "id": "l",
+     "type": "list",
+     "done": false,
+     "blocked_by": [
+      "a"
+     ]
+    }
+   ],
+   "clearable": [],
+   "blocked": []
+  },
+  {
+   "name": "several blockers: one open is enough",
+   "nodes": [
+    {
+     "id": "a",
+     "type": "todo",
+     "done": true
+    },
+    {
+     "id": "c",
+     "type": "todo",
+     "done": false
+    },
+    {
+     "id": "b",
+     "type": "todo",
+     "done": false,
+     "blocked_by": [
+      "a",
+      "c"
+     ]
+    }
+   ],
+   "clearable": [
+    "a"
+   ],
+   "blocked": [
+    "b"
+   ]
+  }
+ ]
+}

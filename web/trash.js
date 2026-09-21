@@ -33,40 +33,14 @@
   new MutationObserver(updateFooter).observe(treeEl, { childList: true });
   updateFooter();
 
-  // A toast with an Undo button, in the same element and style as showUndo.
-  function showUndoToast(message, onUndo) {
-    const errorDiv = document.getElementById("error");
-    const token = "toast:" + Date.now();
-    clearTimeout(undoTimer);
-    lastDeleted = token; // keeps apiFetch from wiping the toast
-    errorDiv.onclick = null;
-    errorDiv.classList.add("toast--calm");
-    errorDiv.hidden = false;
-    errorDiv.textContent = message + " · ";
-    const btn = document.createElement("button");
-    btn.textContent = "Undo";
-    btn.className = "toast-action";
-    btn.onclick = () => {
-      clearTimeout(undoTimer);
-      errorDiv.hidden = true;
-      lastDeleted = null;
-      onUndo();
-    };
-    errorDiv.appendChild(btn);
-    undoTimer = setTimeout(() => {
-      if (lastDeleted === token) {
-        errorDiv.hidden = true;
-        lastDeleted = null;
-      }
-    }, 8000);
-  }
-
   function clearCompleted() {
     const ids = Sync.clearableIds(model);
     if (!ids.length) return;
     if (!engine.enqueue({ kind: "clear_completed", target_id: "clear-completed" })) return;
-    showUndoToast(ids.length === 1 ? "Cleared 1 completed" : `Cleared ${ids.length} completed`, () => {
-      for (const id of ids) engine.enqueue({ kind: "undelete", target_id: id });
+    toast.show({
+      message: ids.length === 1 ? "Cleared 1 completed" : `Cleared ${ids.length} completed`,
+      ttl: 8000,
+      action: { label: "Undo", run: () => { for (const id of ids) engine.enqueue({ kind: "undelete", target_id: id }); } },
     });
   }
   clearBtn.addEventListener("click", clearCompleted);

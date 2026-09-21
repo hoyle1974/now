@@ -4,12 +4,13 @@ title: Sync model
 description: Optimistic local-first writes, outbox, idempotency, versions, freshness checks.
 resource: web/sync.js
 tags: [sync, client, core]
-timestamp: 2026-09-21T12:00:00Z
+timestamp: 2026-09-21T16:00:00Z
 ---
 Every action applies locally first and syncs in the background. Design spec:
 `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
 
 - **Outbox** (`web/sync.js`): ordered queue persisted in IndexedDB (`web/idb-store.js`); edits to the same item coalesce (only into an op never sent: a sent op may already be on the server, so a later edit or an undelete queues a new op); one worker sends in order, retry backoff 1s→30s.
+- **Op table** (`OPS` in `web/sync.js`): one entry per op kind (`create`, `patch`, `delete`, `clear_completed`, `undelete`, `split`, `move`, `repeat`, `reparent`) holds everything about it: `apply` (optimistic), `request` (wire), `versioned` (If-Match), `ack`, conflict/404/400 behaviour (`retryOn409`, `onConflict`, `on400`, `on404`, `reloadAfterAck`), `mintsTarget`, `mayCommitUnacked` + `alreadyCommitted`, `prepare`, `coalesce`, `queueEvenIfUnapplied`. The engine has no `switch (kind)`; adding an op is adding an entry (`tests_js/sync.test.js` checks every entry is complete).
 - **Restored outbox:** `load()` sets `needsTree()`; the worker holds (pill: offline) until a server tree has loaded via `rebuild`, so replayed ops never run against an empty model without `If-Match` versions. After an offline launch the app shows a persistent "couldn't load your list" notice and retries the first load (15s, on return/online, pill tap). Ops carry `queued_at`; a *sent* create/split older than 25 days (the server's txn_log is kept 30) is checked against the first tree and dropped if the todo/children already exist there (same title, created after the op was queued). Limitation: later edits to a dropped create's temp id are dropped with it; ops without `queued_at` (older outboxes) are never checked.
 - **Error handling:** 401/403/408 keep the op and retry with backoff (pill: *Sign in to sync* for auth); the edit is never dropped. A 404 drops the item only when the body says `todo not found`; other 404s retry, then reload. A handler exception resets the op and retries. Delete sends `If-Match` from the undo snapshot's version; a stale delete (409) reloads. `rebuild` re-applies every queued move (acked ops have left the outbox).
 - **Idempotency:** `X-Txn-Id` per op; server stores the outcome in `txn_log` in the write's transaction, kept 30 days so a long-offline device replays safely; `X-Txn-Id` must match `[A-Za-z0-9_-]{1,100}` and not be `__x__` (400 otherwise; clients send UUIDs) ([Firestore](../data/firestore.md)).

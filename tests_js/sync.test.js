@@ -1085,3 +1085,15 @@ test("create and split carry the chosen type, optimistically and on the wire", (
   assert.equal("type" in body("create", { title: "r" }), false);
   assert.equal(body("split", { descriptions: ["a"], type: "list" }).type, "list");
 });
+
+test("every op kind in the table can be applied and sent, and its flags are consistent", () => {
+  for (const [kind, spec] of Object.entries(Sync.OPS)) {
+    assert.equal(typeof spec.apply, "function", `${kind}.apply`);
+    assert.equal(typeof spec.request, "function", `${kind}.request`);
+    if (spec.mayCommitUnacked) assert.equal(typeof spec.alreadyCommitted, "function", `${kind}.alreadyCommitted`);
+    const req = Sync.buildRequest({ kind, target_id: "a", txn_id: "t", payload: { descriptions: [], direction: "up" } }, 3);
+    assert.ok(req.method && req.path && req.headers["X-Txn-Id"] === "t", kind);
+  }
+  assert.throws(() => Sync.buildRequest({ kind: "nope", target_id: "a", txn_id: "t" }), /unknown op kind/);
+  assert.equal(Sync.applyOp(Sync.createModel(), { kind: "nope", target_id: "a" }), false);
+});
