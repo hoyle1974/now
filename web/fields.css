@@ -38,14 +38,22 @@
   background: color-mix(in srgb, var(--tc) 9%, transparent);
 }
 
-/* Root rows sit 2px inside a rounded card: match its corners so the tint and
-   bar don't poke out square. */
+/* Card corners: rows sit 2px inside a rounded card, so a tinted row at the top
+   or bottom edge needs the card's radius or its tint and bar poke out square.
+   Top: the root row. Bottom: the last leaf row of the card, at any depth
+   (children inherit their ancestor's color). */
 .todo-tree > .todo-node > .todo-row[data-color] {
-  border-radius: calc(var(--radius-card) - 2px);
+  border-top-left-radius: calc(var(--radius-card) - 2px);
+  border-top-right-radius: calc(var(--radius-card) - 2px);
 }
-.todo-tree > .todo-node:has(> .todo-children) > .todo-row[data-color] {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
+.todo-tree > .todo-node:not(:has(> .todo-children)) > .todo-row[data-color],
+.todo-tree > .todo-node > .todo-children > .todo-node:last-child:not(:has(> .todo-children)) > .todo-row[data-color],
+.todo-tree > .todo-node > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child:not(:has(> .todo-children)) > .todo-row[data-color],
+.todo-tree > .todo-node > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child:not(:has(> .todo-children)) > .todo-row[data-color],
+.todo-tree > .todo-node > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child:not(:has(> .todo-children)) > .todo-row[data-color],
+.todo-tree > .todo-node > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child > .todo-children > .todo-node:last-child:not(:has(> .todo-children)) > .todo-row[data-color] {
+  border-bottom-left-radius: calc(var(--radius-card) - 2px);
+  border-bottom-right-radius: calc(var(--radius-card) - 2px);
 }
 
 .todo-chip--blocked {
