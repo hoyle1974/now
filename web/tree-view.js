@@ -131,7 +131,7 @@ document.addEventListener("keydown", (e) => {
 });
 
 // The menu opens below its kebab. Near the bottom of the screen that puts it
-// under the composer, so open it upward if there's room above, otherwise
+// under the composer (or an Undo toast), so open it upward if there's room above, otherwise
 // scroll it into view.
 function placeOpenMenu() {
   document.body.classList.remove("menu-room");
@@ -141,7 +141,10 @@ function placeOpenMenu() {
   const composerTop = composer.getClientRects().length
     ? composer.getBoundingClientRect().top
     : window.innerHeight;
-  const bottomLimit = composerTop - 8;
+  // A visible toast (e.g. Undo after a delete) floats above the composer and covers the menu too.
+  const toast = document.getElementById("error");
+  const toastTop = toast && !toast.hidden ? toast.getBoundingClientRect().top : composerTop;
+  const bottomLimit = Math.min(composerTop, toastTop) - 8;
   const topLimit = document.querySelector(".tabs-wrap").getBoundingClientRect().bottom + 8;
   const kebab = menu.parentElement.querySelector(".todo-kebab").getBoundingClientRect();
   // offsetHeight, because the open animation scales the menu's own rect.
