@@ -242,3 +242,15 @@ def test_budget_route_returns_counts(monkeypatch):
     register()
     r = c.post("/internal/budget-alert", json={"message": {"data": budget_msg(alertThresholdExceeded=1.0)}})
     assert r.status_code == 200 and r.json() == {"sent": 1}
+
+
+def test_split_schedules_a_heads_up_per_child(monkeypatch):
+    calls = []
+    monkeypatch.setattr("app.tasks.schedule_from_body", lambda body: calls.append(body))
+    parent = add_todo("p", "2026-09-19T15:00:00")
+    r = c.post(f"/todos/{parent.todo_id}/split",
+               json={"descriptions": ["a", "b"], "due_date": "2026-09-19T17:30:00"})
+    assert r.status_code == 200
+    child_ids = [a["todo_id"] for a in r.json()["affected"][1:]]
+    assert [b["todo_id"] for b in calls] == child_ids and len(child_ids) == 2
+    assert all(b["due_date"].startswith("2026-09-19T17:30") for b in calls)

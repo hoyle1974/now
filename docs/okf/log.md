@@ -71,3 +71,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-20: Artifact Registry cleanup policy now keeps only the newest image (was 3; single user always runs latest); deleted the 5 oldest by hand, since the policy only runs about daily and cannot be triggered.
 - 2026-09-20: principles.md: rollback is an explicit non-goal (only the newest image is kept).
 - 2026-09-21: Ran `setup-cost-guards.sh` live: Pub/Sub subscription `now-app-budget-push` (OIDC as now-notify, audience = NOTIFY_AUDIENCE) and the $1 budget now publishes to topic `now-app-budget-alerts`. Verified: a routine test message reached `/internal/budget-alert` and got 200 (no push sent, no threshold). A real threshold push is untested until the budget actually fires.
+- 2026-09-20: Split children now get heads-ups too (POST /todos/{id}/split schedules one per new child when the split sets a due date).

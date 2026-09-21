@@ -454,7 +454,7 @@ def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
         x_txn_id, lambda: _apply(todo_id, if_match, action, include_deleted=True)), background)
 
 @app.post("/todos/{todo_id}/split", response_model=None)
-def split_todo(todo_id: uuid.UUID, body: models.TodoSplit,
+def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: BackgroundTasks,
                x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     def action(todo: models.Todo) -> dict:
         # affected is the parent first, then the new children in description
@@ -462,7 +462,13 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit,
         parent, affected = db.split_into_children(todo, body.descriptions, body.due_date)
         return {**jsonable_encoder(parent), "affected": _affected(affected)}
 
-    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
+    result = db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action))
+    if result[0] == 200 and body.due_date:
+        # The new children (affected[1:]) all carry the split's due date; the parent is unchanged.
+        for child in result[1]["affected"][1:]:
+            background.add_task(tasks.schedule_from_body,
+                                {"todo_id": child["todo_id"], "due_date": jsonable_encoder(body.due_date)})
+    return _reply(*result)
 
 @app.patch("/todos/{todo_id}/move/{direction}", response_model=None)
 def move_todo(todo_id: uuid.UUID, direction: str,
