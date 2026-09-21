@@ -129,14 +129,14 @@ function getTomorrowString() {
 // Strictly overdue (due date has already passed) — used for the red
 // due-date treatment, which should stay off for something due later today.
 function isOverdue(todo) {
-  if (todo.done || !todo.due_date) return false;
+  if (todo.done || !todo.due_date || !Types.hasField(todo, "due_date")) return false;
   return Due.isOverdue(todo.due_date);
 }
 
 // Overdue OR due today — used for sorting, since "due today" is also worth
 // surfacing to the top even though it isn't red yet.
 function isUrgent(todo) {
-  if (todo.done || !todo.due_date) return false;
+  if (todo.done || !todo.due_date || !Types.hasField(todo, "due_date")) return false;
   return daysUntil(todo.due_date) <= 0;
 }
 
@@ -144,26 +144,7 @@ function isUrgent(todo) {
 // in one memoized bottom-up pass rather than re-walking each parent's subtree
 // independently (which would revisit shared descendants once per ancestor).
 function computeDescendantCounts(todosById) {
-  const counts = new Map();
-  function countFor(todoId) {
-    if (counts.has(todoId)) {
-      return counts.get(todoId);
-    }
-    const todo = todosById.get(todoId);
-    const result = { total: 0, done: 0 };
-    for (const childId of todo.child_ids) {
-      const child = todosById.get(childId);
-      const sub = countFor(childId);
-      result.total += 1 + sub.total;
-      result.done += (child.done ? 1 : 0) + sub.done;
-    }
-    counts.set(todoId, result);
-    return result;
-  }
-  for (const todoId of todosById.keys()) {
-    countFor(todoId);
-  }
-  return counts;
+  return Types.descendantCounts(todosById);
 }
 
 async function copyOutline(todoId) {
@@ -204,7 +185,7 @@ function renderMeta(todo, hasChildren, counts) {
   const meta = document.createElement("div");
   meta.className = "todo-meta";
 
-  if (hasChildren) {
+  if (hasChildren && counts.total && Types.can(todo, "showsProgress")) {
     const progress = document.createElement("span");
     progress.className = "todo-chip";
     const ring = document.createElement("span");
@@ -217,7 +198,7 @@ function renderMeta(todo, hasChildren, counts) {
     meta.appendChild(progress);
   }
 
-  if (todo.repeat) {
+  if (todo.repeat && Types.hasField(todo, "repeat")) {
     const rep = document.createElement("span");
     rep.className = "todo-chip";
     const label = document.createElement("span");
@@ -226,7 +207,7 @@ function renderMeta(todo, hasChildren, counts) {
     meta.appendChild(rep);
   }
 
-  if (todo.due_date) {
+  if (todo.due_date && Types.hasField(todo, "due_date")) {
     const due = document.createElement("span");
     due.className = "todo-chip";
     if (isOverdue(todo)) {

@@ -14,7 +14,30 @@
   const DEFAULT = "todo";
   const get = (item) => data[item && item.type] || data[DEFAULT];
   const can = (item, flag) => Boolean(get(item)[flag]);
+  const nameOf = (item) => (item && data[item.type] ? item.type : DEFAULT);
   const hasField = (item, field) => get(item).fields.includes(field);
 
-  return { get, can, hasField, names: Object.keys(data) };
+  // Progress over the todos beneath each item: only types with a checkbox count, at any
+  // depth, so a container (list/project) is looked through, never counted itself.
+  // Returns Map(id -> { total, done }).
+  function descendantCounts(todosById) {
+    const counts = new Map();
+    const countFor = (id) => {
+      if (counts.has(id)) return counts.get(id);
+      const result = { total: 0, done: 0 };
+      counts.set(id, result); // cycle guard
+      for (const childId of todosById.get(id).child_ids) {
+        const child = todosById.get(childId);
+        if (!child) continue;
+        const sub = countFor(childId);
+        result.total += (can(child, "hasCheckbox") ? 1 : 0) + sub.total;
+        result.done += (can(child, "hasCheckbox") && child.done ? 1 : 0) + sub.done;
+      }
+      return result;
+    };
+    for (const id of todosById.keys()) countFor(id);
+    return counts;
+  }
+
+  return { get, can, hasField, nameOf, descendantCounts, names: Object.keys(data) };
 });

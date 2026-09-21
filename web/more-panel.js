@@ -207,7 +207,7 @@ if (window.Mascot) {
   window.Mascot.setMessageSource(() => {
     const all = [...model.todosById.values()];
     if (!all.length) return "A blank slate. Add something!";
-    const open = all.filter((t) => !t.done).length;
+    const open = all.filter((t) => !t.done && Types.can(t, "hasCheckbox")).length;
     const overdue = all.filter(isOverdue).length;
     if (open === 0) return "Nothing left. Go enjoy it \u2728";
     const lines = [
@@ -320,7 +320,7 @@ if (window.Mascot) {
       if (!all.length) return; // the list hasn't loaded, or is empty: try tomorrow
       const hour = new Date().getHours();
       const hello = hour < 5 ? "Burning the midnight oil?" : hour < 12 ? "Good morning!" : hour < 18 ? "Good afternoon!" : "Good evening!";
-      const open = all.filter((t) => !t.done).length;
+      const open = all.filter((t) => !t.done && Types.can(t, "hasCheckbox")).length;
       const overdue = all.filter(isOverdue).length;
       const tail = overdue ? ` ${overdue} overdue.` : open ? ` ${open} to do.` : " Nothing to do!";
       window.Mascot.react(hello + tail, { key: "greet", cooldown: 0, delay: 0 });

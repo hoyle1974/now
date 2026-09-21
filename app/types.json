@@ -1,15 +1,32 @@
 {
   "todo": {
-    "fields": ["title", "due_date", "repeat", "color", "links", "blocked_by", "references"],
+    "label": "Todo",
+    "icon": "check",
+    "fields": [
+      "title",
+      "due_date",
+      "repeat",
+      "color",
+      "links",
+      "blocked_by",
+      "references"
+    ],
     "hasCheckbox": true,
     "appearsInNextUp": true,
     "triggersAutodone": true,
     "countsInBadge": true,
-    "showsProgress": false,
+    "showsProgress": true,
     "notifies": true
   },
   "list": {
-    "fields": ["title", "color", "links", "references"],
+    "label": "List",
+    "icon": "grip",
+    "fields": [
+      "title",
+      "color",
+      "links",
+      "references"
+    ],
     "hasCheckbox": false,
     "appearsInNextUp": false,
     "triggersAutodone": false,
@@ -18,7 +35,14 @@
     "notifies": false
   },
   "project": {
-    "fields": ["title", "color", "links", "references"],
+    "label": "Project",
+    "icon": "copy",
+    "fields": [
+      "title",
+      "color",
+      "links",
+      "references"
+    ],
     "hasCheckbox": false,
     "appearsInNextUp": false,
     "triggersAutodone": false,

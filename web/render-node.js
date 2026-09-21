@@ -5,7 +5,7 @@
 // stored order (this never touches order_idx). A row that was just completed
 // stays put until its animation ends.
 function sinkDone(todos) {
-  const sunk = (t) => t.done && !justCompleted.has(t.todo_id);
+  const sunk = (t) => t.done && Types.can(t, "hasCheckbox") && !justCompleted.has(t.todo_id);
   return [...todos.filter((t) => !sunk(t)), ...todos.filter(sunk)];
 }
 
@@ -19,13 +19,14 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   // A row shows only its own stored state: a done parent does not make its
   // subtasks look done, and they can still be checked and unchecked.
-  const shownDone = todo.done;
+  const hasCheckbox = Types.can(todo, "hasCheckbox");
+  const shownDone = hasCheckbox && todo.done;
   const row = document.createElement("div");
   row.className = "todo-row";
   if (shownDone) {
     row.classList.add("is-done");
   }
-  if (justCompleted.has(todo.todo_id) && todo.done) {
+  if (justCompleted.has(todo.todo_id) && shownDone) {
     row.classList.add("just-done");
   }
   if (focusedId === todo.todo_id) {
@@ -139,8 +140,10 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     };
   }
 
-  const checkboxHit = document.createElement("label");
-  checkboxHit.className = "todo-check";
+  // A container (list/project) has no done state, so its slot holds a marker instead.
+  const checkboxHit = document.createElement(hasCheckbox ? "label" : "span");
+  checkboxHit.className = hasCheckbox ? "todo-check" : "todo-check todo-check--none";
+  if (!hasCheckbox) checkboxHit.appendChild(icon(Types.get(todo).icon));
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = shownDone;
@@ -156,7 +159,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
     }
     reportedFailure(toggleDone(todo.todo_id, checkbox.checked));
   });
-  checkboxHit.appendChild(checkbox);
+  if (hasCheckbox) checkboxHit.appendChild(checkbox);
 
   const body = document.createElement("div");
   body.className = "todo-body";
@@ -206,6 +209,14 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       menuItem("Edit", "pencil", openPanel("edit")),
       menuItem("Split into subtasks", "split", openPanel("split"))
     );
+
+    // Switching type only changes the label: due date, repeat and done stay, inactive.
+    for (const name of Types.names.filter((n) => n !== Types.nameOf(todo))) {
+      menu.append(menuItem(`Make ${Types.get({ type: name }).label.toLowerCase()}`, "pencil", () => {
+        setActivePanel(null);
+        reportedFailure(setType(todo.todo_id, name));
+      }));
+    }
 
     menu.append(
       menuItem("Copy with subtasks", "copy", () => {

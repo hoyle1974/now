@@ -2,11 +2,11 @@
 // fields. No DOM access, so it runs unchanged under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./types.js"));
   } else {
-    root.Fields = factory();
+    root.Fields = factory(root.Types);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (Types) {
   "use strict";
 
   const COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
@@ -19,7 +19,7 @@
   function isBlocked(todo, todosById) {
     return (todo.blocked_by || []).some((id) => {
       const b = todosById.get(id);
-      return !!b && !b.deleted && !b.done;
+      return !!b && !b.deleted && !b.done && Types.can(b, "hasCheckbox");
     });
   }
 

@@ -95,3 +95,9 @@ test("patchPayload: an edit sends due_date and repeat; no date clears the repeat
   assert.deepEqual(Fields.patchPayload({ title: "T", dueDate: "", repeat: "daily" }),
     { title: "T", due_date: null, repeat: null });
 });
+
+test("a container never blocks", () => {
+  const byId = new Map([["l", { todo_id: "l", type: "list", done: false }], ["p", { todo_id: "p", type: "todo", done: false }]]);
+  assert.equal(Fields.isBlocked({ blocked_by: ["l"] }, byId), false);
+  assert.equal(Fields.isBlocked({ blocked_by: ["p"] }, byId), true);
+});

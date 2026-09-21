@@ -753,6 +753,7 @@ body.menu-room:has(#error:not([hidden])) {
 .sheet input[type="date"],
 .sheet input[type="time"],
 .sheet input[type="number"],
+.sheet select,
 .sheet textarea {
   display: block;
   width: 100%;
@@ -807,6 +808,7 @@ body.menu-room:has(#error:not([hidden])) {
 }
 
 .sheet input:focus,
+.sheet select:focus,
 .sheet textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
@@ -1957,3 +1959,10 @@ li.search-hit { cursor: default; }
 .next-row--blocked .next-title {
   color: var(--label-2);
 }
+
+/* Container rows (list/project) have no checkbox: a quiet marker holds the slot. */
+.todo-check--none { color: var(--label-3); cursor: default; }
+.todo-check--none svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* Edit-sheet fields hidden by the item type stay in the DOM (their data is kept). */
+.field-group { display: contents; }
+.field-group[hidden] { display: none; }

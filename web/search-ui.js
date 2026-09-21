@@ -110,10 +110,10 @@
       const list = el("ul", "search-list");
       for (const hit of hits) {
         const li = el("li");
-        const btn = el("button", "search-hit" + (hit.todo.done ? " is-done" : ""));
+        const btn = el("button", "search-hit" + (hit.todo.done && Types.can(hit.todo, "hasCheckbox") ? " is-done" : ""));
         btn.type = "button";
         if (hit.path.length) btn.appendChild(el("span", "search-path", hit.path.join(" › ")));
-        btn.appendChild(el("span", "search-title", (hit.todo.done ? "✓ " : "") + hit.todo.title));
+        btn.appendChild(el("span", "search-title", (hit.todo.done && Types.can(hit.todo, "hasCheckbox") ? "✓ " : "") + hit.todo.title));
         btn.addEventListener("click", (event) => {
           const y = event.detail === 0 ? btn.getBoundingClientRect().top : event.clientY;
           close();

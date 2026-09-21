@@ -18,3 +18,18 @@ test("containers have no checkbox and are not in badge, next up or autodone", ()
   assert.equal(Types.hasField({ type: "list" }, "due_date"), false);
   assert.equal(Types.hasField({ type: "todo" }, "due_date"), true);
 });
+
+test("descendantCounts counts only todos, at any depth, looking through containers", () => {
+  const node = (id, extra = {}) => [id, { todo_id: id, done: false, child_ids: [], type: "todo", ...extra }];
+  const byId = new Map([
+    node("proj", { type: "project", child_ids: ["a", "lst", "empty"] }),
+    node("a", { done: true }),
+    node("lst", { type: "list", child_ids: ["b", "c"] }),
+    node("b", { done: true }), node("c"),
+    node("empty", { type: "list" }),
+  ]);
+  const counts = Types.descendantCounts(byId);
+  assert.deepEqual(counts.get("proj"), { total: 3, done: 2 });
+  assert.deepEqual(counts.get("lst"), { total: 2, done: 1 });
+  assert.deepEqual(counts.get("empty"), { total: 0, done: 0 });
+});

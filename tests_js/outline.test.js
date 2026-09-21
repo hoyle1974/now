@@ -28,3 +28,10 @@ test("done items are marked and only the chosen subtree is copied", () => {
   );
   assert.equal(Outline.toOutline(m, "b"), "- [x] Sub\n  - Leaf");
 });
+
+test("a container never shows a done mark, even with a stale done", () => {
+  const list = { todo_id: "l", title: "Groceries", type: "list", done: true, child_ids: ["a"] };
+  const a = { todo_id: "a", title: "milk", done: true, child_ids: [] };
+  const byId = new Map([["l", list], ["a", a]]);
+  assert.equal(Outline.toOutline(byId, "l"), "- Groceries\n  - [x] milk");
+});

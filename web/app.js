@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "77";
+const APP_VERSION = "78";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -379,6 +379,10 @@ function showUndo(todoId) {
 }
 
 // dueDate undefined = rename only (leave due date/time and repeat alone).
+async function setType(todoId, type) {
+  engine.enqueue({ kind: "patch", target_id: todoId, payload: { type } });
+}
+
 async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
   setActivePanel(viewerOrigin === todoId ? "view" : null, todoId);
   // null explicitly clears the due date (and a repeat rule needs a date).

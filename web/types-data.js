@@ -9,6 +9,8 @@
   "use strict";
   return {
     "todo": {
+      "label": "Todo",
+      "icon": "check",
       "fields": [
         "title",
         "due_date",
@@ -22,10 +24,12 @@
       "appearsInNextUp": true,
       "triggersAutodone": true,
       "countsInBadge": true,
-      "showsProgress": false,
+      "showsProgress": true,
       "notifies": true
     },
     "list": {
+      "label": "List",
+      "icon": "grip",
       "fields": [
         "title",
         "color",
@@ -40,6 +44,8 @@
       "notifies": false
     },
     "project": {
+      "label": "Project",
+      "icon": "copy",
       "fields": [
         "title",
         "color",

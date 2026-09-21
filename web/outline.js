@@ -3,11 +3,11 @@
 // No DOM access, so it runs under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./types.js"));
   } else {
-    root.Outline = factory();
+    root.Outline = factory(root.Types);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (Types) {
   "use strict";
 
   function toOutline(todosById, rootId) {
@@ -17,7 +17,7 @@
       const todo = todosById.get(id);
       if (!todo || seen.has(id)) return;
       seen.add(id);
-      lines.push(`${"  ".repeat(depth)}- ${todo.done ? "[x] " : ""}${todo.title}`);
+      lines.push(`${"  ".repeat(depth)}- ${todo.done && Types.can(todo, "hasCheckbox") ? "[x] " : ""}${todo.title}`);
       const children = todo.child_ids
         .map((childId) => todosById.get(childId))
         .filter(Boolean)

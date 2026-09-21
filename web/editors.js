@@ -240,6 +240,36 @@ function renderEditEditor(todo) {
   markChips();
 
   const extra = FieldsUI.renderEditFields(todo);
+
+  // Type picker. Only the fields the chosen type has are shown; the others are hidden,
+  // not cleared, so switching back finds them as they were.
+  const typeSelect = document.createElement("select");
+  for (const name of Types.names) {
+    const opt = document.createElement("option");
+    opt.value = name;
+    opt.textContent = Types.get({ type: name }).label;
+    typeSelect.appendChild(opt);
+  }
+  typeSelect.value = Types.nameOf(todo);
+  const group = (field, nodes) => {
+    const g = document.createElement("div");
+    g.className = "field-group";
+    g.dataset.field = field;
+    g.append(...nodes);
+    return g;
+  };
+  const groups = [
+    group("due_date", [sheetLabel("Due date", dueDateInput), dueField, shortcutsDiv,
+      sheetLabel("Time (optional)", dueTimeInput), dueTimeInput]),
+    group("repeat", [sheetLabel("Repeat every", repeatControls.unit), repeatControls.row]),
+    ...["color", "links", "blocked_by", "references"].map((f, i) => group(f, extra.nodes.slice(2 * i, 2 * i + 2))),
+  ];
+  const showFields = () => {
+    for (const g of groups) g.hidden = !Types.hasField({ type: typeSelect.value }, g.dataset.field);
+  };
+  typeSelect.addEventListener("change", showFields);
+  showFields();
+
   const buttons = renderEditorActions(() => {
     const title = titleInput.value.trim();
     if (!title) return;
@@ -248,13 +278,19 @@ function renderEditEditor(todo) {
       showNotice({ level: "error", message: result.error });
       return;
     }
-    reportedFailure(saveEdit(todo.todo_id, title, Due.combine(dueDateInput.value, dueTimeInput.value),
-      repeatControls.value(), result.fields));
+    const chosen = { type: typeSelect.value };
+    // Fields the type doesn't have are left exactly as stored.
+    const fields = Object.fromEntries(Object.entries(result.fields).filter(([f]) => Types.hasField(chosen, f)));
+    if (chosen.type !== Types.nameOf(todo)) fields.type = chosen.type;
+    const dated = Types.hasField(chosen, "due_date");
+    reportedFailure(saveEdit(todo.todo_id, title,
+      dated ? Due.combine(dueDateInput.value, dueTimeInput.value) : undefined,
+      dated ? repeatControls.value() : null, fields));
   });
 
   const heading = document.createElement("h2");
   heading.className = "sheet-title";
-  heading.textContent = "Edit todo";
+  heading.textContent = "Edit item";
 
   const body = document.createElement("div");
   body.className = "sheet-body";
@@ -262,14 +298,9 @@ function renderEditEditor(todo) {
     heading,
     sheetLabel("Title", titleInput),
     titleInput,
-    sheetLabel("Due date", dueDateInput),
-    dueField,
-    shortcutsDiv,
-    sheetLabel("Time (optional)", dueTimeInput),
-    dueTimeInput,
-    sheetLabel("Repeat every", repeatControls.unit),
-    repeatControls.row,
-    ...extra.nodes
+    sheetLabel("Type", typeSelect),
+    typeSelect,
+    ...groups
   );
   const screen = renderSheet(body, buttons);
   screen.classList.add("sheet-full");
@@ -292,7 +323,7 @@ function renderViewer(todo, counts) {
 
   const body = document.createElement("div");
   body.className = "sheet-body";
-  add(body, "h2", "sheet-title" + (todo.done ? " is-done" : ""), todo.title);
+  add(body, "h2", "sheet-title" + (todo.done && Types.can(todo, "hasCheckbox") ? " is-done" : ""), todo.title);
 
   const facts = document.createElement("dl");
   facts.className = "view-facts";
@@ -300,10 +331,11 @@ function renderViewer(todo, counts) {
     add(facts, "dt", "sheet-label", name);
     add(facts, "dd", "view-value", value);
   };
-  fact("Status", todo.done ? "Done" : "Open");
-  fact("Due", todo.due_date ? formatDue(todo.due_date) : "No due date");
-  if (todo.repeat) fact("Repeats", Due.formatRepeat(todo.repeat));
-  if (counts && counts.total) fact("Subtasks", `${counts.done} of ${counts.total} done`);
+  if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
+  else fact("Type", Types.get(todo).label);
+  if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? formatDue(todo.due_date) : "No due date");
+  if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
+  if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
   if (Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
   body.appendChild(facts);
   body.appendChild(FieldsUI.renderDetail(todo));

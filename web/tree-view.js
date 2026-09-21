@@ -24,7 +24,7 @@ function renderSummary() {
   const all = [...model.todosById.values()];
   updateBadge(all);
   if (all.length === 0) return;
-  const open = all.filter((t) => !t.done).length;
+  const open = all.filter((t) => !t.done && Types.can(t, "hasCheckbox")).length;
   const overdue = all.filter(isOverdue).length;
   summary.append(open === 0 ? "Everything's done" : `${open} open`);
   if (overdue > 0) {
