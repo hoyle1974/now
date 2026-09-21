@@ -40,3 +40,12 @@ test("canPrompt is true only where a permission ask can help", () => {
   assert.equal(Badge.canPrompt(nav, undefined), false);
   assert.equal(Badge.canPrompt({}, { permission: "default" }), false);
 });
+
+test("containers never count, whatever their due date", () => {
+  const todos = [
+    { done: false, due_date: "2026-01-01T00:00:00", type: "todo" },
+    { done: false, due_date: "2026-01-01T00:00:00", type: "list" },
+    { done: false, due_date: "2026-01-01T00:00:00", type: "project" },
+  ];
+  assert.equal(Badge.dueCount(todos, () => -1), 1);
+});

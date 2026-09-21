@@ -1047,3 +1047,24 @@ test("applyOp create keeps the color it is given", () => {
   Sync.applyOp(model, { kind: "create", target_id: "tmp:1", payload: { title: "a", color: "teal" } });
   assert.equal(model.todosById.get("tmp:1").color, "teal");
 });
+
+test("type is a patchable field: applied locally and sent", () => {
+  const model = Sync.createModel();
+  Sync.applyOp(model, { kind: "create", target_id: "a", payload: { title: "a" } });
+  assert.equal(model.todosById.get("a").type, "todo");
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload: { type: "list" } });
+  assert.equal(model.todosById.get("a").type, "list");
+  const req = Sync.buildRequest({ kind: "patch", target_id: "a", txn_id: "t", payload: { type: "list" } }, 3);
+  assert.deepEqual(req.body, { type: "list" });
+  assert.equal(req.headers["If-Match"], "3");
+});
+
+test("clearableIds: a container is cleared by its todos, not its own done", () => {
+  const proj = todo("proj", { type: "project", child_ids: ["t1"] });
+  const t1 = todo("t1", { done: true, parent_id: "proj" });
+  const empty = todo("empty", { type: "list", done: true });
+  const open = todo("open", { type: "project", child_ids: ["t2"] });
+  const t2 = todo("t2", { parent_id: "open" });
+  const model = treeOf(proj, t1, empty, open, t2);
+  assert.deepEqual(Sync.clearableIds(model), ["proj"]);
+});

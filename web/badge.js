@@ -2,18 +2,18 @@
 // No DOM access, so it runs under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./types.js"));
   } else {
-    root.Badge = factory();
+    root.Badge = factory(root.Types);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (Types) {
   "use strict";
 
   // daysUntil(todo) is the app's calendar-day distance (negative = overdue).
   function dueCount(todos, daysUntil) {
     let n = 0;
     for (const t of todos) {
-      if (!t.done && t.due_date && daysUntil(t) <= 0) n++;
+      if (!t.done && t.due_date && Types.can(t, "countsInBadge") && daysUntil(t) <= 0) n++;
     }
     return n;
   }

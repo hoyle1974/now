@@ -44,3 +44,23 @@ test("a root or unknown todo has no ancestors to complete", () => {
   assert.deepEqual(Autodone.ancestorsToComplete(m, "a"), []);
   assert.deepEqual(Autodone.ancestorsToComplete(m, "zzz"), []);
 });
+
+test("a container between two todos is transparent to autodone", () => {
+  const m = modelOf(
+    todo("g", { child_ids: ["p"] }),
+    todo("p", { parent_id: "g", type: "project", child_ids: ["a", "b"] }),
+    todo("a", { parent_id: "p", done: true }),
+    todo("b", { parent_id: "p" }),
+  );
+  assert.deepEqual(Autodone.ancestorsToComplete(m, "b"), ["g"]);   // the project itself is never completed
+});
+
+test("an open todo under a container keeps the grandparent open", () => {
+  const m = modelOf(
+    todo("g", { child_ids: ["p"] }),
+    todo("p", { parent_id: "g", type: "list", child_ids: ["a", "b"] }),
+    todo("a", { parent_id: "p" }),
+    todo("b", { parent_id: "p" }),
+  );
+  assert.deepEqual(Autodone.ancestorsToComplete(m, "b"), []);
+});
