@@ -3,12 +3,13 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T14:00:00Z
+timestamp: 2026-09-21T07:15:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
 - `models.py` — pydantic models and limits ([Todo](../data/todo.md)).
 - `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep.
+- `types.json`, `types.py` — item type registry ([item types](../features/item-types.md)); `scripts/gen_types.py` generates `web/types-data.js`, wrapped by `web/types.js`.
 - `next_up.py` — ranking ([next up](../features/next-up.md)).
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).
 - `tasks.py` — Cloud Tasks heads-up scheduling (`fire_time`, `schedule_heads_up`); `push.py` — digest planner, heads-up handler and FCM sender ([push reminders](../features/push-reminders.md)).

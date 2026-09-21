@@ -4,7 +4,7 @@ title: Todo
 description: Fields, limits and derived values of a todo document.
 resource: app/models.py
 tags: [data, model]
-timestamp: 2026-09-20T18:00:00Z
+timestamp: 2026-09-21T07:15:00Z
 ---
 | Field | Notes |
 |---|---|
@@ -18,6 +18,7 @@ timestamp: 2026-09-20T18:00:00Z
 | `version` | Bumped on each content write; used with `If-Match`. |
 | `color`, `links`, `blocked_by`, `references` | [Fields](../features/fields.md). |
 | `attachments` | `[{id, name, content_type, size}]`; bytes are in a bucket, changed only by the attachment routes ([attachments](../features/attachments.md)). |
+| `type` | `todo` (default) / `list` / `project`; missing or unknown reads as `todo`. Changed by `PATCH`, which touches only this field ([item types](../features/item-types.md)). |
 | `blocked` | Derived, never stored, only added by `GET /todos/tree`. |
 
 Limits: 20 links, URL ≤2048 chars (http/https), label ≤200, 50 ids per list, 10 attachments of ≤10 MB.
