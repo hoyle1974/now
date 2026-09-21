@@ -574,7 +574,10 @@ svg {
 }
 
 /* Extra scroll room so a menu on the last rows can clear the fixed composer. */
-body.menu-room {
+/* (Also with a toast up: the toast's own padding rule below would otherwise win, leaving
+   no room to scroll the menu clear.) */
+body.menu-room,
+body.menu-room:has(#error:not([hidden])) {
   padding-bottom: calc(var(--composer-h, 84px) + 320px);
 }
 
