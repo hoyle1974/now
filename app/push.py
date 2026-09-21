@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import hashlib
 import logging
+import uuid
 from dataclasses import dataclass
 from typing import Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -17,6 +18,12 @@ class DeviceRegistration(BaseModel):
     token: str = Field(min_length=1, max_length=4096)
     tz: str = "UTC"
     platform: str = Field("", max_length=64)
+
+
+class HeadsUp(BaseModel):
+    """Body of a Cloud Tasks delivery (app/tasks.py): the todo and the due time the task was made for."""
+    todo_id: str = Field(min_length=1, max_length=64)
+    due: str = Field(min_length=1, max_length=64)
 
 
 class TokenOnly(BaseModel):
@@ -59,6 +66,10 @@ def _local_due(todo: models.Todo, zone: ZoneInfo) -> datetime.datetime:
     return due.astimezone(zone).replace(tzinfo=None) if due.tzinfo else due
 
 
+def _is_timed(due: datetime.datetime) -> bool:
+    return due.time() != datetime.time(0, 0)
+
+
 def plan_device(dev_id: str, tz: str, now_utc: datetime.datetime,
                 todos: list[models.Todo], sent: Callable[[str], list[str] | None]) -> list[Push]:
     """What to send this device right now: at most one digest per device-local day
@@ -95,15 +106,18 @@ def send_fcm(token: str, p: Push) -> None:
         raise DeadToken() from e
 
 
-def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | None = None) -> dict:
-    """One scheduler tick (once a day). Reads only todos due within two days (or overdue), and
-    nothing at all when no device is registered. The marker is written before the
-    send, so a failure loses one push rather than repeating it."""
-    from app import db
+def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | None = None,
+               create_task: Callable | None = None) -> dict:
+    """The daily tick. Sends each device its digest, then makes a heads-up task for every
+    timed todo due soon (app/tasks.py; the write routes make them too, this is the safety
+    net). Reads only todos due within two days (or overdue), and nothing at all when no
+    device is registered. The marker is written before the send, so a failure loses one
+    push rather than repeating it."""
+    from app import db, tasks
     send = send or send_fcm
     devices = db.list_push_devices()
     if not devices:
-        return {"devices": 0, "sent": 0}
+        return {"devices": 0, "sent": 0, "scheduled": 0}
     # Two days ahead covers "end of today" in any timezone; each device filters precisely.
     todos = db.get_due_todos((now_utc + datetime.timedelta(days=2)).replace(tzinfo=None))
     sent = 0
@@ -120,4 +134,41 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
                 break
             except Exception:
                 logging.exception("push send failed for device %s", dev["id"])
-    return {"devices": len(devices), "sent": sent}
+    tz = tasks.home_tz(devices)
+    scheduled = sum(tasks.schedule_heads_up(str(t.todo_id), t.due_date, t.done, t.deleted, now_utc, tz, create_task)
+                    for t in todos) if tz else 0
+    return {"devices": len(devices), "sent": sent, "scheduled": scheduled}
+
+
+def run_heads_up(todo_id: str, due_iso: str, now_utc: datetime.datetime,
+                 send: Callable[[str, Push], None] | None = None) -> dict:
+    """A Cloud Task fired: tell every device the todo is due in about an hour, unless it
+    was completed, deleted or moved since the task was made (then stay silent, so the
+    task is done and not retried)."""
+    from app import db
+    send = send or send_fcm
+    try:
+        tid = models.TodoId(uuid.UUID(todo_id))
+    except ValueError:
+        return {"sent": 0, "skipped": "bad id"}
+    todo = db.get_todo(tid)
+    if todo is None or todo.done or todo.due_date is None or todo.due_date.isoformat() != due_iso:
+        return {"sent": 0, "skipped": "stale"}
+    sent = 0
+    for dev in db.list_push_devices():
+        zone = _zone(dev.get("tz", "UTC"))
+        due = _local_due(todo, zone)
+        if not _is_timed(due) or due <= now_utc.astimezone(zone).replace(tzinfo=None):
+            continue
+        key = f"soon:{todo.todo_id}:{due_iso}:{dev['id']}"
+        if db.get_push_marker(key) is not None:
+            continue
+        db.put_push_marker(key, [str(todo.todo_id)], now_utc + MARKER_TTL)
+        try:
+            send(dev["token"], Push(key, todo.title, f"Due at {due.strftime('%-I:%M %p')}, in about an hour"))
+            sent += 1
+        except DeadToken:
+            db.delete_push_device(dev["id"])
+        except Exception:
+            logging.exception("heads-up send failed for device %s", dev["id"])
+    return {"sent": sent}

@@ -44,6 +44,7 @@ else
   has WIDGET_TOKEN        && ok "env WIDGET_TOKEN"        || warn "env WIDGET_TOKEN unset (lock screen widget off)"
   has CALENDAR_TOKEN      && ok "env CALENDAR_TOKEN"      || warn "env CALENDAR_TOKEN unset (calendar feed off: scripts/setup-calendar.sh)"
   has NOTIFY_AUDIENCE && has NOTIFY_CALLER && ok "env NOTIFY_* (reminders)" || warn "NOTIFY_* unset (reminders off: scripts/setup-push.sh)"
+  has REMINDER_QUEUE      && ok "env REMINDER_QUEUE"      || warn "env REMINDER_QUEUE unset (no 1-hour heads-ups, only the daily digest: scripts/setup-push.sh)"
   url="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format='value(status.url)' 2>/dev/null)"
   code="$(curl -s -o /dev/null -w '%{http_code}' "$url/health" 2>/dev/null || true)"
   [ "$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format="value(spec.template.metadata.annotations['run.googleapis.com/cpu-throttling'])" 2>/dev/null)" = "true" ] \

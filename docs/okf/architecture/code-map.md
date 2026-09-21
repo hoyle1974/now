@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T02:00:00Z
+timestamp: 2026-09-21T05:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -11,7 +11,7 @@ timestamp: 2026-09-21T02:00:00Z
 - `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep.
 - `next_up.py` — ranking ([next up](../features/next-up.md)).
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).
-- `push.py` — reminder planner and FCM sender ([push reminders](../features/push-reminders.md)).
+- `tasks.py` — Cloud Tasks heads-up scheduling (`fire_time`, `schedule_heads_up`); `push.py` — digest planner, heads-up handler and FCM sender ([push reminders](../features/push-reminders.md)).
 - `ics.py` — iCalendar rendering ([calendar feed](../features/calendar-feed.md)).
 - `auth.py` — Firebase token, widget token, Scheduler OIDC.
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).

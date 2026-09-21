@@ -91,7 +91,7 @@ def test_unregister_removes_the_device():
 def test_notify_route_returns_counts(monkeypatch):
     monkeypatch.setattr(push, "send_fcm", Fake())
     r = c.post("/internal/notify")
-    assert r.status_code == 200 and r.json() == {"devices": 0, "sent": 0}
+    assert r.status_code == 200 and r.json() == {"devices": 0, "sent": 0, "scheduled": 0}
 
 
 # ---- runner ----
@@ -104,7 +104,7 @@ def test_run_notify_sends_digest_once():
     register()
     add_todo("pay rent", "2026-09-19T00:00:00")
     fake = Fake()
-    assert push.run_notify(NINE_LA, send=fake) == {"devices": 1, "sent": 1}
+    assert push.run_notify(NINE_LA, send=fake) == {"devices": 1, "sent": 1, "scheduled": 0}
     assert fake.sent == [("tok", "1 due today")]
     push.run_notify(NINE_LA + dt.timedelta(minutes=10), send=fake)
     assert len(fake.sent) == 1
@@ -113,7 +113,7 @@ def test_run_notify_sends_digest_once():
 def test_run_notify_zero_due_writes_marker_and_sends_nothing():
     register()
     fake = Fake()
-    assert push.run_notify(NINE_LA, send=fake) == {"devices": 1, "sent": 0}
+    assert push.run_notify(NINE_LA, send=fake) == {"devices": 1, "sent": 0, "scheduled": 0}
     assert db.get_push_marker(f"digest:2026-09-19:{push.device_id('tok')}") == []
 
 
@@ -138,7 +138,7 @@ def test_run_notify_sends_one_digest_to_each_device_and_no_heads_up():
     db.upsert_push_device(push.device_id("tok2"), "tok2", "America/New_York", "web")
     add_todo("dentist", "2026-09-19T15:00:00")  # timed, later today: listed in the digest, no extra heads-up
     fake = Fake()
-    assert push.run_notify(dt.datetime(2026, 9, 19, 21, 30, tzinfo=UTC), send=fake) == {"devices": 2, "sent": 2}
+    assert push.run_notify(dt.datetime(2026, 9, 19, 21, 30, tzinfo=UTC), send=fake) == {"devices": 2, "sent": 2, "scheduled": 0}
     assert sorted(fake.sent) == [("tok", "1 due today"), ("tok2", "1 due today")]
     push.run_notify(dt.datetime(2026, 9, 19, 22, 30, tzinfo=UTC), send=fake)
     assert len(fake.sent) == 2

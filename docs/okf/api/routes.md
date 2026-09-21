@@ -4,7 +4,7 @@ title: HTTP routes
 description: All routes in app/main.py.
 resource: app/main.py
 tags: [api]
-timestamp: 2026-09-21T01:00:00Z
+timestamp: 2026-09-21T05:00:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -24,7 +24,8 @@ timestamp: 2026-09-21T01:00:00Z
 | `GET /calendar/<token>.ics` | [Calendar feed](../features/calendar-feed.md): read-only ICS; the secret path token is the auth (no sign-in header), only this route. |
 | `GET /calendar/link` | Signed-in: `{enabled, path}` for the More panel's Subscribe / Copy link. |
 | `POST /push/devices` `{token, tz, platform}`, `POST /push/devices/unregister` `{token}` | Register or drop a device for [push reminders](../features/push-reminders.md); 400 on an unknown timezone. |
-| `POST /internal/notify` | Cloud Scheduler only (OIDC); sends due reminders, returns `{devices, sent}`. |
+| `POST /internal/notify` | Cloud Scheduler only (OIDC), once a day; sends the digest and makes heads-up tasks, returns `{devices, sent, scheduled}`. |
+| `POST /internal/notify-todo` `{todo_id, due}` | Cloud Tasks only (same OIDC check); sends one 1-hour heads-up unless the todo changed, returns `{sent}` ([push reminders](../features/push-reminders.md)). |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
 Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev`.

@@ -20,7 +20,7 @@ timestamp: 2026-09-21T12:00:00Z
 | Project APIs, Firestore database (PITR pinned on), the `now-app` Cloud Run service shell, its service account, monitoring (uptime check, alert policies, channel), budget topic | zilch (Terraform; remote state `gs://<project-id>-zilch-tfstate`, prefix `terraform/state/now-app`) |
 | The running code, env vars and `widget-token` secret reference on `now-app` | `deploy.sh`, `setup-push.sh`, `init.sh --widget`, `migrate-service.sh` (zilch ignores image, env, gcloud client fields) |
 | Attachments bucket | `scripts/create-bucket.sh` |
-| Reminders: Scheduler job, `now-notify` service account, FCM role, `push_sent` TTL | `scripts/setup-push.sh` (zilch has a generic `enable_scheduler` job; unused) |
+| Reminders: Scheduler job, Cloud Tasks queue `now-reminders`, `now-notify` service account, FCM role, `push_sent` TTL | `scripts/setup-push.sh` (zilch has a generic `enable_scheduler` job; unused) |
 | Firebase web app, Hosting site, Google sign-in provider | Firebase console / `scripts/init.sh` (sign-in is console-only) |
 | Log metric `now_sync_conflicts` | by hand, gcloud ([monitoring](../ops/monitoring-backups.md)) |
 

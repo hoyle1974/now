@@ -17,6 +17,7 @@ from app import ics
 from app import models
 from app import next_up
 from app import push
+from app import tasks
 from app import auth
 from app.auth import require_user
 
@@ -130,6 +131,19 @@ def notify() -> dict:
     """Cloud Scheduler tick (OIDC-verified in require_user): send due reminders."""
     return push.run_notify(datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
 
+@app.post("/internal/notify-todo")
+def notify_todo(body: push.HeadsUp) -> dict:
+    """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user)."""
+    return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
+
+def _saved(result: tuple, todo_of: Callable[[dict], dict | None] = lambda body: body) -> Response:
+    """Reply for a finished write, after making the heads-up task for a todo it saved
+    (best-effort, outside the transaction; a replayed retry just finds the task already there)."""
+    status, body = result[0], result[1]
+    if status == 200:
+        tasks.schedule_from_body(todo_of(body))
+    return _reply(*result)
+
 @app.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) -> Response:
     def create() -> tuple[int, dict | None]:
@@ -139,7 +153,7 @@ def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) ->
         db.create_todo(todo)
         return 200, jsonable_encoder(todo)
 
-    return _reply(*db.run_atomic(x_txn_id, create))
+    return _saved(db.run_atomic(x_txn_id, create))
 
 @app.get("/calendar/link")
 def calendar_link() -> dict:
@@ -293,7 +307,7 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
-    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
+    return _saved(db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
 
 @app.post("/todos/{todo_id}/repeat", response_model=None)
 def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
@@ -310,7 +324,8 @@ def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.Todo
         copy = db.spawn_next_occurrence(todo, today)
         return {"created": True, "spawned_id": str(copy.todo_id), "todo": jsonable_encoder(copy)}
 
-    return _reply(*db.run_atomic(x_txn_id, lambda: _apply(todo_id, None, action)))
+    return _saved(db.run_atomic(x_txn_id, lambda: _apply(todo_id, None, action)),
+                  lambda body: body.get("todo"))
 
 
 @app.patch("/todos/{todo_id}/reparent", response_model=None)
@@ -424,7 +439,7 @@ def undelete_todo_endpoint(todo_id: uuid.UUID,
         restored, affected = db.undelete_todo(models.TodoId(todo_id))
         return {**jsonable_encoder(restored), "affected": _affected(affected)}
 
-    return _reply(*db.run_atomic(
+    return _saved(db.run_atomic(
         x_txn_id, lambda: _apply(todo_id, if_match, action, include_deleted=True)))
 
 @app.post("/todos/{todo_id}/split", response_model=None)

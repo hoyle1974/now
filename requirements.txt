@@ -4,3 +4,4 @@ python-multipart==0.0.32
 firebase-admin==7.6.0
 google-cloud-firestore==2.31.0
 google-cloud-storage==3.14.1
+google-cloud-tasks==2.24.0

@@ -48,7 +48,7 @@ def calendar_feed_path() -> str | None:
 
 # Cloud Scheduler calls these with a Google-signed OIDC token. Read at call time
 # so the deployed env vars (and tests) decide; either unset turns the route off.
-_SCHEDULER_PATHS = {"/internal/notify"}
+_SCHEDULER_PATHS = {"/internal/notify", "/internal/notify-todo"}  # Scheduler (daily digest) and Cloud Tasks (heads-ups)
 
 def _verify_oidc(token: str, audience: str) -> dict:
     from google.auth.transport import requests as google_requests
