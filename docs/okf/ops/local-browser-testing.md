@@ -3,7 +3,7 @@ type: Runbook
 title: Local server and Chrome testing
 description: How to run the app locally against the Firestore emulator and drive it in Chrome without signing in.
 tags: [tests, local, chrome]
-timestamp: 2026-09-21T16:30:00Z
+timestamp: 2026-09-21T21:30:00Z
 ---
 Unit tests do not cover `web/app.js` and the other top-level UI scripts, so any UI change needs a look in a real browser before it ships. A refactor once deleted the engine setup from `app.js`; every test still passed and only the browser showed a blank app. Do this before deploying UI changes. Never point it at production: it uses the emulator and a copy of `web/`.
 
@@ -37,6 +37,8 @@ curl -s localhost:8082/health                      # {"status":"ok"} once it is 
 4. `read_console_messages` with `onlyErrors: true` shows uncaught exceptions; reload first so console tracking sees page load. If `model` or `engine` is `undefined`, a top-level script threw during load: read the first error.
 5. Screenshot at the default size; use `resize_window` (e.g. 390x844) for phone width.
 6. Close the tab when done.
+
+**Pre-deploy UI checklist.** For any UI change, walk [the UI feature inventory](../features/ui-inventory.md) for everything the change could touch, at minimum: create an item from the composer; open a row's viewer (Images section present); open Edit from the `...` menu and from the viewer (Images section present, type, dates, color, links); change type and Undo; delete and Undo; open Trash and a trashed item; search for a trashed item. A feature that was on the list before and is not reachable now is a regression even if every test passes.
 
 **Pitfalls.**
 - **The service worker caches `?v=` scripts cache-first.** After changing a file without bumping the version, the browser keeps serving the old one (this hid a fix once). Clear it: `for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); location.reload()`. Bumping `APP_VERSION` and the `?v=` numbers in `index.html` (they must match) also works.

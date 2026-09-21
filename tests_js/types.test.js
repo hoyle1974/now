@@ -61,3 +61,12 @@ test("every type has a label, description, icon and a known default child type",
     assert.ok(Types.names.includes(t.defaultChildType), name);
   }
 });
+
+test("every type keeps the fields the UI promises (images, links, color) so the viewer and Edit sheet offer them", () => {
+  // If this fails, a refactor dropped a capability: see docs/okf/features/ui-inventory.md.
+  for (const name of Types.names) {
+    for (const field of ["title", "attachments", "links", "color", "references"]) {
+      assert.ok(Types.hasField({ type: name }, field), `${name} lost "${field}"`);
+    }
+  }
+});
