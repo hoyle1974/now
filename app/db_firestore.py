@@ -15,7 +15,7 @@ from typing import Any
 
 from google.cloud import firestore  # type: ignore[attr-defined]
 
-from app import blobstore, db_firestore_helpers, models, recurrence
+from app import blobstore, db_firestore_helpers, models, recurrence, types
 
 log = logging.getLogger(__name__)
 
@@ -342,19 +342,25 @@ def clear_completed() -> list[tuple[str, int]]:
     for tid, data in live.items():
         children.setdefault(data.get("parent_id"), []).append(tid)
 
-    all_done: dict[str, bool] = {}
-    def check(tid: str) -> bool:
-        if tid not in all_done:
-            all_done[tid] = False  # cycle guard
-            all_done[tid] = live[tid].get("done", False) and all(
-                check(c) for c in children.get(tid, []))
-        return all_done[tid]
+    memo: dict[str, tuple[bool, bool]] = {}
+    def check(tid: str) -> tuple[bool, bool]:
+        """(everything beneath is done, a todo is here or beneath). A container's own
+        `done` means nothing, so only the todos in it decide."""
+        if tid not in memo:
+            memo[tid] = (False, False)  # cycle guard
+            data = live[tid]
+            kids = [check(c) for c in children.get(tid, [])]
+            has_state = types.can_type(data.get("type"), "hasCheckbox")
+            memo[tid] = (all(k[0] for k in kids) and (data.get("done", False) or not has_state),
+                         has_state or any(k[1] for k in kids))
+        return memo[tid]
 
     cleared = []
     pending = list(children.get(None, []))
     while pending:
         tid = pending.pop()
-        if check(tid):
+        all_done, has_todo = check(tid)
+        if all_done and has_todo:
             data = live[tid]
             version = data.get("version", 1) + 1
             _update(_state.todos.document(tid),
@@ -571,7 +577,8 @@ def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
             live[data["todo_id"]] = db_firestore_helpers.doc_to_todo(data)
     # Derived flag. Ids of missing/deleted todos are simply ignored.
     for todo in live.values():
-        todo.blocked = any(str(b) in live and not live[str(b)].done for b in todo.blocked_by)
+        todo.blocked = any(str(b) in live and not live[str(b)].done and types.can(live[str(b)], "hasCheckbox")
+                           for b in todo.blocked_by)
 
     children: dict[str | None, list[models.Todo]] = {}
     for todo in live.values():

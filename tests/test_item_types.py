@@ -157,3 +157,40 @@ def test_run_heads_up_stays_silent_for_a_todo_switched_to_a_list(db_setup):
     got = push.run_heads_up(t["todo_id"], "2026-09-19T20:00:00", dt.datetime(2026, 9, 19, 12, tzinfo=dt.UTC),
                             send=lambda *a: None)
     assert got == {"sent": 0, "skipped": "stale"}
+
+
+# ---- clear completed, blocked -----------------------------------------------
+
+def _post(title, parent=None, done=False, type=None):
+    tid = client.post("/todos", json={"title": title}).json()["todo_id"]
+    body = {}
+    if done:
+        body["done"] = True
+    if type:
+        body["type"] = type
+    if body:
+        client.patch(f"/todos/{tid}", json=body)
+    if parent:
+        client.patch(f"/todos/{tid}/reparent", json={"parent_id": parent, "index": None})
+    return tid
+
+
+def test_clear_completed_derives_container_completion_from_its_todos(db_setup):
+    proj = _post("proj", type="project")                  # done=False, but all its todos are done
+    _post("t1", parent=proj, done=True)
+    _post("t2", parent=proj, done=True)
+    open_proj = _post("open proj", type="project")
+    t3 = _post("t3", parent=open_proj, done=True)         # a done leaf is cleared even under an open parent
+    _post("t4", parent=open_proj)
+    empty = _post("empty", type="list", done=True)        # stale done, no todos: kept
+    cleared = {x["todo_id"] for x in client.post("/todos/clear-completed").json()["cleared"]}
+    assert cleared == {proj, t3}
+    assert open_proj not in cleared and empty not in cleared
+
+
+def test_container_does_not_block(db_setup):
+    lst = _post("list", type="list")
+    x = _post("x")
+    client.patch(f"/todos/{x}", json={"blocked_by": [lst]})
+    tree = client.get("/todos/tree").json()
+    assert tree["todosById"][x]["blocked"] is False
