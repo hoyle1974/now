@@ -73,13 +73,15 @@ class TodoCreate(BaseModel):
     type: ItemType | None = Field(None)  # omitted = todo
 
 class TodoUpdate(BaseModel):
+    # Omitted = leave alone. Explicit null clears ONLY due_date, repeat and color
+    # (update_todo checks model_fields_set); on every other field null == omitted.
     title: str | None = Field(None, max_length=MAX_TITLE_LEN)
     done: bool | None = Field(None)
     due_date: datetime.datetime | None = Field(None)
     deleted: bool | None = Field(None)
     collapsed: bool | None = Field(None)
-    repeat: Repeat | None = Field(None)  # an explicit null clears the rule
-    color: Color | None = Field(None)          # explicit null clears
+    repeat: Repeat | None = Field(None)  # explicit null clears the rule
+    color: Color | None = Field(None)  # explicit null clears
     type: ItemType | None = Field(None)        # only the label changes; due_date, repeat and done stay
     links: list[Link] | None = Field(None)     # replaces the whole list
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list

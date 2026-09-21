@@ -1861,10 +1861,10 @@ li.search-hit { cursor: default; }
 /* ---------- Mascot: Nudge peeks up from behind the add bar ---------- */
 
 .mascot {
-  position: fixed;
+  position: absolute; /* inside .composer (full width): bottom edge = top of the New Item box */
   left: var(--x, 82%);
-  bottom: calc(var(--composer-h, 84px) - 1px);
-  z-index: 35; /* above the composer, so nothing can hide him */
+  bottom: calc(100% - 10px);
+  z-index: 35;
   width: 80px;
   height: 64px;
   margin-left: -40px;
@@ -1878,6 +1878,11 @@ li.search-hit { cursor: default; }
 .mascot-body {
   width: 80px;
   height: 64px;
+  /* Sink the feet 6px behind the bar (clipped at the box bottom), so wiggles and
+     bounces never reveal the bottom of his body. Uses top, not transform, so the
+     animations keep it. */
+  position: relative;
+  top: 6px;
   /* Well below the clip line (the antenna and its sway stick out above the box). */
   transform: translateY(calc(100% + 24px));
   visibility: hidden;
@@ -1907,6 +1912,15 @@ li.search-hit { cursor: default; }
 .mascot .m-antenna { transform-origin: 40px 14px; animation: mascot-sway 2.4s ease-in-out infinite; }
 
 .mascot.is-giggle .mascot-body { animation: mascot-wiggle 0.45s ease-in-out 2; }
+
+/* Arms: hang at his sides; one sometimes waves (pivot at the shoulder). */
+.mascot .m-arm { transform-box: view-box; }
+.mascot .m-arm-l { transform-origin: 6px 48px; }
+.mascot .m-arm-r { transform-origin: 74px 48px; }
+.mascot.is-wave-l .m-arm-l { animation: mascot-wave-l 2.2s 0.55s ease-in-out; }
+.mascot.is-wave-r .m-arm-r { animation: mascot-wave-r 2.2s 0.55s ease-in-out; }
+@keyframes mascot-wave-l { 0%, 100% { transform: rotate(0); } 12%, 40%, 68% { transform: rotate(125deg); } 26%, 54%, 82% { transform: rotate(160deg); } }
+@keyframes mascot-wave-r { 0%, 100% { transform: rotate(0); } 12%, 40%, 68% { transform: rotate(-125deg); } 26%, 54%, 82% { transform: rotate(-160deg); } }
 
 @keyframes mascot-twinkle { 50% { transform: scale(1.35); opacity: 0.75; } }
 @keyframes mascot-sway { 0%, 100% { transform: rotate(-7deg); } 50% { transform: rotate(7deg); } }

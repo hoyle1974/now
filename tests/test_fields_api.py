@@ -119,3 +119,23 @@ def test_new_root_keeps_a_color_the_client_sends():
     t = c.post("/todos", json={"title": "t", "color": "teal"}).json()
     assert t["color"] == "teal"
     assert c.post("/todos", json={"title": "t", "color": "chartreuse"}).status_code == 422
+
+
+def test_null_clears_only_due_date_repeat_color():
+    """Explicit null clears due_date/repeat/color; on every other field it is
+    the same as omitting it (no 500, nothing wiped)."""
+    t = mk("keep")
+    other = mk("other")
+    r = patch(t, done=True, color="red", due_date="2030-01-01T00:00:00",
+              repeat={"every": 1, "unit": "day"}, links=[{"url": "https://a.com"}],
+              blocked_by=[other["todo_id"]], references=[other["todo_id"]])
+    before = r.json()
+    r = patch(t, title=None, done=None, deleted=None, collapsed=None, type=None,
+              links=None, blocked_by=None, references=None)
+    assert r.status_code == 200
+    after = r.json()
+    for f in ("title", "done", "deleted", "collapsed", "type", "links", "blocked_by", "references"):
+        assert after[f] == before[f], f
+    r = patch(t, due_date=None, repeat=None, color=None).json()
+    assert r["due_date"] is None and r["repeat"] is None and r["color"] is None
+    assert patch(t, title="x").json()["due_date"] is None  # omitted leaves alone

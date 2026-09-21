@@ -18,6 +18,8 @@
   <g class="m-antenna"><line x1="40" y1="14" x2="40" y2="4" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
     <circle class="m-bulb" cx="40" cy="4" r="4.5" fill="#ffcc00"/></g>
   <path d="M6 64 V38 C6 22 20 12 40 12 C60 12 74 22 74 38 V64 Z" fill="currentColor"/>
+  <g class="m-arm m-arm-l"><line x1="6" y1="48" x2="6" y2="62" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></g>
+  <g class="m-arm m-arm-r"><line x1="74" y1="48" x2="74" y2="62" stroke="currentColor" stroke-width="7" stroke-linecap="round"/></g>
   <ellipse cx="18" cy="46" rx="6" ry="4" fill="#ff8fb1" opacity=".55"/>
   <ellipse cx="62" cy="46" rx="6" ry="4" fill="#ff8fb1" opacity=".55"/>
   <g class="m-eyes">
@@ -56,7 +58,9 @@
       clearTimeout(hideTimer);
       hideTimer = setTimeout(hide, 900);
     });
-    document.body.appendChild(el);
+    // Child of the composer, so he is anchored to it by layout (no measured height to
+    // go stale under iOS safe-area / toolbar changes).
+    (document.getElementById("add-form") || document.body).appendChild(el);
   }
 
   const quiet = () =>
@@ -101,12 +105,19 @@
     build();
     up = true;
     el.style.setProperty("--x", cheer ? "50%" : ["18%", "50%", "82%"][Math.floor(Math.random() * 3)]);
-    el.classList.remove("is-giggle", "is-blink");
+    el.classList.remove("is-giggle", "is-blink", "is-wave-l", "is-wave-r");
     el.classList.toggle("is-cheer", cheer || happy);
     const msg = text || (Math.random() < 0.6 || cheer ? message() : "");
     bubble.hidden = !msg;
     bubble.textContent = msg;
     if (msg) keepBubbleOnScreen();
+    // Sometimes wave, with the arm away from the nearest screen edge (toward the middle).
+    if (!cheer && !happy && Math.random() < 0.5) {
+      const cx = el.getBoundingClientRect().left + el.offsetWidth / 2;
+      const vw = document.documentElement.clientWidth;
+      const mid = Math.abs(cx - vw / 2) < 4;
+      el.classList.add((mid ? Math.random() < 0.5 : cx < vw / 2) ? "is-wave-r" : "is-wave-l");
+    }
     el.classList.add("is-up");
     soft = idle && !cheer && !happy;
     sfx(cheer ? "cheer" : happy ? "giggle" : soft ? "peekSoft" : "peek");

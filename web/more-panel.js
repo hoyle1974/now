@@ -297,6 +297,17 @@ if (window.Mascot) {
 
 // ---- more mascot reactions -------------------------------------------------
 
+// What the mascot says about the day: overdue and due today, not the raw total.
+function dueLine(todos) {
+  const live = todos.filter((t) => !t.done && Types.can(t, "hasCheckbox"));
+  const overdue = live.filter(isOverdue).length;
+  const today = live.filter((t) => !isOverdue(t) && Types.hasField(t, "due_date") && t.due_date && Due.daysUntil(t.due_date) === 0).length;
+  if (overdue && today) return `${overdue} overdue, ${today} due today.`;
+  if (overdue) return `${overdue} overdue. Let's clear ${overdue === 1 ? "it" : "them"}!`;
+  if (today) return `${today} due today. You've got this!`;
+  return "Nothing due today. Nice!";
+}
+
 // Welcome back after a real absence, and a once-a-day greeting.
 (() => {
   if (!window.Mascot) return;
@@ -304,8 +315,7 @@ if (window.Mascot) {
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { hiddenAt = Date.now(); return; }
     if (hiddenAt && Date.now() - hiddenAt > 20 * 60 * 1000) {
-      const open = [...model.todosById.values()].filter((t) => !t.done).length;
-      window.Mascot.react(open ? `Welcome back! ${open} open.` : "Welcome back! All clear.", { key: "back", cooldown: 600000, delay: 1200 });
+      window.Mascot.react(`Welcome back! ${dueLine([...model.todosById.values()])}`, { key: "back", cooldown: 600000, delay: 1200 });
     }
     hiddenAt = 0;
   });
@@ -320,10 +330,7 @@ if (window.Mascot) {
       if (!all.length) return; // the list hasn't loaded, or is empty: try tomorrow
       const hour = new Date().getHours();
       const hello = hour < 5 ? "Burning the midnight oil?" : hour < 12 ? "Good morning!" : hour < 18 ? "Good afternoon!" : "Good evening!";
-      const open = all.filter((t) => !t.done && Types.can(t, "hasCheckbox")).length;
-      const overdue = all.filter(isOverdue).length;
-      const tail = overdue ? ` ${overdue} overdue.` : open ? ` ${open} to do.` : " Nothing to do!";
-      window.Mascot.react(hello + tail, { key: "greet", cooldown: 0, delay: 0 });
+      window.Mascot.react(`${hello} ${dueLine(all)}`, { key: "greet", cooldown: 0, delay: 0 });
       try { localStorage.setItem(KEY, today); } catch (_) { /* unavailable */ }
     }, 4000);
   }
