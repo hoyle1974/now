@@ -37,12 +37,16 @@
   // random glances; a tap on him pulls them toward the finger for a moment.
   const GAZE_MAX = 3;
   const clampGaze = (v) => Math.max(-GAZE_MAX, Math.min(GAZE_MAX, v));
-  // ax/ay: accelerationIncludingGravity. Android reads the reaction to gravity, iOS the
-  // opposite sign, so flip for iOS (flip = true). Upright phone: pupils rest a touch low.
-  function gazeFromTilt(ax, ay, flip) {
+  // dx/dy: change in accelerationIncludingGravity since he popped up (how you were
+  // holding the phone then is "straight ahead"). Android reads the reaction to
+  // gravity, iOS the opposite sign, so flip for iOS (flip = true). About 30 degrees
+  // of tilt takes the pupils to the edge.
+  const TILT_GAIN = 2;
+  function gazeFromTilt(dx, dy, flip) {
     const s = flip ? -1 : 1;
-    return { x: clampGaze((-s * ax / GRAVITY) * GAZE_MAX * 1.5), y: clampGaze((s * ay / GRAVITY) * GAZE_MAX * 0.6) };
+    return { x: clampGaze((-s * dx / GRAVITY) * GAZE_MAX * TILT_GAIN), y: clampGaze((s * dy / GRAVITY) * GAZE_MAX * TILT_GAIN) };
   }
+  let tiltBase = null;
   let tilt = { x: 0, y: 0 }, glance = { x: 0, y: 0 }, lookTimer = null, lookLockUntil = 0;
   function applyGaze() {
     if (!el) return;
@@ -66,7 +70,7 @@
     const dx = clientX - (r.left + r.width / 2), dy = clientY - (r.top + r.height / 2);
     const d = Math.hypot(dx, dy) || 1;
     glance = { x: clampGaze((dx / d) * GAZE_MAX), y: clampGaze((dy / d) * GAZE_MAX) };
-    lookLockUntil = Date.now() + 900;
+    lookLockUntil = Date.now() + 2200;
     applyGaze();
   }
 
@@ -96,7 +100,7 @@
       }
       if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(8);
       clearTimeout(hideTimer);
-      hideTimer = setTimeout(hide, 900);
+      hideTimer = setTimeout(hide, 2400); // linger so you can see him look at your finger
     });
     // Child of the composer, so he is anchored to it by layout (no measured height to
     // go stale under iOS safe-area / toolbar changes).
@@ -164,6 +168,8 @@
     if (msg && !cheer) setTimeout(() => up && voice("beep"), 700);
     blink(2);
     glance = { x: 0, y: 0 };
+    tilt = { x: 0, y: 0 };
+    tiltBase = null;
     lookLockUntil = 0;
     applyGaze();
     lookTimer = setTimeout(lookAround, 900);
@@ -231,7 +237,11 @@
     if (!a || a.x == null) return;
     const dev = Math.abs(Math.sqrt(a.x * a.x + a.y * a.y + a.z * a.z) - GRAVITY);
     if (peakListener) peakListener(dev);
-    if (up) { tilt = gazeFromTilt(a.x, a.y, needsPermission()); applyGaze(); }
+    if (up) {
+      if (!tiltBase) tiltBase = { x: a.x, y: a.y };
+      tilt = gazeFromTilt(a.x - tiltBase.x, a.y - tiltBase.y, needsPermission());
+      applyGaze();
+    }
     if (dev < 7) return; // ordinary movement
     const now = Date.now();
     if (now - lastSpike < 100) return; // one swing counts once

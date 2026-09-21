@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "91";
+const APP_VERSION = "92";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.

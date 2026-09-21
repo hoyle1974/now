@@ -102,3 +102,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-21: Mascot sinks only 6px behind the New Item box (was 16, hid his mouth) (app v89).
 - 2026-09-21: Mascot has separate left/right arms; about half of pop-ups he waves with the arm away from the nearest screen edge (toward the middle; random at centre) (app v90). ui-inventory unchanged (cosmetic, no new control).
 - 2026-09-21: Mascot eyes move (app v91): random glances, pupils follow phone tilt when shake is on, look toward a tap. New `tests_js/gaze.test.js`. Updated ui-inventory and code-map (cosmetic, no new control).
+- 2026-09-21: Mascot tilt gaze is relative to the pose at pop-up (app v92; a tap now keeps him up 2.4s instead of 0.9s so he visibly looks at the finger): before, an upright phone read as a constant downward gaze and hid the tilt. Gain raised (30 degrees = pupil at the edge).
