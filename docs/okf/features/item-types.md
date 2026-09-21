@@ -4,7 +4,7 @@ title: Item types
 description: Every todo has a type (todo, list, project); a shared registry says what each type can do.
 resource: app/types.json
 tags: [types, registry, data]
-timestamp: 2026-09-21T17:00:00Z
+timestamp: 2026-09-21T21:00:00Z
 ---
 Every row is a typed item: `todo` (today's behaviour), `list` (flat group header) or `project` (container that will show a progress readout). `Todo.type` ([Todo](../data/todo.md)) defaults to `todo`; a document with no or an unknown `type` reads as `todo` (server `doc_to_todo`, client `Types.get`), so there is no migration and an old cached client stays safe. New documents write `type: "todo"`.
 
@@ -23,7 +23,7 @@ Every row is a typed item: `todo` (today's behaviour), `list` (flat group header
 - A container row has no checkbox: the registry `icon` (`check`, `list`, `folder`) holds the slot; its own `done` never styles the row, and done-sink, swipe-to-complete, outline `[x]`, search marks and the open counts ignore it. A due date or repeat on a container shows no chip, is not "overdue", and does not sort.
 - **Type picker** (`web/types-ui.js`, `TypeUI.create`): built from `Types.names`, a chip row up to 4 types, a described list beyond. Used by the edit and new-item sheets, the menu's Type panel and the composer. It keeps its value in a hidden input so an open sheet survives a re-render.
 - **`...` menu** has one type entry, "Type: <label>", however many types exist; it opens a panel where a choice applies at once with an Undo toast ("Now a Project · Undo", `setType`/`showTypeUndo` in app.js). Menu order: Add item, Add several, Edit, Type, Copy, Move, Delete.
-- **Item form** (`web/item-form.js`, `ItemForm.render`) is both the New item sheet (from Add item) and the Edit sheet: title, type picker, then one group per registry field the chosen type has (`FIELD_GROUPS`; `FieldsUI.renderEditFields` returns groups keyed by field). Fields the type lacks are hidden, not cleared, and are left out of the save. New item shows only the due date group; the rest is one Edit away.
+- **Item form** (`web/item-form.js`, `ItemForm.render`) is both the New item sheet (from Add item) and the Edit sheet: title, type picker, then one group per registry field the chosen type has (`FIELD_GROUPS`, incl. `attachments`; `FieldsUI.renderEditFields` returns groups keyed by field). Fields the type lacks are hidden, not cleared, and are left out of the save. New item shows only the due date group; the rest is one Edit away.
 - **Default type for a new item is sibling-first** (`Types.defaultChildType`): the type of the newest live sibling (by `create_date`), else the parent's `defaultChildType`, else `todo`. It applies under any parent and at the top level (composer). Add several uses the same default.
 - **Composer:** a type chip beside the calendar button shows what the next item will be (resolved from the newest root item; a pick applies to one item only); a type without `due_date` hides the date button.
 - **Dates:** `DatePicker` (`web/date-picker.js`) is the only date control: chips Today / Tomorrow / Pick date / Clear plus an optional time field, used by the composer, the new-item sheet and the edit sheet. Add several has no dates.

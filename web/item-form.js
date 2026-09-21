@@ -6,7 +6,7 @@
 const ItemForm = (() => {
   // Every editable field a type may list, in the order the sheet shows them. A field named in
   // types.json that is missing here has no input yet (tests/item-form.test.js checks this).
-  const FIELD_GROUPS = ["due_date", "repeat", "color", "links", "blocked_by", "references"];
+  const FIELD_GROUPS = ["due_date", "repeat", "color", "links", "blocked_by", "references", "attachments"];
   // A new item only asks for what is needed to file it; the rest is one Edit away.
   const CREATE_FIELDS = ["due_date"];
 
@@ -37,6 +37,8 @@ const ItemForm = (() => {
       due_date: [DOM.label("Due date", picker.dateInput), picker.chips, picker.timeField],
       ...(editing ? { repeat: [DOM.label("Repeat every", repeatControls.unit), repeatControls.row] } : {}),
       ...extra.groups,
+      // Images upload as soon as they are added (online only), independent of Save.
+      ...(editing ? { attachments: [AttachmentsUI.renderSection(todo)] } : {}),
     };
     const initialType = editing ? Types.nameOf(todo) : defaultTypeFor(parent);
     const groups = FIELD_GROUPS.filter((f) => nodes[f] && (editing || CREATE_FIELDS.includes(f))).map((field) => {

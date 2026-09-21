@@ -68,7 +68,7 @@ const FieldsUI = (() => {
       refs.forEach((t) => panel.appendChild(todoButton(t)));
     }
     if (!any) panel.appendChild(el("p", "detail-empty", opts.trashed ? "No links or related todos." : "No links or related todos. Add them from Edit."));
-    if (!opts.trashed) panel.appendChild(AttachmentsUI.renderSection(todo));
+    if (!opts.trashed && Types.hasField(todo, "attachments")) panel.appendChild(AttachmentsUI.renderSection(todo));
     return panel;
   }
 

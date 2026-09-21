@@ -18,7 +18,8 @@
         "color",
         "links",
         "blocked_by",
-        "references"
+        "references",
+        "attachments"
       ],
       "hasCheckbox": true,
       "appearsInNextUp": true,
@@ -36,7 +37,8 @@
         "title",
         "color",
         "links",
-        "references"
+        "references",
+        "attachments"
       ],
       "hasCheckbox": false,
       "appearsInNextUp": false,
@@ -54,7 +56,8 @@
         "title",
         "color",
         "links",
-        "references"
+        "references",
+        "attachments"
       ],
       "hasCheckbox": false,
       "appearsInNextUp": false,
