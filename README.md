@@ -2,7 +2,9 @@
 
 A minimal todo app built with **FastAPI** + a vanilla-JS frontend, backed by **Firestore** on GCP Cloud Run.
 
-Designed as a learning project, but simple enough to actually use day-to-day.
+Started as a learning project; it is now a real app used every day.
+
+**Single user, by design.** There is one user (the owner); multi-tenancy is a non-goal. To use it yourself, clone it, create your own GCP project, and deploy and manage it there. **The #1 rule: it must cost nothing in GCP at personal-use volume.** See `docs/okf/principles.md`.
 
 ## Stack
 

@@ -191,3 +191,54 @@ def test_a_firebase_login_does_not_open_the_notify_route(notify_env, monkeypatch
     with pytest.raises(HTTPException) as e:
         auth.require_user(request_for("/internal/notify", "a-firebase-id-token"))
     assert e.value.status_code == 401
+
+
+# ---- budget alerts ----
+
+def budget_msg(**kw):
+    import base64, json
+    payload = {"budgetDisplayName": "now-app monthly budget", "costAmount": 0.03, "budgetAmount": 1.0,
+               "costIntervalStart": "2026-09-01T07:00:00Z", "currencyCode": "USD", **kw}
+    return base64.b64encode(json.dumps(payload).encode()).decode()
+
+
+def test_budget_alert_pushes_any_hour_to_every_device_once():
+    register()
+    fake = Fake()
+    now = dt.datetime(2026, 9, 21, 3, 0, tzinfo=dt.timezone.utc)  # 3 AM UTC: not 9:00
+    out = push.run_budget_alert(budget_msg(alertThresholdExceeded=0.01), now, send=fake)
+    assert out == {"sent": 1}
+    assert fake.sent == [("tok", "GCP COST ALERT")]
+    assert push.run_budget_alert(budget_msg(alertThresholdExceeded=0.01), now, send=fake)["skipped"] == "already sent"
+    assert len(fake.sent) == 1
+    assert push.run_budget_alert(budget_msg(alertThresholdExceeded=0.5), now, send=fake) == {"sent": 1}
+
+
+def test_budget_alert_ignores_routine_updates_and_garbage():
+    fake = Fake()
+    now = dt.datetime(2026, 9, 21, tzinfo=dt.timezone.utc)
+    assert push.run_budget_alert(budget_msg(), now, send=fake)["skipped"] == "no threshold crossed"
+    assert push.run_budget_alert("!!not base64 json", now, send=fake)["skipped"] == "unreadable"
+    assert fake.sent == []
+
+
+def test_budget_push_text_actual_and_forecast():
+    a = push.budget_push({"costAmount": 0.03, "budgetAmount": 1, "alertThresholdExceeded": 0.01, "costIntervalStart": "2026-09-01T07:00:00Z"})
+    assert a.body.startswith("$0.03 spent of the $1.00 budget (1%)")
+    f = push.budget_push({"costAmount": 0.5, "budgetAmount": 1, "forecastThresholdExceeded": 1.0, "costIntervalStart": "2026-09-01T07:00:00Z"})
+    assert f.body.startswith("Forecast to reach 100%") and f.key != a.key
+
+
+def test_budget_route_accepts_only_the_pubsub_identity(notify_env):
+    auth.require_user(request_for("/internal/budget-alert", "good"))  # no exception
+    for bad in (None, "nope", "a-firebase-id-token"):
+        with pytest.raises(HTTPException) as e:
+            auth.require_user(request_for("/internal/budget-alert", bad))
+        assert e.value.status_code == 401
+
+
+def test_budget_route_returns_counts(monkeypatch):
+    monkeypatch.setattr(push, "send_fcm", Fake())
+    register()
+    r = c.post("/internal/budget-alert", json={"message": {"data": budget_msg(alertThresholdExceeded=1.0)}})
+    assert r.status_code == 200 and r.json() == {"sent": 1}

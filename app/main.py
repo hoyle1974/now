@@ -131,21 +131,30 @@ def notify() -> dict:
     """Cloud Scheduler tick (OIDC-verified in require_user): send due reminders."""
     return push.run_notify(datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
 
+@app.post("/internal/budget-alert")
+def budget_alert(body: push.PubSubEnvelope) -> dict:
+    """Pub/Sub push of a Cloud Billing budget notification (OIDC-verified in require_user):
+    tell the owner's devices immediately (rule #1: zero GCP cost)."""
+    return push.run_budget_alert(body.message.data, datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
+
 @app.post("/internal/notify-todo")
 def notify_todo(body: push.HeadsUp) -> dict:
     """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user)."""
     return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.timezone.utc), send=push.send_fcm)
 
-def _saved(result: tuple, todo_of: Callable[[dict], dict | None] = lambda body: body) -> Response:
-    """Reply for a finished write, after making the heads-up task for a todo it saved
-    (best-effort, outside the transaction; a replayed retry just finds the task already there)."""
+def _saved(result: tuple, background: BackgroundTasks, todo_of: Callable[[dict], dict | None] = lambda body: body,
+           schedule: bool = True) -> Response:
+    """Reply for a finished write, then make the heads-up task for a todo it saved
+    (best-effort, after the response, outside the transaction; a replayed retry just finds the
+    task already there). schedule=False for writes that can't change a reminder."""
     status, body = result[0], result[1]
-    if status == 200:
-        tasks.schedule_from_body(todo_of(body))
+    if status == 200 and schedule:
+        background.add_task(tasks.schedule_from_body, todo_of(body))
     return _reply(*result)
 
 @app.post("/todos", response_model=None)
-def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) -> Response:
+def create_todo(body: models.TodoCreate, background: BackgroundTasks,
+                x_txn_id: str | None = Header(None)) -> Response:
     def create() -> tuple[int, dict | None]:
         todo = models.Todo(title = body.title)
         if body.due_date:
@@ -153,7 +162,7 @@ def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) ->
         db.create_todo(todo)
         return 200, jsonable_encoder(todo)
 
-    return _saved(db.run_atomic(x_txn_id, create))
+    return _saved(db.run_atomic(x_txn_id, create), background)
 
 @app.get("/calendar/link")
 def calendar_link() -> dict:
@@ -272,7 +281,7 @@ def _check_ids(todo: models.Todo, name: str, ids: list[models.TodoId]) -> None:
         raise HTTPException(400, "blocked_by would create a cycle")
 
 @app.patch("/todos/{todo_id}", response_model=None)
-def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
+def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # Collapsing is view state: last write wins, so it skips the If-Match
     # check and doesn't bump the version (no conflicts with content edits).
@@ -307,10 +316,12 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate,
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
-    return _saved(db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)))
+    return _saved(db.run_atomic(x_txn_id, lambda: _apply(todo_id, if_match, action)), background,
+                  schedule=not view_only)
 
 @app.post("/todos/{todo_id}/repeat", response_model=None)
-def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
+def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
+                body: models.TodoRepeatRequest = models.TodoRepeatRequest(),
                 x_txn_id: str | None = Header(None)) -> Response:
     """Create the next occurrence of a repeating todo (call it after completing
     the original). A todo spawns at most once: later calls return the same copy."""
@@ -325,7 +336,7 @@ def repeat_todo(todo_id: uuid.UUID, body: models.TodoRepeatRequest = models.Todo
         return {"created": True, "spawned_id": str(copy.todo_id), "todo": jsonable_encoder(copy)}
 
     return _saved(db.run_atomic(x_txn_id, lambda: _apply(todo_id, None, action)),
-                  lambda body: body.get("todo"))
+                  background, lambda body: body.get("todo"))
 
 
 @app.patch("/todos/{todo_id}/reparent", response_model=None)
@@ -432,7 +443,7 @@ def delete_attachment(todo_id: uuid.UUID, attachment_id: str,
     return _reply(*result)
 
 @app.patch("/todos/{todo_id}/undelete", response_model=None)
-def undelete_todo_endpoint(todo_id: uuid.UUID,
+def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
                            x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Restore a soft-deleted todo and its entire subtree (undo)"""
     def action(todo: models.Todo) -> dict:
@@ -440,7 +451,7 @@ def undelete_todo_endpoint(todo_id: uuid.UUID,
         return {**jsonable_encoder(restored), "affected": _affected(affected)}
 
     return _saved(db.run_atomic(
-        x_txn_id, lambda: _apply(todo_id, if_match, action, include_deleted=True)))
+        x_txn_id, lambda: _apply(todo_id, if_match, action, include_deleted=True)), background)
 
 @app.post("/todos/{todo_id}/split", response_model=None)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit,

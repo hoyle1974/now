@@ -3,11 +3,11 @@ type: Index
 title: now — knowledge bundle
 description: Curated knowledge about the "now" todo app, in Open Knowledge Format v0.1.
 tags: [okf, index]
-timestamp: 2026-09-21T01:00:00Z
+timestamp: 2026-09-21T02:00:00Z
 ---
 # now
 
-A personal todo app: FastAPI + vanilla-JS frontend, Firestore on GCP Cloud Run.
+A personal todo app for one user (its owner), used daily: FastAPI + vanilla-JS frontend, Firestore on GCP Cloud Run. No multi-tenancy; others clone and run their own. **It must cost nothing in GCP** ([principles](principles.md)).
 This directory is an [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 bundle: markdown files with YAML frontmatter (`type` is the only required field),
 linked to each other with ordinary markdown links. It is checked in and curated
@@ -27,6 +27,7 @@ like code.
 
 ## Concepts
 
+- Principles: [one user, #1 rule = free in GCP, non-goals](principles.md)
 - Architecture: [stack](architecture/stack.md), [code map](architecture/code-map.md), [zilch-gcp](architecture/zilch-gcp.md)
 - Data: [Todo](data/todo.md), [Firestore collections](data/firestore.md)
 - API: [routes](api/routes.md)

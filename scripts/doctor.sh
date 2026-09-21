@@ -67,6 +67,8 @@ fi
 gcloud artifacts repositories describe cloud-run-source-deploy --project "$PROJECT" --location "$REGION" --format='value(cleanupPolicies)' 2>/dev/null | grep -q . \
   && ok "Artifact Registry cleanup policy" || warn "no image cleanup policy on cloud-run-source-deploy (scripts/setup-cost-guards.sh)"
 
+scripts/cost-check.sh || fails=$((fails + 1))
+
 echo "client config"
 if [ -f web/config.js ]; then
   grep -q "\"$PROJECT\"" web/config.js && ok "web/config.js projectId matches" || fail "web/config.js does not mention project $PROJECT"

@@ -25,3 +25,6 @@ if [ ! -f web/config.js ]; then
 fi
 
 gcloud run deploy "$SERVICE" "${args[@]}"
+
+# Rule #1 is zero GCP cost: verify (read-only) that this deploy did not break it.
+scripts/cost-check.sh || { echo "deploy finished, but the cost check FAILED. Fix it now." >&2; exit 1; }

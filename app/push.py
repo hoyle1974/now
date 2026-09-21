@@ -1,7 +1,9 @@
 """Push reminders: decide what to send (pure) and send it (thin)."""
 from __future__ import annotations
+import base64
 import datetime
 import hashlib
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -171,4 +173,67 @@ def run_heads_up(todo_id: str, due_iso: str, now_utc: datetime.datetime,
             db.delete_push_device(dev["id"])
         except Exception:
             logging.exception("heads-up send failed for device %s", dev["id"])
+    return {"sent": sent}
+
+
+BUDGET_MARKER_TTL = datetime.timedelta(days=35)
+
+
+class PubSubMessage(BaseModel):
+    data: str = ""
+
+
+class PubSubEnvelope(BaseModel):
+    """What a Pub/Sub push subscription POSTs; only the message payload matters."""
+    message: PubSubMessage = PubSubMessage()
+
+
+def budget_push(payload: dict) -> Push | None:
+    """The push for one Cloud Billing budget notification, or None when it crossed no
+    threshold (budgets also publish routine spend updates every so often).
+    Rule #1 of this project is zero GCP cost, so any crossing is worth a push."""
+    forecast = payload.get("forecastThresholdExceeded")
+    actual = payload.get("alertThresholdExceeded")
+    fraction = forecast if actual is None else actual
+    if fraction is None:
+        return None
+    try:
+        cost, budget, fraction = float(payload["costAmount"]), float(payload["budgetAmount"]), float(fraction)
+    except (KeyError, TypeError, ValueError):
+        return None
+    cur = "$" if payload.get("currencyCode", "USD") == "USD" else payload.get("currencyCode", "") + " "
+    kind = "forecast" if actual is None else "actual"
+    month = str(payload.get("costIntervalStart", ""))[:7]
+    if kind == "forecast":
+        body = f"Forecast to reach {fraction:.0%} of the {cur}{budget:.2f} budget this month (spent {cur}{cost:.2f} so far). Run scripts/cost-check.sh."
+    else:
+        body = f"{cur}{cost:.2f} spent of the {cur}{budget:.2f} budget ({fraction:.0%}) this month. Run scripts/cost-check.sh."
+    return Push(f"budget:{month}:{kind}:{fraction:g}", "GCP COST ALERT", body)
+
+
+def run_budget_alert(data: str, now_utc: datetime.datetime,
+                     send: Callable[[str, Push], None] | None = None) -> dict:
+    """A Pub/Sub delivery of a budget notification: push it to every device, at any hour
+    (not a reminder, so no 9:00 rule), once per month per threshold. Always answers ok
+    so Pub/Sub does not redeliver garbage."""
+    from app import db
+    send = send or send_fcm
+    try:
+        p = budget_push(json.loads(base64.b64decode(data or "")))
+    except Exception:
+        return {"sent": 0, "skipped": "unreadable"}
+    if p is None:
+        return {"sent": 0, "skipped": "no threshold crossed"}
+    if db.get_push_marker(p.key) is not None:
+        return {"sent": 0, "skipped": "already sent"}
+    db.put_push_marker(p.key, [], now_utc + BUDGET_MARKER_TTL)
+    sent = 0
+    for dev in db.list_push_devices():
+        try:
+            send(dev["token"], p)
+            sent += 1
+        except DeadToken:
+            db.delete_push_device(dev["id"])
+        except Exception:
+            logging.exception("budget alert send failed for device %s", dev["id"])
     return {"sent": sent}
