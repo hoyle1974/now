@@ -11,7 +11,7 @@ scripts/test.sh                    # python (server + firestore layer)
 node --test tests_js/*.test.js     # client modules (sync, freshness, due, fields, reorder, service-worker routing, ...)
 scripts/e2e.sh                     # engine vs. the running app + emulator (sign-in gate off via tests_js/e2e_server.py, emulator-only, outside app/ so it never ships)
 ```
-See [stack](../architecture/stack.md).
+See [stack](../architecture/stack.md). For UI changes also run the app locally and drive it in Chrome: [local server and Chrome testing](local-browser-testing.md).
 
 `tests/test_item_types.py` covers the type registry and every guard; it also fails when `web/types-data.js` is stale (regenerate with `python scripts/gen_types.py`).
 
