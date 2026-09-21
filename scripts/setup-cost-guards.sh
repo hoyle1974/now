@@ -19,7 +19,7 @@ DRY=0
 [ "${1:-}" = "--dry-run" ] && DRY=1
 BUDGET_USD="${BUDGET_USD:-$(_cfg .now.env BUDGET_USD)}"
 BUDGET_USD="${BUDGET_USD:-1}"   # rule #1 is zero cost: any real spend should page you
-KEEP="${KEEP_IMAGES:-3}"
+KEEP="${KEEP_IMAGES:-1}"   # single user, always on latest: no rollback images
 REPO=cloud-run-source-deploy
 BUDGET_NAME="${SERVICE} monthly budget"
 
