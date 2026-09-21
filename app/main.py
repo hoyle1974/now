@@ -13,6 +13,7 @@ import uuid
 from app import attachments
 from app import blobstore
 from app import db
+from app import ics
 from app import models
 from app import next_up
 from app import push
@@ -139,6 +140,21 @@ def create_todo(body: models.TodoCreate, x_txn_id: str | None = Header(None)) ->
         return 200, jsonable_encoder(todo)
 
     return _reply(*db.run_atomic(x_txn_id, create))
+
+@app.get("/calendar/link")
+def calendar_link() -> dict:
+    """For the More panel (signed in): where the calendar feed lives, or enabled=false."""
+    path = auth.calendar_feed_path()
+    return {"enabled": path is not None, "path": path}
+
+@app.get("/calendar/{token}.ics", response_model=None)
+def calendar_feed(token: str) -> Response:
+    """Read-only iCalendar feed of open dated todos. The token in the path is checked
+    by require_user (app/auth.py); the parameter is only there to shape the route."""
+    _, todos_by_id = db.get_tree(db.get_rev())
+    return Response(ics.build_calendar(todos_by_id), media_type="text/calendar; charset=utf-8",
+                    headers={"Cache-Control": "private, max-age=300",
+                             "Content-Disposition": 'inline; filename="now.ics"'})
 
 @app.get("/todos/root", response_model=list[models.Todo])
 def list_todos() -> list[models.Todo]:

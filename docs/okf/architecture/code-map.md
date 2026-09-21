@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-20T23:30:00Z
+timestamp: 2026-09-21T01:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — routes ([API](../api/routes.md)).
@@ -12,6 +12,7 @@ timestamp: 2026-09-20T23:30:00Z
 - `next_up.py` — ranking ([next up](../features/next-up.md)).
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).
 - `push.py` — reminder planner and FCM sender ([push reminders](../features/push-reminders.md)).
+- `ics.py` — iCalendar rendering ([calendar feed](../features/calendar-feed.md)).
 - `auth.py` — Firebase token, widget token, Scheduler OIDC.
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).
 
@@ -27,4 +28,4 @@ timestamp: 2026-09-20T23:30:00Z
 - The full-screen viewer/edit sheet owns one `history` entry (`syncHistory` in `ui-helpers.js`, `popstate` in `app.js`), so the back gesture closes or steps back.
 - Mascot: taps on him are not activity; idle re-arm is throttled to 1s; the `devicemotion` listener is attached only while shake is armed, the page is visible and the mascot enabled. iOS forgets motion access on a full relaunch, so `now.shakeOn` is stored and re-requested on the first tap of the next session (event log line `re-armed on first tap`).
 
-**Other:** `scripts/` (`test.sh`, `e2e.sh`, `init.sh`, `doctor.sh`, `create-bucket.sh`, `setup-push.sh`, `migrate-service.sh`, `lib/config.sh`, `scriptable-next-up.js`, `generate_icons.py`, `okf-reminder.sh`), `tests/` (python), `tests_js/` (node), `docs/superpowers/` (design specs and plans), `hosting-public/` (empty Firebase Hosting root; all traffic is rewritten to Cloud Run).
+**Other:** `scripts/` (`test.sh`, `e2e.sh`, `init.sh`, `doctor.sh`, `create-bucket.sh`, `setup-push.sh`, `setup-calendar.sh`, `migrate-service.sh`, `lib/config.sh`, `scriptable-next-up.js`, `generate_icons.py`, `okf-reminder.sh`), `tests/` (python), `tests_js/` (node), `docs/superpowers/` (design specs and plans), `hosting-public/` (empty Firebase Hosting root; all traffic is rewritten to Cloud Run).

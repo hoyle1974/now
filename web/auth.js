@@ -72,7 +72,7 @@
   function isApiRequest(input) {
     const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
     return url.origin === window.location.origin &&
-      (url.pathname === "/todos" || url.pathname.startsWith("/todos/") || url.pathname.startsWith("/push/"));
+      (url.pathname === "/todos" || url.pathname.startsWith("/todos/") || url.pathname.startsWith("/push/") || url.pathname === "/calendar/link");
   }
 
   async function withToken(input, init, forceRefresh) {

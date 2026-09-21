@@ -3,6 +3,7 @@ ALLOWED_EMAIL. Static files stay public (they hold no data)."""
 from __future__ import annotations
 import hmac
 import os
+import re
 from fastapi import HTTPException, Request
 import firebase_admin
 from firebase_admin import auth as fb_auth
@@ -28,6 +29,22 @@ def _widget_token_ok(request: Request) -> bool:
     return bool(WIDGET_TOKEN and supplied and request.method == "GET"
                 and request.url.path == _WIDGET_PATH
                 and hmac.compare_digest(supplied.encode(), WIDGET_TOKEN.encode()))
+
+# Secret-URL calendar feed (GET /calendar/<token>.ics): calendar apps can send no
+# headers, so the token is in the path. Unlocks only that route; unset = off.
+CALENDAR_TOKEN = os.environ.get("CALENDAR_TOKEN", "")
+_CALENDAR_PATH_RE = re.compile(r"^/calendar/([A-Za-z0-9_-]{16,128})\.ics$")
+
+def _calendar_token_ok(request: Request) -> bool:
+    m = _CALENDAR_PATH_RE.match(request.url.path)
+    return bool(CALENDAR_TOKEN and m and request.method == "GET"
+                and hmac.compare_digest(m.group(1).encode(), CALENDAR_TOKEN.encode()))
+
+def calendar_feed_path() -> str | None:
+    """The secret feed path for the signed-in app to show, or None when the feed is off."""
+    if not CALENDAR_TOKEN or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", CALENDAR_TOKEN):
+        return None
+    return f"/calendar/{CALENDAR_TOKEN}.ics"
 
 # Cloud Scheduler calls these with a Google-signed OIDC token. Read at call time
 # so the deployed env vars (and tests) decide; either unset turns the route off.
@@ -59,7 +76,7 @@ def require_user(request: Request) -> None:
     if request.url.path in _SCHEDULER_PATHS:
         verify_scheduler(request)
         return
-    if _widget_token_ok(request):
+    if _widget_token_ok(request) or _calendar_token_ok(request):
         return
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):

@@ -71,6 +71,44 @@ async function copyText(text) {
   }
 })();
 
+// Calendar feed: a private read-only ICS link (see docs/okf/features/calendar-feed.md).
+// The token never ships in the page: the signed-in app asks the server for the path.
+(async () => {
+  const row = document.getElementById("calendar-row");
+  if (!row) return;
+  let path = null;
+  try {
+    const response = await fetch("/calendar/link");
+    const info = response.ok ? await response.json() : null;
+    if (info && info.enabled && info.path) path = info.path;
+  } catch (e) { /* offline or signed out: the row stays hidden */ }
+  if (!path) return;
+  row.hidden = false;
+  const copyBtn = document.getElementById("calendar-copy");
+  const subBtn = document.getElementById("calendar-subscribe");
+  const flash = (btn, text, label) => {
+    btn.textContent = text;
+    setTimeout(() => { btn.textContent = label; }, 2500);
+  };
+  const copyLink = async (btn, label) => {
+    const ok = await copyText(`${window.location.origin}${path}`);
+    flash(btn, ok ? "Copied" : "Copy failed", label);
+    return ok;
+  };
+  subBtn.addEventListener("click", () => {
+    logEvent("calendar", "subscribe");
+    window.location.href = `webcal://${window.location.host}${path}`;
+    // iOS Home Screen apps often ignore webcal: links. If we are still here, the
+    // link was not opened, so copy it for Calendar > Add Subscription instead.
+    setTimeout(() => {
+      if (document.visibilityState === "visible") {
+        copyLink(subBtn, "Subscribe").then((ok) => { if (ok) flash(subBtn, "Link copied", "Subscribe"); });
+      }
+    }, 1500);
+  });
+  copyBtn.addEventListener("click", () => copyLink(copyBtn, "Copy link"));
+})();
+
 document.getElementById("badge-enable").addEventListener("click", async () => {
   try { await Notification.requestPermission(); } catch (e) { /* older signature or blocked */ }
   syncBadgeButton();

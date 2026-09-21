@@ -4,7 +4,7 @@ title: HTTP routes
 description: All routes in app/main.py.
 resource: app/main.py
 tags: [api]
-timestamp: 2026-09-20T23:30:00Z
+timestamp: 2026-09-21T01:00:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -21,6 +21,8 @@ timestamp: 2026-09-20T23:30:00Z
 | `POST /todos/{id}/repeat` | Spawn next occurrence ([repeating](../features/repeating-todos.md)). |
 | `POST /todos/{id}/split` | Split into several todos. |
 | `POST /todos/{id}/attachments` (multipart `file`), `GET`/`DELETE /todos/{id}/attachments/{aid}` | Images on a todo; upload/delete return the updated todo; a `Content-Length` over 10 MB + 1 MB is refused with 413 before the body is read ([attachments](../features/attachments.md)). |
+| `GET /calendar/<token>.ics` | [Calendar feed](../features/calendar-feed.md): read-only ICS; the secret path token is the auth (no sign-in header), only this route. |
+| `GET /calendar/link` | Signed-in: `{enabled, path}` for the More panel's Subscribe / Copy link. |
 | `POST /push/devices` `{token, tz, platform}`, `POST /push/devices/unregister` `{token}` | Register or drop a device for [push reminders](../features/push-reminders.md); 400 on an unknown timezone. |
 | `POST /internal/notify` | Cloud Scheduler only (OIDC); sends due reminders, returns `{devices, sent}`. |
 | `DELETE /todos/{id}` | Soft delete (204). |

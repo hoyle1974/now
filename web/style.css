@@ -1810,6 +1810,7 @@ li.search-hit { cursor: default; }
 }
 
 .more-row .log-toggle { margin: 0; }
+.more-row[hidden] { display: none; }
 .more-row .theme-swatches { margin-left: 0; }
 .more-row .log-toggle[aria-pressed="true"] { color: var(--accent); }
 

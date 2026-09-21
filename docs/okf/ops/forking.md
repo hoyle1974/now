@@ -4,9 +4,9 @@ title: Forking and per-deployment config
 description: How a fork is set up (zilch for infrastructure, init.sh for the app), and where per-deployment settings live.
 resource: scripts/init.sh
 tags: [fork, config, zilch, deploy]
-timestamp: 2026-09-20T23:30:00Z
+timestamp: 2026-09-21T01:00:00Z
 ---
-Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (sibling repo `../zilch-gcp`, Terraform): project APIs, Cloud Run, Firestore, Scheduler, monitoring; it writes `.zilch.config`. **The app** is set up by `scripts/init.sh` (`--dry-run` to preview, `--push` to add reminders, `--widget` to create the lock screen widget token secret) and verified by the read-only `scripts/doctor.sh` (names only, never env values). `init.sh` has only been run as `--dry-run` and against the author's own project.
+Two layers. **Infrastructure** comes from [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (sibling repo `../zilch-gcp`, Terraform): project APIs, Cloud Run, Firestore, Scheduler, monitoring; it writes `.zilch.config`. **The app** is set up by `scripts/init.sh` (`--dry-run` to preview, `--push` to add reminders, `--widget` to create the lock screen widget token secret, `--calendar` for the private [calendar feed](../features/calendar-feed.md) (`scripts/setup-calendar.sh`)) and verified by the read-only `scripts/doctor.sh` (names only, never env values). `init.sh` has only been run as `--dry-run` and against the author's own project.
 
 **Where settings live** (nothing project-specific is hardcoded in code any more):
 - `scripts/lib/config.sh` resolves `PROJECT`, `REGION`, `SERVICE` for every script: environment > `.now.env` > `.zilch.config` (`gcp_project_id`, `gcp_region`, `app_name`) > `gcloud config`. Files are parsed, not sourced. No defaults name the author's project.

@@ -6,6 +6,7 @@
 #   scripts/init.sh              # ask once, then do it
 #   scripts/init.sh --push       # also set up push reminders (Scheduler job, IAM)
 #   scripts/init.sh --widget     # also create the lock screen widget token (Secret Manager)
+#   scripts/init.sh --calendar   # also create the private calendar feed (scripts/setup-calendar.sh)
 #
 # Prerequisites: gcloud and firebase logged in; a project with billing and a Firestore
 # database (zilch creates both); a Firebase project on it (console: "Add Firebase").
@@ -15,13 +16,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/config.sh
 
-DRY=0; PUSH=0; WIDGET=0
+DRY=0; PUSH=0; WIDGET=0; CALENDAR=0
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY=1 ;;
     --push) PUSH=1 ;;
     --widget) WIDGET=1 ;;
-    *) echo "usage: $0 [--dry-run] [--push] [--widget]" >&2; exit 2 ;;
+    --calendar) CALENDAR=1 ;;
+    *) echo "usage: $0 [--dry-run] [--push] [--widget] [--calendar]" >&2; exit 2 ;;
   esac
 done
 
@@ -124,6 +126,11 @@ if [ "$WIDGET" = 1 ]; then
     --update-secrets WIDGET_TOKEN=widget-token:latest
   echo "   read the token to paste into Scriptable with:"
   echo "   gcloud secrets versions access latest --secret widget-token --project $PROJECT"
+fi
+
+if [ "$CALENDAR" = 1 ]; then
+  say "5d Calendar feed (secret calendar-token; unlocks only GET /calendar/<token>.ics)"
+  run scripts/setup-calendar.sh
 fi
 
 say "6/6 Firebase Hosting (serves the app on $HOSTING_SITE.web.app)"
