@@ -47,6 +47,7 @@
     return { x: clampGaze((-s * dx / GRAVITY) * GAZE_MAX * TILT_GAIN), y: clampGaze((s * dy / GRAVITY) * GAZE_MAX * TILT_GAIN) };
   }
   let tiltBase = null;
+  let tapUntil = 0;
   let tilt = { x: 0, y: 0 }, glance = { x: 0, y: 0 }, lookTimer = null, lookLockUntil = 0;
   function applyGaze() {
     if (!el) return;
@@ -100,6 +101,7 @@
       }
       if (root.navigator && root.navigator.vibrate) root.navigator.vibrate(8);
       clearTimeout(hideTimer);
+      tapUntil = Date.now() + 2400;
       hideTimer = setTimeout(hide, 2400); // linger so you can see him look at your finger
     });
     // Child of the composer, so he is anchored to it by layout (no measured height to
@@ -177,8 +179,10 @@
     hideTimer = setTimeout(hide, cheer ? STAY + 1400 : STAY + (msg ? 900 : 0));
   }
 
-  function hide() {
+  function hide(reason) {
     if (!up) return;
+    // The More panel's event log shows why he left, for "he vanished when I tapped" reports.
+    if (typeof logEvent === "function") logEvent("mascot", "hid: " + (typeof reason === "string" ? reason : "timer"));
     up = false;
     clearTimeout(hideTimer);
     clearTimeout(lookTimer);
@@ -203,7 +207,8 @@
   let lastArm = 0;
   function activity(e) {
     if (e.target.closest?.(".mascot")) return;
-    if (up) hide();
+    if (Date.now() < tapUntil) return; // he is reacting to a tap: stray events don't send him home
+    if (up) hide("activity " + e.type);
     else {
       const t = Date.now();
       if (t - lastArm < 1000) return;
@@ -217,7 +222,7 @@
       root.addEventListener(ev, activity, { passive: true, capture: true });
     }
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden) hide(); else schedule();
+      if (document.hidden) hide("page hidden"); else schedule();
       syncMotion();
     });
     schedule();
@@ -316,7 +321,7 @@
     setTimeout(() => {
       if (!enabled() || reduced() || document.hidden) return;
       if (force) {
-        if (up) hide();
+        if (up) hide("forced reaction");
       } else {
         if (up || quiet()) return;
         const now = Date.now();
@@ -332,7 +337,7 @@
     gaze: { fromTilt: gazeFromTilt, max: GAZE_MAX },
     shake: { onPeak(fn) { peakListener = fn; }, supported: shakeSupported, needsPermission, request: requestShake, armOnFirstTap, active: () => shakeOn, _onMotion: onMotion },
     enabled,
-    setEnabled(on) { write(on ? "1" : "0"); if (!on) hide(); else schedule(); syncMotion(); },
+    setEnabled(on) { write(on ? "1" : "0"); if (!on) hide("turned off"); else schedule(); syncMotion(); },
     peek: (opts) => show(opts),
     cheer: () => show({ cheer: true, text: "All done! Look at you ✨" }),
     hide,
