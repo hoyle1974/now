@@ -77,3 +77,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-21: Tinted cards (app v72): the last leaf row of a colored card, at any depth, gets the card's bottom radius (children inherit the parent's color, so a colored parent with subtasks was square at the bottom).
 - 2026-09-21: Composer date chips (app v73) stay in the centered column on wide screens: `.composer-chips` repeats its `auto` side margins because `.chip-row`'s `margin` was overriding them.
 - 2026-09-21: New top-level todos get a random color (`POST /todos`). Python hygiene: `pyproject.toml` (ruff/mypy/pytest config), explicit imports in `app/db.py`, mypy clean, narrower lint fixes.
+- 2026-09-21: `app/main.py` split into `app/routes/` routers (todos, attachments, calendar, notifications, system, common); no behaviour change.

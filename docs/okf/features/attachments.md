@@ -2,9 +2,9 @@
 type: Feature
 title: Image attachments
 description: Images on todos, bytes in a private Cloud Storage bucket, served only through the API.
-resource: app/main.py
+resource: app/routes/attachments.py
 tags: [attachments, storage, images]
-timestamp: 2026-09-20T14:00:00Z
+timestamp: 2026-09-21T14:00:00Z
 ---
 - **Limits:** ≤10 images per todo, 10 MB each; JPEG, PNG, GIF, WebP only. The server sniffs the leading bytes and ignores the client's `Content-Type`; SVG is refused (400 wrong type, 413 too big, 400 at the cap).
 - **Metadata** is `Todo.attachments` `[{id, name, content_type, size}]` ([Todo](../data/todo.md)). It is only changed by the attachment routes (a `PATCH` cannot touch it), and each change bumps `version` and the rev like any content edit. Old docs default to `[]`.

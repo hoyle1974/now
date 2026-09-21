@@ -6,7 +6,7 @@
 # --cpu-throttling (request-based billing): CPU is billed only while a request is being
 # served. Never use --no-cpu-throttling: an always-allocated instance is billed around the
 # clock (about $30/month; it was measured while the reminder job still ran every 10 minutes). The archive sweep that runs
-# after a response (see _load_tree in app/main.py) simply finishes on the next request.
+# after a response (see _load_tree in app/routes/todos.py) simply finishes on the next request.
 set -euo pipefail
 cd "$(dirname "$0")"
 source scripts/lib/config.sh

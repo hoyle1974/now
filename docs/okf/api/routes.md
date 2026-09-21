@@ -1,10 +1,10 @@
 ---
 type: API
 title: HTTP routes
-description: All routes in app/main.py.
-resource: app/main.py
+description: Routes live in app/routes/*.py, mounted by app/main.py.
+resource: app/routes
 tags: [api]
-timestamp: 2026-09-21T05:00:00Z
+timestamp: 2026-09-21T14:00:00Z
 ---
 | Route | Purpose |
 |---|---|

@@ -1,7 +1,7 @@
 """Heads-up reminders: one Cloud Task per timed todo, delivered LEAD before it is due.
 
 Tasks are created when a todo with a timed due date in the next day is saved (routes in
-app/main.py) and by the daily digest run (push.run_notify), so both paths end up with the
+app/routes/todos.py) and by the daily digest run (push.run_notify), so both paths end up with the
 same task: its name is derived from the todo id and due time, and creating it twice is a
 no-op. A task carries only the todo id and the due time it was made for; the handler
 (push.run_heads_up) re-reads the todo and stays silent if it was completed, deleted or

@@ -3,10 +3,10 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T03:00:00Z
+timestamp: 2026-09-21T14:00:00Z
 ---
 **Server (`app/`)**
-- `main.py` — routes ([API](../api/routes.md)).
+- `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
 - `models.py` — pydantic models and limits ([Todo](../data/todo.md)).
 - `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep.
 - `next_up.py` — ranking ([next up](../features/next-up.md)).

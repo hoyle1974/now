@@ -26,7 +26,7 @@ Server runs at `http://localhost:8000`
 
 ## What's here
 
-- `app/main.py` — FastAPI app with routes
+- `app/main.py` — FastAPI app; routes are in `app/routes/`
 - `app/db.py`, `app/db_firestore.py` — Firestore data layer
 - `web/` — Frontend JavaScript for drag-and-drop and interactions
 - `scripts/` — Utility scripts

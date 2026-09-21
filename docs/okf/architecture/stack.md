@@ -3,11 +3,11 @@ type: Architecture
 title: Stack
 description: Technologies and how the pieces fit together.
 tags: [architecture]
-timestamp: 2026-09-21T02:00:00Z
+timestamp: 2026-09-21T14:00:00Z
 ---
 Single-user by design, zero GCP cost is the #1 rule ([principles](../principles.md)).
 
-- **Backend:** FastAPI (`app/main.py`), Python 3.13, pydantic models ([Todo](../data/todo.md)).
+- **Backend:** FastAPI (`app/main.py`, routes in `app/routes/`), Python 3.13, pydantic models ([Todo](../data/todo.md)).
 - **Database:** Firestore ([collections](../data/firestore.md)). Tests use the emulator ([testing](../ops/testing.md)).
 - **Image storage:** a private Cloud Storage bucket, reached only through the API ([attachments](../features/attachments.md)).
 - **Frontend:** vanilla JS in `web/` (no framework, no build step) served with a
