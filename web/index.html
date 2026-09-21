@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
   <meta name="description" content="A personal todo list: nested, offline-first, with reminders.">
-  <link rel="stylesheet" href="/style.css?v=80">
-  <link rel="stylesheet" href="/fields.css?v=80">
+  <link rel="stylesheet" href="/style.css?v=81">
+  <link rel="stylesheet" href="/fields.css?v=81">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -122,21 +122,16 @@
   </div>
 
   <form id="add-form" class="composer">
-    <div id="add-chips" class="chip-row composer-chips" hidden>
-      <button type="button" class="chip" data-due="today">Today</button>
-      <button type="button" class="chip" data-due="tomorrow">Tomorrow</button>
-      <label class="chip chip-pick" id="add-pick"><span id="add-pick-text">Pick date</span>
-        <input type="date" id="add-due" name="due" aria-label="Pick a due date">
-      </label>
-    </div>
     <div class="composer-inner">
-      <input type="text" id="add-title" name="title" placeholder="New todo"
-             autocomplete="off" enterkeyhint="done" aria-label="New todo" required>
+      <input type="text" id="add-title" name="title" placeholder="New item"
+             autocomplete="off" enterkeyhint="done" aria-label="New item" required>
+      <button type="button" id="add-type" class="composer-type" aria-label="Type"
+              aria-haspopup="true" aria-expanded="false"></button>
       <button type="button" id="add-due-toggle" class="composer-date" aria-label="Set due date"
-              aria-expanded="false" aria-controls="add-chips">
+              aria-expanded="false">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
       </button>
-      <button type="submit" class="composer-send" aria-label="Add todo">
+      <button type="submit" class="composer-send" aria-label="Add item">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
       </button>
     </div>
@@ -157,40 +152,43 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
-<script defer src="/config.js?v=80"></script>
-<script defer src="/types-data.js?v=80"></script>
-<script defer src="/types.js?v=80"></script>
-<script defer src="/auth.js?v=80"></script>
-<script defer src="/eventlog.js?v=80"></script>
-  <script defer src="/sync.js?v=80"></script>
-  <script defer src="/fields.js?v=80"></script>
-  <script defer src="/attachments.js?v=80"></script>
-  <script defer src="/fields-ui.js?v=80"></script>
-  <script defer src="/attachments-ui.js?v=80"></script>
-  <script defer src="/idb-store.js?v=80"></script>
-  <script defer src="/remote-diff.js?v=80"></script>
-  <script defer src="/freshness.js?v=80"></script>
-  <script defer src="/badge.js?v=80"></script>
-  <script defer src="/push.js?v=80"></script>
-  <script defer src="/due.js?v=80"></script>
-  <script defer src="/autodone.js?v=80"></script>
-<script defer src="/outline.js?v=80"></script>
-  <script defer src="/reorder.js?v=80"></script>
-  <script defer src="/search.js?v=80"></script>
-  <script defer src="/themes.js?v=80"></script>
-<script defer src="/mascot.js?v=80"></script>
-<script defer src="/sparkle.js?v=80"></script>
-<script defer src="/app.js?v=80"></script>
-<script defer src="/ui-helpers.js?v=80"></script>
-<script defer src="/row-interactions.js?v=80"></script>
-<script defer src="/render-node.js?v=80"></script>
-<script defer src="/editors.js?v=80"></script>
-<script defer src="/tree-view.js?v=80"></script>
-<script defer src="/composer.js?v=80"></script>
-<script defer src="/next-up-ui.js?v=80"></script>
-<script defer src="/pull-refresh.js?v=80"></script>
-<script defer src="/more-panel.js?v=80"></script>
-  <script defer src="/trash.js?v=80"></script>
-  <script defer src="/search-ui.js?v=80"></script>
+<script defer src="/config.js?v=81"></script>
+<script defer src="/types-data.js?v=81"></script>
+<script defer src="/types.js?v=81"></script>
+<script defer src="/date-picker.js?v=81"></script>
+<script defer src="/auth.js?v=81"></script>
+<script defer src="/eventlog.js?v=81"></script>
+  <script defer src="/sync.js?v=81"></script>
+  <script defer src="/fields.js?v=81"></script>
+  <script defer src="/attachments.js?v=81"></script>
+  <script defer src="/fields-ui.js?v=81"></script>
+  <script defer src="/attachments-ui.js?v=81"></script>
+  <script defer src="/idb-store.js?v=81"></script>
+  <script defer src="/remote-diff.js?v=81"></script>
+  <script defer src="/freshness.js?v=81"></script>
+  <script defer src="/badge.js?v=81"></script>
+  <script defer src="/push.js?v=81"></script>
+  <script defer src="/due.js?v=81"></script>
+  <script defer src="/autodone.js?v=81"></script>
+<script defer src="/outline.js?v=81"></script>
+  <script defer src="/reorder.js?v=81"></script>
+  <script defer src="/search.js?v=81"></script>
+  <script defer src="/themes.js?v=81"></script>
+<script defer src="/mascot.js?v=81"></script>
+<script defer src="/sparkle.js?v=81"></script>
+<script defer src="/app.js?v=81"></script>
+<script defer src="/ui-helpers.js?v=81"></script>
+<script defer src="/row-interactions.js?v=81"></script>
+<script defer src="/render-node.js?v=81"></script>
+<script defer src="/editors.js?v=81"></script>
+<script defer src="/types-ui.js?v=81"></script>
+<script defer src="/item-form.js?v=81"></script>
+<script defer src="/tree-view.js?v=81"></script>
+<script defer src="/composer.js?v=81"></script>
+<script defer src="/next-up-ui.js?v=81"></script>
+<script defer src="/pull-refresh.js?v=81"></script>
+<script defer src="/more-panel.js?v=81"></script>
+  <script defer src="/trash.js?v=81"></script>
+  <script defer src="/search-ui.js?v=81"></script>
 </body>
 </html>

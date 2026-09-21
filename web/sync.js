@@ -54,12 +54,12 @@
     return { roots: [], todosById: new Map(), trash: new Map() };
   }
 
-  function newNode(id, title, dueDate, parentId, orderIdx) {
+  function newNode(id, title, dueDate, parentId, orderIdx, type = "todo") {
     return {
       todo_id: id, title, done: false, create_date: new Date().toISOString(),
       due_date: normalizeDue(dueDate), order_idx: orderIdx, parent_id: parentId,
       child_ids: [], deleted: false, collapsed: false, repeat: null, spawned_id: null, version: 0,
-      color: null, type: "todo", links: [], blocked_by: [], references: [],
+      color: null, type, links: [], blocked_by: [], references: [],
     };
   }
 
@@ -134,7 +134,7 @@
     switch (kind) {
       case "create": {
         if (model.todosById.has(id)) return false;
-        const node = newNode(id, payload.title, payload.due_date, null, null);
+        const node = newNode(id, payload.title, payload.due_date, null, null, payload.type);
         if (payload.color) node.color = payload.color;
         model.todosById.set(id, node);
         model.roots.push(node);
@@ -185,7 +185,7 @@
         let next = Math.max(-1, ...parent.child_ids.map((c) => model.todosById.get(c)?.order_idx ?? -1)) + 1;
         payload.descriptions.forEach((title, i) => {
           if (model.todosById.has(tmpIds[i])) return;
-          const child = newNode(tmpIds[i], title, payload.due_date, id, next++);
+          const child = newNode(tmpIds[i], title, payload.due_date, id, next++, payload.type);
           model.todosById.set(child.todo_id, child);
           parent.child_ids.push(child.todo_id);
         });
@@ -253,6 +253,7 @@
         const body = { title: p.title };
         if (p.color) body.color = p.color;
         if (p.due_date) body.due_date = p.due_date;
+        if (p.type) body.type = p.type;
         return { method: "POST", path: "/todos", headers, body };
       }
       case "patch": {
@@ -274,6 +275,7 @@
         conditional();
         const body = { descriptions: p.descriptions };
         if (p.due_date) body.due_date = p.due_date;
+        if (p.type) body.type = p.type;
         return { method: "POST", path: `/todos/${id}/split`, headers, body };
       }
       case "move":

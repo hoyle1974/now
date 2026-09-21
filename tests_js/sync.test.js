@@ -1068,3 +1068,20 @@ test("clearableIds: a container is cleared by its todos, not its own done", () =
   const model = treeOf(proj, t1, empty, open, t2);
   assert.deepEqual(Sync.clearableIds(model), ["proj"]);
 });
+
+test("create and split carry the chosen type, optimistically and on the wire", () => {
+  const model = Sync.createModel();
+  const p = todo("p");
+  Object.assign(model, treeOf(p));
+  Sync.applyOp(model, { kind: "create", target_id: "tmp:r", payload: { title: "r", type: "project" } });
+  assert.equal(model.todosById.get("tmp:r").type, "project");
+  Sync.applyOp(model, { kind: "split", target_id: "p",
+    payload: { descriptions: ["a"], child_tmp_ids: ["tmp:a"], type: "list" } });
+  assert.equal(model.todosById.get("tmp:a").type, "list");
+  Sync.applyOp(model, { kind: "create", target_id: "tmp:t", payload: { title: "t" } });
+  assert.equal(model.todosById.get("tmp:t").type, "todo");
+  const body = (kind, payload) => Sync.buildRequest({ kind, target_id: "p", txn_id: "t", payload, base: {} }).body;
+  assert.equal(body("create", { title: "r", type: "project" }).type, "project");
+  assert.equal("type" in body("create", { title: "r" }), false);
+  assert.equal(body("split", { descriptions: ["a"], type: "list" }).type, "list");
+});

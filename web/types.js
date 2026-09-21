@@ -18,6 +18,19 @@
   const nameOf = (item) => (known(item) ? item.type : DEFAULT);
   const hasField = (item, field) => get(item).fields.includes(field);
 
+  // The type a new item starts as: that of the newest live sibling (so a run of same-type
+  // items needs no extra taps), else the parent's registry default, else "todo".
+  // parent is null at the top level; siblings are the items that will sit beside it.
+  function defaultChildType(parent, siblings) {
+    let newest = null;
+    for (const s of siblings || []) {
+      if (s.deleted) continue;
+      if (!newest || String(s.create_date) > String(newest.create_date)) newest = s;
+    }
+    if (newest) return nameOf(newest);
+    return parent ? get(parent).defaultChildType || DEFAULT : DEFAULT;
+  }
+
   // Progress over the todos beneath each item: only types with a checkbox count, at any
   // depth, so a container (list/project) is looked through, never counted itself.
   // Returns Map(id -> { total, done }).
@@ -40,5 +53,5 @@
     return counts;
   }
 
-  return { get, can, hasField, nameOf, descendantCounts, names: Object.keys(data) };
+  return { get, can, hasField, nameOf, defaultChildType, descendantCounts, names: Object.keys(data) };
 });

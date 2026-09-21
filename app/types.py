@@ -27,5 +27,9 @@ def can(item: Any, flag: str) -> bool:
     return can_type(getattr(item, "type", DEFAULT), flag)
 
 
+def has_field_type(name: str | None, field: str) -> bool:
+    return field in caps(name)["fields"]
+
+
 def has_field(item: Any, field: str) -> bool:
-    return field in caps(getattr(item, "type", DEFAULT))["fields"]
+    return has_field_type(getattr(item, "type", DEFAULT), field)

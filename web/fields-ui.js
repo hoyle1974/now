@@ -223,12 +223,13 @@ const FieldsUI = (() => {
     const blocked = new Set(base.blocked_by);
     const refs = new Set(base.references);
 
-    const nodes = [
-      label("Color"), renderColorPicker(state),
-      label("Links"), renderLinksEditor(state),
-      label("Blocked by"), renderTodoPicker(todo, blocked, blockerExclusions(todosById, todo)),
-      label("References"), renderTodoPicker(todo, refs),
-    ];
+    // Keyed by field name, so a sheet shows a group by looking the field up in the registry.
+    const groups = {
+      color: [label("Color"), renderColorPicker(state)],
+      links: [label("Links"), renderLinksEditor(state)],
+      blocked_by: [label("Blocked by"), renderTodoPicker(todo, blocked, blockerExclusions(todosById, todo))],
+      references: [label("References"), renderTodoPicker(todo, refs)],
+    };
     function changes() {
       const cleaned = Fields.cleanLinks(state.links);
       if (cleaned.error) return { error: cleaned.error };
@@ -236,7 +237,7 @@ const FieldsUI = (() => {
         color: state.color, links: cleaned.links, blocked_by: [...blocked], references: [...refs],
       }) };
     }
-    return { nodes, changes };
+    return { groups, changes };
   }
 
   return { init, decorateRow, blockedChip, isRowTap, renderDetail, renderEditFields };

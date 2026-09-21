@@ -205,18 +205,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       renderTree();
     };
     menu.append(
-      menuItem("Add subtask", "plus", openPanel("add")),
+      menuItem("Add item", "plus", openPanel("add")),
+      menuItem("Add several", "split", openPanel("split")),
       menuItem("Edit", "pencil", openPanel("edit")),
-      menuItem("Split into subtasks", "split", openPanel("split"))
+      // One entry however many types there are; switching only changes the label:
+      // due date, repeat and done stay, inactive.
+      menuItem(`Type: ${TypeUI.labelOf(Types.nameOf(todo))}`, Types.get(todo).icon, openPanel("type"))
     );
-
-    // Switching type only changes the label: due date, repeat and done stay, inactive.
-    for (const name of Types.names.filter((n) => n !== Types.nameOf(todo))) {
-      menu.append(menuItem(`Make ${Types.get({ type: name }).label.toLowerCase()}`, "pencil", () => {
-        setActivePanel(null);
-        reportedFailure(setType(todo.todo_id, name));
-      }));
-    }
 
     menu.append(
       menuItem("Copy with subtasks", "copy", () => {
@@ -278,11 +273,15 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   }
 
   if (isActivePanel("add", todo.todo_id)) {
-    li.appendChild(renderAddChildEditor(todo));
+    li.appendChild(ItemForm.render({ mode: "create", parent: todo }));
   }
 
   if (isActivePanel("edit", todo.todo_id)) {
-    li.appendChild(renderEditEditor(todo));
+    li.appendChild(ItemForm.render({ mode: "edit", todo }));
+  }
+
+  if (isActivePanel("type", todo.todo_id)) {
+    li.appendChild(renderTypePanel(todo));
   }
 
   if (isActivePanel("view", todo.todo_id)) {

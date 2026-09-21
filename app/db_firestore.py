@@ -621,7 +621,7 @@ def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     return _doc_to_todo_with_children(doc.to_dict(), include_deleted_children=True)
 
 def split_into_children(todo: models.Todo, descriptions: list[str],
-                        due_date=None) -> tuple[models.Todo, list[tuple[str, int]]]:
+                        due_date=None, type: str = "todo") -> tuple[models.Todo, list[tuple[str, int]]]:
     """Create child todos from descriptions.
 
     Returns the parent (child_ids and version updated) and the affected
@@ -638,7 +638,8 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
             title=description,
             parent_id=todo.todo_id,
             order_idx=next_order,
-            due_date=due_date
+            due_date=due_date,
+            type=type,
         )
         _set(_state.todos.document(str(child_todo.todo_id)),
              db_firestore_helpers.todo_to_doc(child_todo))

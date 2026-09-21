@@ -2,50 +2,72 @@
 // One of the app.js parts: classic scripts sharing one global scope, loaded in the
 // order listed in index.html (top-level statements run in that order).
 
-// ---- Composer: due date chips -----------------------------------------------
-// A calendar button opens a row of Today / Tomorrow / Pick date. #add-due (the
-// native date input inside the "Pick date" chip) holds the chosen value.
+// ---- Composer: due date and type ---------------------------------------------
+// The shared DatePicker's chips sit above the bar, opened by the calendar button. The type
+// chip shows what the next item will be: the type of the newest top-level item, unless
+// changed here for one item.
 
 const addForm = document.getElementById("add-form");
-const addChips = document.getElementById("add-chips");
 const addDueToggle = document.getElementById("add-due-toggle");
-const addDue = document.getElementById("add-due");
-const addPickText = document.getElementById("add-pick-text");
+const addType = document.getElementById("add-type");
+
+const composerDate = DatePicker.create({ rowClass: "composer-chips", onChange: () => renderComposerDue() });
+composerDate.chips.hidden = true;
+addForm.prepend(composerDate.chips);
 
 function renderComposerDue() {
-  const value = addDue.value;
-  const isToday = value === getTodayString();
-  const isTomorrow = value === getTomorrowString();
-  addChips.querySelector('[data-due="today"]').classList.toggle("is-active", isToday);
-  addChips.querySelector('[data-due="tomorrow"]').classList.toggle("is-active", isTomorrow);
-  const custom = !!value && !isToday && !isTomorrow;
-  document.getElementById("add-pick").classList.toggle("is-active", custom);
-  addPickText.textContent = custom ? formatDue(`${value}T00:00:00`) : "Pick date";
+  const value = composerDate.date();
   addDueToggle.classList.toggle("has-value", !!value);
   addDueToggle.setAttribute("aria-label", value ? `Due ${value}. Change due date` : "Set due date");
 }
 
 function setComposerChips(open) {
-  addChips.hidden = !open;
+  composerDate.chips.hidden = !open;
   addDueToggle.setAttribute("aria-expanded", String(open));
 }
 
-addDueToggle.addEventListener("click", () => setComposerChips(addChips.hidden));
+addDueToggle.addEventListener("click", () => setComposerChips(composerDate.chips.hidden));
 
-addChips.addEventListener("click", (event) => {
-  const chip = event.target.closest("[data-due]");
-  if (!chip) return;
-  const value = chip.dataset.due === "today" ? getTodayString() : getTomorrowString();
-  addDue.value = addDue.value === value ? "" : value; // tapping the chosen chip clears it
-  renderComposerDue();
-});
+let composerTypeChoice = null; // set by the picker for the next item only
+const composerType = () => composerTypeChoice || ItemForm.defaultTypeFor(null);
 
-// The date input sits invisibly over its chip; some desktop browsers only open
-// the picker from a small icon, so ask for it explicitly.
-document.getElementById("add-pick").addEventListener("click", () => {
-  try { addDue.showPicker(); } catch (e) { /* unsupported: the input still works */ }
+let typePop = null;
+function closeTypePop() {
+  if (typePop) typePop.remove();
+  typePop = null;
+  addType.setAttribute("aria-expanded", "false");
+}
+
+function renderComposerType() {
+  const type = composerType();
+  addType.replaceChildren(icon(Types.get({ type }).icon));
+  addType.setAttribute("aria-label", `Type: ${TypeUI.labelOf(type)}. Change type`);
+  // A type without a due date has nothing to set one on.
+  const dated = Types.hasField({ type }, "due_date");
+  addDueToggle.hidden = !dated;
+  if (!dated) setComposerChips(false);
+}
+
+addType.addEventListener("click", () => {
+  if (typePop) { closeTypePop(); return; }
+  const picker = TypeUI.create({
+    value: composerType(),
+    layout: "list",
+    onChange: (name) => {
+      composerTypeChoice = name;
+      closeTypePop();
+      renderComposerType();
+    },
+  });
+  typePop = document.createElement("div");
+  typePop.className = "type-pop";
+  typePop.appendChild(picker.node);
+  addForm.appendChild(typePop);
+  addType.setAttribute("aria-expanded", "true");
 });
-addDue.addEventListener("input", renderComposerDue);
+document.addEventListener("click", (event) => {
+  if (typePop && !event.target.closest(".type-pop, #add-type")) closeTypePop();
+});
 
 // Tell the CSS how tall the composer is, so padding and popups clear it.
 // Measured from the rendered box (incl. the home-indicator padding), and
@@ -69,9 +91,10 @@ addForm.addEventListener("submit", (event) => {
   const title = input.value.trim();
   if (!title) return;
   // A new top-level todo gets a random color; the server stores the one we send.
-  const payload = { title, color: Fields.COLORS[Math.floor(Math.random() * Fields.COLORS.length)] };
-  if (addDue.value) {
-    payload.due_date = addDue.value;
+  const type = composerType();
+  const payload = { title, type, color: Fields.COLORS[Math.floor(Math.random() * Fields.COLORS.length)] };
+  if (composerDate.date() && Types.hasField({ type }, "due_date")) {
+    payload.due_date = composerDate.date();
   }
   engine.enqueue({ kind: "create", payload });
   if (window.Mascot) {
@@ -81,7 +104,8 @@ addForm.addEventListener("submit", (event) => {
     }
   }
   input.value = "";
-  addDue.value = "";
-  renderComposerDue();
+  composerDate.set("");
   setComposerChips(false);
+  composerTypeChoice = null;
 });
+renderComposerType();

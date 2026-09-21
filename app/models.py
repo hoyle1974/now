@@ -70,6 +70,7 @@ class TodoCreate(BaseModel):
     title: str = Field(max_length=MAX_TITLE_LEN)
     color: Color | None = Field(None)  # the client picks one so it can show it at once; omitted = server picks
     due_date: datetime.datetime | None = Field(None)
+    type: ItemType | None = Field(None)  # omitted = todo
 
 class TodoUpdate(BaseModel):
     title: str | None = Field(None, max_length=MAX_TITLE_LEN)
@@ -111,6 +112,7 @@ class TodoRepeatRequest(BaseModel):
 class TodoSplit(BaseModel):
     descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
     due_date: datetime.datetime | None = Field(None)
+    type: ItemType | None = Field(None)  # applies to every child created; omitted = todo
 
 class Todo(BaseModel):
     todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )

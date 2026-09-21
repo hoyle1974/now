@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "80";
+const APP_VERSION = "81";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -379,8 +379,30 @@ function showUndo(todoId) {
 }
 
 // dueDate undefined = rename only (leave due date/time and repeat alone).
+// The row menu's type change: applies at once, with an Undo toast, because switching to a
+// type without a due date silently drops the item from Next Up and the badge.
 async function setType(todoId, type) {
-  engine.enqueue({ kind: "patch", target_id: todoId, payload: { type } });
+  const previous = Types.nameOf(model.todosById.get(todoId));
+  if (!engine.enqueue({ kind: "patch", target_id: todoId, payload: { type } })) return;
+  showTypeUndo(todoId, previous, type);
+}
+
+function showTypeUndo(todoId, previous, type) {
+  const errorDiv = document.getElementById("error");
+  claimToast(errorDiv);
+  errorDiv.classList.add("toast--calm");
+  errorDiv.hidden = false;
+  errorDiv.textContent = `Now ${TypeUI.withArticle(TypeUI.labelOf(type))} · `;
+  const undoBtn = document.createElement("button");
+  undoBtn.textContent = "Undo";
+  undoBtn.className = "toast-action";
+  undoBtn.onclick = () => {
+    clearTimeout(undoTimer);
+    errorDiv.hidden = true;
+    engine.enqueue({ kind: "patch", target_id: todoId, payload: { type: previous } });
+  };
+  errorDiv.appendChild(undoBtn);
+  undoTimer = setTimeout(() => { errorDiv.hidden = true; }, 5000);
 }
 
 async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
@@ -391,12 +413,14 @@ async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
     payload: Fields.patchPayload({ title, dueDate, repeat, fields }) });
 }
 
-async function saveSplit(todoId, descriptions, dueDate = null) {
+async function saveSplit(todoId, descriptions, dueDate = null, type = null) {
   setActivePanel(null);
   const payload = { descriptions };
   if (dueDate) {
     payload.due_date = dueDate;
   }
+  // Add several uses the same default as Add item; a chosen type is sent as is.
+  payload.type = type || ItemForm.defaultTypeFor(model.todosById.get(todoId));
   engine.enqueue({ kind: "split", target_id: todoId, payload });
 }
 

@@ -1,4 +1,5 @@
-// The edit, split, add-subtask sheets and the todo viewer.
+// The split and type sheets, the todo viewer, and the shared sheet helpers
+// (the edit and new-item sheets are ItemForm, item-form.js).
 // One of the app.js parts: classic scripts sharing one global scope, loaded in the
 // order listed in index.html (top-level statements run in that order).
 // Shared Cancel/Save row for the inline editors below — each editor supplies
@@ -69,7 +70,7 @@ function sheetLabel(text, forEl) {
 
 function renderSplitEditor(todo) {
   const textarea = document.createElement("textarea");
-  textarea.placeholder = "One subtask per line";
+  textarea.placeholder = "One item per line";
   textarea.rows = 3;
 
   const buttons = renderEditorActions(() => {
@@ -82,54 +83,7 @@ function renderSplitEditor(todo) {
   }, "Split");
 
   textarea.rows = 8;
-  return renderFullSheet("Split into subtasks", [textarea], buttons, todo.title);
-}
-
-function renderAddChildEditor(todo) {
-  const input = document.createElement("input");
-  input.type = "text";
-  input.placeholder = "Subtask title";
-  input.enterKeyHint = "done";
-
-  const dueDateInput = document.createElement("input");
-  dueDateInput.type = "date";
-  const dueTimeInput = renderTimeInput(dueDateInput);
-
-  const submit = () => {
-    const title = input.value.trim();
-    if (!title) return;
-    reportedFailure(saveSplit(todo.todo_id, [title], Due.combine(dueDateInput.value, dueTimeInput.value)));
-  };
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      submit();
-    }
-  });
-
-  return renderFullSheet("New subtask", [
-    sheetLabel("Title", input),
-    input,
-    sheetLabel("Due date (optional)", dueDateInput),
-    dueDateInput,
-    sheetLabel("Time (optional)", dueTimeInput),
-    dueTimeInput,
-  ], renderEditorActions(submit, "Add"));
-}
-
-// The optional time-of-day next to a date input. It only means something with
-// a date, so it is disabled (and cleared) while the date is empty.
-function renderTimeInput(dateInput, value = "") {
-  const timeInput = document.createElement("input");
-  timeInput.type = "time";
-  timeInput.value = value;
-  const sync = () => {
-    timeInput.disabled = !dateInput.value;
-    if (!dateInput.value) timeInput.value = "";
-  };
-  dateInput.addEventListener("input", sync);
-  sync();
-  return timeInput;
+  return renderFullSheet("Add several", [textarea], buttons, todo.title);
 }
 
 // "Repeat every [2] [weeks]" next to the due date. Repeating needs a date to
@@ -183,128 +137,32 @@ function renderRepeatControls(dateInput, rule) {
   };
 }
 
-// #6: Due date shortcuts in edit panel
-function renderEditEditor(todo) {
-  const titleInput = document.createElement("input");
-  titleInput.type = "text";
-  titleInput.placeholder = "Title";
-  titleInput.value = todo.title;
-
-  const dueDateInput = document.createElement("input");
-  dueDateInput.type = "date";
-  if (todo.due_date) {
-    dueDateInput.value = todo.due_date.slice(0, 10);
-  }
-  // An empty date input is blank on iOS, so nobody knows to tap it: show a hint over it.
-  const dueField = document.createElement("div");
-  dueField.className = "date-field";
-  const dueHint = document.createElement("span");
-  dueHint.className = "date-field-hint";
-  dueHint.textContent = "Pick a date";
-  dueHint.setAttribute("aria-hidden", "true");
-  dueField.append(dueDateInput, dueHint);
-  const syncDueHint = () => dueField.classList.toggle("is-empty", !dueDateInput.value);
-  dueDateInput.addEventListener("input", syncDueHint);
-  dueDateInput.addEventListener("change", syncDueHint);
-  syncDueHint();
-  const dueTimeInput = renderTimeInput(dueDateInput, Due.timePart(todo.due_date));
-  const repeatControls = renderRepeatControls(dueDateInput, todo.repeat);
-
-  // One compact row; the chip matching the current date shows as selected.
-  const shortcutsDiv = document.createElement("div");
-  shortcutsDiv.className = "chip-row";
-  const shortcuts = [
-    { label: "Today", value: getTodayString() },
-    { label: "Tomorrow", value: getTomorrowString() },
-    { label: "Clear", value: "", plain: true },
-  ];
-  const chipButtons = shortcuts.map((shortcut) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip" + (shortcut.plain ? " chip-plain" : "");
-    btn.textContent = shortcut.label;
-    btn.addEventListener("click", () => {
-      dueDateInput.value = shortcut.value;
-      dueDateInput.dispatchEvent(new Event("input")); // keeps the time field in step
-      markChips();
-    });
-    shortcutsDiv.appendChild(btn);
-    return btn;
+// The row menu's Type entry: pick a type and it applies at once (with an Undo toast).
+function renderTypePanel(todo) {
+  const picker = TypeUI.create({
+    value: Types.nameOf(todo),
+    layout: "list",
+    onChange: (name) => {
+      setActivePanel(null);
+      if (name !== Types.nameOf(todo)) reportedFailure(setType(todo.todo_id, name));
+      else renderTree();
+    },
   });
-  function markChips() {
-    shortcuts.forEach((shortcut, i) => {
-      chipButtons[i].classList.toggle("is-active", !shortcut.plain && dueDateInput.value === shortcut.value);
-    });
-  }
-  dueDateInput.addEventListener("input", markChips);
-  markChips();
-
-  const extra = FieldsUI.renderEditFields(todo);
-
-  // Type picker. Only the fields the chosen type has are shown; the others are hidden,
-  // not cleared, so switching back finds them as they were.
-  const typeSelect = document.createElement("select");
-  for (const name of Types.names) {
-    const opt = document.createElement("option");
-    opt.value = name;
-    opt.textContent = Types.get({ type: name }).label;
-    typeSelect.appendChild(opt);
-  }
-  typeSelect.value = Types.nameOf(todo);
-  const group = (field, nodes) => {
-    const g = document.createElement("div");
-    g.className = "field-group";
-    g.dataset.field = field;
-    g.append(...nodes);
-    return g;
-  };
-  const groups = [
-    group("due_date", [sheetLabel("Due date", dueDateInput), dueField, shortcutsDiv,
-      sheetLabel("Time (optional)", dueTimeInput), dueTimeInput]),
-    group("repeat", [sheetLabel("Repeat every", repeatControls.unit), repeatControls.row]),
-    ...["color", "links", "blocked_by", "references"].map((f, i) => group(f, extra.nodes.slice(2 * i, 2 * i + 2))),
-  ];
-  const showFields = () => {
-    for (const g of groups) g.hidden = !Types.hasField({ type: typeSelect.value }, g.dataset.field);
-  };
-  typeSelect.addEventListener("change", showFields);
-  showFields();
-
-  const buttons = renderEditorActions(() => {
-    const title = titleInput.value.trim();
-    if (!title) return;
-    const result = extra.changes();
-    if (result.error) {
-      showNotice({ level: "error", message: result.error });
-      return;
-    }
-    const chosen = { type: typeSelect.value };
-    // Fields the type doesn't have are left exactly as stored.
-    const fields = Object.fromEntries(Object.entries(result.fields).filter(([f]) => Types.hasField(chosen, f)));
-    if (chosen.type !== Types.nameOf(todo)) fields.type = chosen.type;
-    const dated = Types.hasField(chosen, "due_date");
-    reportedFailure(saveEdit(todo.todo_id, title,
-      dated ? Due.combine(dueDateInput.value, dueTimeInput.value) : undefined,
-      dated ? repeatControls.value() : null, fields));
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "btn btn-plain";
+  cancel.textContent = "Cancel";
+  cancel.addEventListener("click", () => {
+    setActivePanel(null);
+    renderTree();
   });
-
-  const heading = document.createElement("h2");
-  heading.className = "sheet-title";
-  heading.textContent = "Edit item";
-
-  const body = document.createElement("div");
-  body.className = "sheet-body";
-  body.append(
-    heading,
-    sheetLabel("Title", titleInput),
-    titleInput,
-    sheetLabel("Type", typeSelect),
-    typeSelect,
-    ...groups
-  );
-  const screen = renderSheet(body, buttons);
-  screen.classList.add("sheet-full");
-  return screen;
+  const actions = document.createElement("div");
+  actions.className = "sheet-actions";
+  actions.appendChild(cancel);
+  const heading = document.createElement("p");
+  heading.className = "sheet-label";
+  heading.textContent = "Change type";
+  return renderSheet(heading, picker.node, actions);
 }
 
 // Full-screen read-only look at one todo; Edit hands off to the edit sheet.
@@ -331,8 +189,8 @@ function renderViewer(todo, counts) {
     add(facts, "dt", "sheet-label", name);
     add(facts, "dd", "view-value", value);
   };
+  fact("Type", Types.get(todo).label);
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
-  else fact("Type", Types.get(todo).label);
   if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? formatDue(todo.due_date) : "No due date");
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);

@@ -1966,3 +1966,131 @@ li.search-hit { cursor: default; }
 /* Edit-sheet fields hidden by the item type stay in the DOM (their data is kept). */
 .field-group { display: contents; }
 .field-group[hidden] { display: none; }
+
+/* ---------- One date picker, one type picker (date-picker.js, types-ui.js) ---------- */
+
+.chip[hidden],
+.composer-date[hidden] {
+  display: none;
+}
+
+/* The date input hides under its chip; the sheet's generic input styling must not resize it. */
+.sheet .chip-pick input[type="date"] {
+  margin: 0;
+  padding: 0;
+  min-height: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.date-picker-time input[type="time"] {
+  max-width: 200px;
+}
+
+.type-chip svg {
+  width: 16px;
+  height: 16px;
+  margin-right: 6px;
+  flex: 0 0 auto;
+}
+
+.type-picker .chip {
+  background: var(--fill);
+}
+
+.type-picker .chip.is-active {
+  background: var(--accent);
+}
+
+.type-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 12px;
+}
+
+.type-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--fill);
+  color: var(--label);
+  text-align: left;
+}
+
+.type-option svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.type-option-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.type-option-label {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.type-option-desc {
+  font-size: 13px;
+  color: var(--label-2);
+}
+
+.type-option.is-active {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.type-option.is-active svg,
+.type-option.is-active .type-option-desc {
+  color: inherit;
+}
+
+.composer-type {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  color: var(--accent);
+}
+
+.composer-type svg {
+  width: 20px;
+  height: 20px;
+}
+
+.composer-type[aria-expanded="true"] {
+  background: var(--fill);
+}
+
+.type-pop {
+  position: absolute;
+  bottom: 100%;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  max-width: 608px;
+  margin: 0 auto 8px;
+  padding: 8px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 0 0 0.5px var(--separator), 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.type-pop .type-list {
+  margin: 0;
+}

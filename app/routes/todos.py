@@ -9,7 +9,7 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 
-from app import db, models, next_up, tasks
+from app import db, models, next_up, tasks, types
 from app.routes.common import affected_refs, apply, reply, saved
 
 log = logging.getLogger(__name__)
@@ -20,8 +20,9 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
     def create() -> tuple[int, dict | None]:
         # A new top-level project gets a random colour so projects are told apart at a glance.
-        todo = models.Todo(title=body.title, color=body.color or random.choice(models.COLORS))
-        if body.due_date:
+        todo = models.Todo(title=body.title, color=body.color or random.choice(models.COLORS),
+                           type=body.type or types.DEFAULT)
+        if body.due_date and types.has_field(todo, "due_date"):
             todo.due_date = body.due_date
         db.create_todo(todo)
         return 200, jsonable_encoder(todo)
@@ -213,18 +214,21 @@ def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
 @router.post("/todos/{todo_id}/split", response_model=None)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: BackgroundTasks,
                x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
+    # A type without a due date never gets one, so nothing is scheduled for it either.
+    due_date = body.due_date if types.has_field_type(body.type, "due_date") else None
+
     def action(todo: models.Todo) -> dict:
         # affected is the parent first, then the new children in description
         # order, so the client can map its temporary child ids to real ones by position.
-        parent, affected = db.split_into_children(todo, body.descriptions, body.due_date)
+        parent, affected = db.split_into_children(todo, body.descriptions, due_date, body.type or types.DEFAULT)
         return {**jsonable_encoder(parent), "affected": affected_refs(affected)}
 
     result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
-    if result[0] == 200 and body.due_date:
+    if result[0] == 200 and due_date:
         # The new children (affected[1:]) all carry the split's due date; the parent is unchanged.
         for child in result[1]["affected"][1:]:  # type: ignore[index]
             background.add_task(tasks.schedule_from_body,
-                                {"todo_id": child["todo_id"], "due_date": jsonable_encoder(body.due_date)})
+                                {"todo_id": child["todo_id"], "due_date": jsonable_encoder(due_date)})
     return reply(*result)
 
 @router.patch("/todos/{todo_id}/move/{direction}", response_model=None)

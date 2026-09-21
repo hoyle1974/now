@@ -83,6 +83,8 @@ function restoreSheet(treeEl, snap) {
 }
 
 function renderTree() {
+  // The composer's default type follows the newest top-level item.
+  if (typeof renderComposerType === "function") renderComposerType();
   const treeEl = document.getElementById("todo-tree");
   const sheetSnap = snapshotSheet(treeEl);
   treeEl.innerHTML = "";

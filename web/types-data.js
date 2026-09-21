@@ -25,11 +25,13 @@
       "triggersAutodone": true,
       "countsInBadge": true,
       "showsProgress": true,
-      "notifies": true
+      "notifies": true,
+      "description": "Something to do, with a checkbox and an optional due date.",
+      "defaultChildType": "todo"
     },
     "list": {
       "label": "List",
-      "icon": "grip",
+      "icon": "list",
       "fields": [
         "title",
         "color",
@@ -41,11 +43,13 @@
       "triggersAutodone": false,
       "countsInBadge": false,
       "showsProgress": false,
-      "notifies": false
+      "notifies": false,
+      "description": "A plain group of items, with no checkbox or due date.",
+      "defaultChildType": "todo"
     },
     "project": {
       "label": "Project",
-      "icon": "copy",
+      "icon": "folder",
       "fields": [
         "title",
         "color",
@@ -57,7 +61,9 @@
       "triggersAutodone": false,
       "countsInBadge": false,
       "showsProgress": true,
-      "notifies": false
+      "notifies": false,
+      "description": "A group that shows how many of its todos are done.",
+      "defaultChildType": "todo"
     }
   };
 });

@@ -228,3 +228,43 @@ def test_container_with_dormant_blocked_by_is_not_flagged_blocked(db_setup):
     client.patch(f"/todos/{lst}", json={"blocked_by": [blocker]})
     tree = client.get("/todos/tree").json()
     assert tree["todosById"][lst]["blocked"] is False
+
+
+# ---- type on create and split ------------------------------------------------
+
+def test_registry_documents_every_type():
+    for name in types.NAMES:
+        spec = types.caps(name)
+        assert spec["description"] and spec["icon"]
+        assert spec["defaultChildType"] in types.NAMES
+
+
+def test_create_accepts_type_and_defaults_to_todo(db_setup):
+    assert client.post("/todos", json={"title": "plain"}).json()["type"] == "todo"
+    made = client.post("/todos", json={"title": "big", "type": "project"}).json()
+    assert made["type"] == "project"
+    assert client.post("/todos", json={"title": "x", "type": "nonsense"}).status_code == 422
+
+
+def test_create_drops_a_due_date_the_type_cannot_have(db_setup):
+    made = client.post("/todos", json={"title": "l", "type": "list", "due_date": "2026-10-01T00:00:00"}).json()
+    assert made["due_date"] is None
+    todo = client.post("/todos", json={"title": "t", "due_date": "2026-10-01T00:00:00"}).json()
+    assert todo["due_date"] is not None
+
+
+def test_split_applies_type_to_every_child(db_setup):
+    parent = client.post("/todos", json={"title": "p", "type": "project"}).json()
+    res = client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["a", "b"], "type": "list"})
+    assert res.status_code == 200
+    by_id = client.get("/todos/tree").json()["todosById"]
+    kids = [by_id[i] for i in by_id[parent["todo_id"]]["child_ids"]]
+    assert [k["type"] for k in kids] == ["list", "list"]
+    plain = client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["c"]})
+    assert plain.status_code == 200
+
+
+def test_split_rejects_unknown_type(db_setup):
+    parent = client.post("/todos", json={"title": "p"}).json()
+    res = client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["a"], "type": "nonsense"})
+    assert res.status_code == 422

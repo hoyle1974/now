@@ -39,3 +39,25 @@ test("inherited object keys are not types", () => {
   assert.equal(Types.hasField({ type: "toString" }, "due_date"), true);
   assert.equal(Types.nameOf({ type: "__proto__" }), "todo");
 });
+
+test("defaultChildType: newest sibling wins, then the parent's default, then todo", () => {
+  const sib = (type, when, extra = {}) => ({ type, create_date: when, deleted: false, ...extra });
+  const parent = { type: "project" };
+  assert.equal(Types.defaultChildType(parent, []), "todo");
+  assert.equal(Types.defaultChildType(parent, [sib("list", "2026-01-01"), sib("todo", "2026-01-02")]), "todo");
+  assert.equal(Types.defaultChildType(parent, [sib("todo", "2026-01-01"), sib("list", "2026-01-02")]), "list");
+  // Order in the array does not matter; only create_date does.
+  assert.equal(Types.defaultChildType(parent, [sib("list", "2026-01-02"), sib("todo", "2026-01-01")]), "list");
+  assert.equal(Types.defaultChildType(parent, [sib("list", "2026-01-02", { deleted: true }), sib("todo", "2026-01-01")]), "todo");
+  assert.equal(Types.defaultChildType(null, [sib("project", "2026-01-01")]), "project");
+  assert.equal(Types.defaultChildType(null, []), "todo");
+  assert.equal(Types.defaultChildType(parent, [sib("from-the-future", "2026-01-01")]), "todo");
+});
+
+test("every type has a label, description, icon and a known default child type", () => {
+  for (const name of Types.names) {
+    const t = Types.get({ type: name });
+    assert.ok(t.label && t.description && t.icon, name);
+    assert.ok(Types.names.includes(t.defaultChildType), name);
+  }
+});
