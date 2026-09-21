@@ -577,8 +577,9 @@ def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
             live[data["todo_id"]] = db_firestore_helpers.doc_to_todo(data)
     # Derived flag. Ids of missing/deleted todos are simply ignored.
     for todo in live.values():
-        todo.blocked = any(str(b) in live and not live[str(b)].done and types.can(live[str(b)], "hasCheckbox")
-                           for b in todo.blocked_by)
+        todo.blocked = types.has_field(todo, "blocked_by") and any(
+            str(b) in live and not live[str(b)].done and types.can(live[str(b)], "hasCheckbox")
+            for b in todo.blocked_by)
 
     children: dict[str | None, list[models.Todo]] = {}
     for todo in live.values():

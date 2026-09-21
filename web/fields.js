@@ -17,6 +17,7 @@
   // The server's `blocked` flag is only right in the full tree, so recompute it
   // from the local model: blocked while any blocker still exists and is open.
   function isBlocked(todo, todosById) {
+    if (!Types.hasField(todo, "blocked_by")) return false;
     return (todo.blocked_by || []).some((id) => {
       const b = todosById.get(id);
       return !!b && !b.deleted && !b.done && Types.can(b, "hasCheckbox");

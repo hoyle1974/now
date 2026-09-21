@@ -26,6 +26,8 @@ from a declarative registry, never from `if type === "todo"`.
 
 ## Registry
 
+(As built: `todo` also has `showsProgress`, so its subtask chip is governed by the flag like a project's; the registry also carries `label` and `icon`.)
+
 Per type: `fields` (editable inputs) and flags `hasCheckbox`, `appearsInNextUp`,
 `triggersAutodone`, `countsInBadge`, `showsProgress`, `notifies` (push, Cloud Tasks
 heads-ups, ICS feed).

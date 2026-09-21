@@ -101,3 +101,9 @@ test("a container never blocks", () => {
   assert.equal(Fields.isBlocked({ blocked_by: ["l"] }, byId), false);
   assert.equal(Fields.isBlocked({ blocked_by: ["p"] }, byId), true);
 });
+
+test("a container's dormant blocked_by does not make it blocked", () => {
+  const byId = new Map([["p", { todo_id: "p", type: "todo", done: false }]]);
+  assert.equal(Fields.isBlocked({ type: "list", blocked_by: ["p"] }, byId), false);
+  assert.equal(Fields.isBlocked({ type: "todo", blocked_by: ["p"] }, byId), true);
+});

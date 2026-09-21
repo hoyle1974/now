@@ -12,9 +12,10 @@
   "use strict";
 
   const DEFAULT = "todo";
-  const get = (item) => data[item && item.type] || data[DEFAULT];
+  const known = (item) => Boolean(item) && Object.hasOwn(data, item.type);
+  const get = (item) => data[known(item) ? item.type : DEFAULT];
   const can = (item, flag) => Boolean(get(item)[flag]);
-  const nameOf = (item) => (item && data[item.type] ? item.type : DEFAULT);
+  const nameOf = (item) => (known(item) ? item.type : DEFAULT);
   const hasField = (item, field) => get(item).fields.includes(field);
 
   // Progress over the todos beneath each item: only types with a checkbox count, at any

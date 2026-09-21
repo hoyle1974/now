@@ -33,3 +33,9 @@ test("descendantCounts counts only todos, at any depth, looking through containe
   assert.deepEqual(counts.get("lst"), { total: 2, done: 1 });
   assert.deepEqual(counts.get("empty"), { total: 0, done: 0 });
 });
+
+test("inherited object keys are not types", () => {
+  assert.equal(Types.can({ type: "constructor" }, "hasCheckbox"), true);
+  assert.equal(Types.hasField({ type: "toString" }, "due_date"), true);
+  assert.equal(Types.nameOf({ type: "__proto__" }), "todo");
+});

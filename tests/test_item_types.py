@@ -206,3 +206,25 @@ def test_generated_client_data_is_current():
     gen = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(gen)
     assert (root / "web" / "types-data.js").read_text() == gen.render(), "run: python scripts/gen_types.py"
+
+
+# ---- review fixes: dormant blocked_by on a container -------------------------
+
+def test_container_dormant_blocked_by_blocks_nothing():
+    _ALL.clear()
+    blocker = _mk("blocker")
+    child = _mk("child")
+    lst = _mk("list", "list", kids=[child], blocked_by=[blocker])   # blocked_by is dormant on a list
+    other = _mk("other", blocked_by=[blocker])
+    by_id = {str(t.todo_id): t for t in _ALL}
+    got = {i["title"]: i["blocked_by"] for i in rank_next_up([lst, blocker, other], by_id, 10)}
+    assert got["child"] == []                      # not held back by its list's dormant blocker
+    assert got["other"] == ["blocker"]             # a real todo still is
+
+
+def test_container_with_dormant_blocked_by_is_not_flagged_blocked(db_setup):
+    blocker = _post("blocker")
+    lst = _post("list", type="list")
+    client.patch(f"/todos/{lst}", json={"blocked_by": [blocker]})
+    tree = client.get("/todos/tree").json()
+    assert tree["todosById"][lst]["blocked"] is False

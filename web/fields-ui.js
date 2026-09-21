@@ -201,6 +201,13 @@ const FieldsUI = (() => {
     return wrap;
   }
 
+  // Not offered as blockers: relatives (see Fields.relativeIds) and containers, which never block.
+  function blockerExclusions(todosById, todo) {
+    const out = new Set(Fields.relativeIds(todosById, todo.todo_id));
+    for (const t of todosById.values()) if (!Types.can(t, "hasCheckbox")) out.add(t.todo_id);
+    return out;
+  }
+
   // Everything the edit sheet needs: elements to append, and changes() which
   // returns { fields } (only what differs) or { error }.
   function renderEditFields(todo) {
@@ -219,7 +226,7 @@ const FieldsUI = (() => {
     const nodes = [
       label("Color"), renderColorPicker(state),
       label("Links"), renderLinksEditor(state),
-      label("Blocked by"), renderTodoPicker(todo, blocked, Fields.relativeIds(todosById, todo.todo_id)),
+      label("Blocked by"), renderTodoPicker(todo, blocked, blockerExclusions(todosById, todo)),
       label("References"), renderTodoPicker(todo, refs),
     ];
     function changes() {

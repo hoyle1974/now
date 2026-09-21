@@ -103,7 +103,7 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
         seen: set[str] = set()
         while node is not None and str(node.todo_id) not in seen:
             seen.add(str(node.todo_id))
-            for bid in node.blocked_by:
+            for bid in (node.blocked_by if types.has_field(node, "blocked_by") else []):
                 b = by_id.get(str(bid))
                 if b is not None and _open(b) and types.can(b, "hasCheckbox"):
                     found.setdefault(str(b.todo_id), b)
