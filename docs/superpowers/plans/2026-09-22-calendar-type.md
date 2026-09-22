@@ -602,6 +602,7 @@ def test_apply_calendar_sync_creates_updates_deletes(db_setup):
     db.create_todo(cal)
     kept = calendar_sync.ParsedEvent("kept@x", "Same", dt.datetime(2026, 2, 1, 9), None)
     db.apply_calendar_sync(str(cal.todo_id), [kept])
+    kept_id_before = db.get_calendar_event_children(str(cal.todo_id))["kept@x"].todo_id
 
     changed = calendar_sync.ParsedEvent("kept@x", "Renamed", dt.datetime(2026, 2, 1, 9), "Room 2")
     new = calendar_sync.ParsedEvent("new@x", "Brand new", dt.datetime(2026, 2, 3, 9), None)
@@ -614,6 +615,29 @@ def test_apply_calendar_sync_creates_updates_deletes(db_setup):
     assert children["kept@x"].location == "Room 2"
     assert children["kept@x"].type == "calendar_event"
     assert children["kept@x"].parent_id == cal.todo_id
+    # The critical property: a changed-but-still-present event is patched in place, not
+    # deleted and recreated. remote-diff.js (web/remote-diff.js) identifies items by todo
+    # id, not external_uid; a delete+create here would make every routine resync of an
+    # unchanged calendar look like a spurious "N changes from another device" to the client.
+    assert children["kept@x"].todo_id == kept_id_before
+    assert children["kept@x"].version == 2  # bumped once by the in-place patch, not reset by a recreate
+
+
+def test_apply_calendar_sync_unchanged_event_is_not_written(db_setup):
+    """A uid match with identical fields gets no write at all — not even a no-op patch —
+    so its version/rev stay untouched and nothing looks changed to the client."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    same = calendar_sync.ParsedEvent("same@x", "Unchanged", dt.datetime(2026, 2, 1, 9), None)
+    db.apply_calendar_sync(str(cal.todo_id), [same])
+    before = db.get_calendar_event_children(str(cal.todo_id))["same@x"]
+
+    result = db.apply_calendar_sync(str(cal.todo_id), [same])
+
+    assert result == {"created": 0, "updated": 0, "deleted": 0}
+    after = db.get_calendar_event_children(str(cal.todo_id))["same@x"]
+    assert after.todo_id == before.todo_id
+    assert after.version == before.version
 
 
 def test_apply_calendar_sync_deletes_missing(db_setup):
