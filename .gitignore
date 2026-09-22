@@ -15,3 +15,4 @@ firebase-debug.log
 web/config.js
 .firebaserc
 .calendar-url
+.worktrees/
