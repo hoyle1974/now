@@ -1,4 +1,5 @@
 import datetime as dt
+import json
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -131,6 +132,20 @@ def test_task_name_is_stable_and_changes_with_the_due_time():
     assert a == tasks._task_name("q", "id", "2026-09-19T15:00:00")
     assert a != tasks._task_name("q", "id", "2026-09-19T16:00:00")
     assert a.startswith("q/tasks/soon-id-")
+
+
+def test_task_body_names_the_user(monkeypatch):
+    captured = {}
+    class FakeClient:
+        def create_task(self, request, timeout=None):
+            captured["body"] = json.loads(request["task"].http_request.body)
+    monkeypatch.setattr(tasks, "_client", FakeClient())
+    monkeypatch.setenv("REMINDER_QUEUE", "projects/p/locations/l/queues/q")
+    monkeypatch.setenv("NOTIFY_AUDIENCE", "https://x.example")
+    monkeypatch.setenv("NOTIFY_CALLER", "sa@x.iam")
+    with tenant.as_user("kid@example.com"):
+        assert tasks.create_task("tid", "2026-09-21T10:00:00", dt.datetime.now(dt.UTC)) is True
+    assert captured["body"] == {"todo_id": "tid", "due": "2026-09-21T10:00:00", "user": "kid@example.com"}
 
 
 # ---- the daily run schedules ----

@@ -245,6 +245,35 @@ def test_budget_route_returns_counts(monkeypatch):
     assert r.status_code == 200 and r.json() == {"sent": 1}
 
 
+def test_digest_runs_for_every_user_and_never_crosses(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    sent = []
+    for email in ("me@example.com", "kid@example.com"):
+        with tenant.as_user(email):
+            db.upsert_push_device(f"dev-{email}", f"tok-{email}", "America/Los_Angeles", "ios")
+            db.create_todo(models.Todo(title=f"due for {email}", due_date=dt.datetime(2026, 9, 19, 9, 0)))
+    from app.routes import notifications
+    monkeypatch.setattr(push, "send_fcm", lambda token, p: sent.append((token, p.body)))
+    out = notifications.notify()
+    assert out["devices"] == 2
+    tokens = {t for t, _ in sent}
+    assert tokens == {"tok-me@example.com", "tok-kid@example.com"}
+    for token, body in sent:
+        assert token.split("tok-")[1] in body  # each device only hears about its own owner's todo
+
+
+def test_heads_up_binds_the_user_named_in_the_task(monkeypatch):
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    from app.routes import notifications
+    seen = []
+    monkeypatch.setattr(push, "run_heads_up", lambda todo_id, due, now, send=None: seen.append(tenant.current()) or {"sent": 0})
+    notifications.notify_todo(push.HeadsUp(todo_id="x", due="y", user="kid@example.com"))
+    notifications.notify_todo(push.HeadsUp(todo_id="x", due="y"))  # task queued before this change
+    assert seen == ["kid@example.com", "me@example.com"]
+    with pytest.raises(HTTPException):
+        notifications.notify_todo(push.HeadsUp(todo_id="x", due="y", user="stranger@example.com"))
+
+
 def test_split_schedules_a_heads_up_per_child(monkeypatch):
     calls = []
     monkeypatch.setattr("app.tasks.schedule_from_body", lambda body: calls.append(body))

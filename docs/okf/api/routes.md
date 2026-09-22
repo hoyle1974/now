@@ -4,7 +4,7 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-21T19:30:00Z
+timestamp: 2026-09-21T23:45:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -22,10 +22,10 @@ timestamp: 2026-09-21T19:30:00Z
 | `POST /todos/{id}/split` | Add several children; optional `type` for all of them. |
 | `POST /todos/{id}/attachments` (multipart `file`), `GET`/`DELETE /todos/{id}/attachments/{aid}` | Images on a todo; upload/delete return the updated todo; a `Content-Length` over 10 MB + 1 MB is refused with 413 before the body is read ([attachments](../features/attachments.md)). |
 | `GET /calendar/<token>.ics` | [Calendar feed](../features/calendar-feed.md): read-only ICS; the secret path token is the auth (no sign-in header), only this route. |
-| `GET /calendar/link` | Signed-in: `{enabled, path}` for the More panel's Subscribe / Copy link. |
-| `POST /push/devices` `{token, tz, platform}`, `POST /push/devices/unregister` `{token}` | Register or drop a device for [push reminders](../features/push-reminders.md); 400 on an unknown timezone. |
-| `POST /internal/notify` | Cloud Scheduler only (OIDC), once a day; sends the digest and makes heads-up tasks, returns `{devices, sent, scheduled}`. |
-| `POST /internal/notify-todo` `{todo_id, due}` | Cloud Tasks only (same OIDC check); sends one 1-hour heads-up unless the todo changed, returns `{sent}` ([push reminders](../features/push-reminders.md)). |
+| `GET /calendar/link` | Signed-in: `{enabled, path}` for the More panel's Subscribe / Copy link; `enabled` is only ever true for the owner (`auth.owner()`, the feed token is theirs). |
+| `POST /push/devices` `{token, tz, platform}`, `POST /push/devices/unregister` `{token}` | Register or drop a device for [push reminders](../features/push-reminders.md); 400 on an unknown timezone; scoped to the signed-in user. |
+| `POST /internal/notify` | Cloud Scheduler only (OIDC), once a day; one job loops every `auth.ALLOWED_EMAILS` entry, binding each as the current user in turn (one user's failure doesn't block the rest), sums `{devices, sent, scheduled}` over all of them. |
+| `POST /internal/notify-todo` `{todo_id, due, user}` | Cloud Tasks only (same OIDC check); `user` names whose todo it is (absent on a task queued before this change → falls back to the owner; 400 if it names anyone outside `ALLOWED_EMAILS`); sends one 1-hour heads-up unless the todo changed, returns `{sent}` ([push reminders](../features/push-reminders.md)). |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
 Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev`.

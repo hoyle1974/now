@@ -1,5 +1,5 @@
 import pytest
-from fastapi import Depends, FastAPI
+from fastapi import BackgroundTasks, Depends, FastAPI
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
@@ -80,3 +80,18 @@ def test_bound_user_reaches_a_sync_route_in_the_threadpool(monkeypatch):
     c = TestClient(mini)
     assert c.get("/whoami", headers={"Authorization": "Bearer kid"}).json() == {"user": "kid@example.com"}
     assert c.get("/whoami", headers={"Authorization": "Bearer me"}).json() == {"user": "me@example.com"}
+
+
+def test_background_tasks_see_the_bound_user(monkeypatch):
+    _two_users(monkeypatch)
+    from fastapi import BackgroundTasks
+    seen = []
+    mini = FastAPI(dependencies=[Depends(auth.require_user), Depends(auth.bind_user)])
+
+    @mini.get("/bg")
+    def bg(background: BackgroundTasks) -> dict:
+        background.add_task(lambda: seen.append(tenant.current()))
+        return {}
+
+    TestClient(mini).get("/bg", headers={"Authorization": "Bearer kid"})
+    assert seen == ["kid@example.com"]

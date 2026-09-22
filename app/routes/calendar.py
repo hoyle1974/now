@@ -1,17 +1,17 @@
 """The iCalendar feed."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, Response
 
-from app import auth, db, ics
+from app import auth, db, ics, tenant
 
 router = APIRouter()
 
 @router.get("/calendar/link")
-def calendar_link(request: Request) -> dict:
-    """For the More panel (signed in): where the calendar feed lives, or enabled=false."""
-    user = getattr(request.state, "user", None) or auth.owner()
-    path = auth.calendar_feed_path(user)
+def calendar_link() -> dict:
+    """For the More panel (signed in): where the calendar feed lives, or enabled=false
+    (also for anyone but the owner: the feed token is the owner's)."""
+    path = auth.calendar_feed_path(tenant.current())
     return {"enabled": path is not None, "path": path}
 
 @router.get("/calendar/{token}.ics", response_model=None)

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import datetime
+import logging
 
 from fastapi import APIRouter, HTTPException
 
-from app import db, push
+from app import auth, db, push, tenant
 
 router = APIRouter()
 
@@ -24,16 +25,34 @@ def unregister_push_device(body: push.TokenOnly) -> dict:
 
 @router.post("/internal/notify")
 def notify() -> dict:
-    """Cloud Scheduler tick (OIDC-verified in require_user): send due reminders."""
-    return push.run_notify(datetime.datetime.now(datetime.UTC), send=push.send_fcm)
+    """Cloud Scheduler tick (OIDC-verified in require_user): send each allowed user's due
+    reminders. One job serves everyone; the totals keep the old response shape."""
+    now = datetime.datetime.now(datetime.UTC)
+    total = {"devices": 0, "sent": 0, "scheduled": 0}
+    for email in auth.ALLOWED_EMAILS:
+        try:
+            with tenant.as_user(email):
+                out = push.run_notify(now, send=push.send_fcm)
+        except Exception:
+            logging.exception("digest failed for one user; the others still get theirs")
+            continue
+        for key in total:
+            total[key] += out.get(key, 0)
+    return total
 
 @router.post("/internal/budget-alert")
 def budget_alert(body: push.PubSubEnvelope) -> dict:
     """Pub/Sub push of a Cloud Billing budget notification (OIDC-verified in require_user):
-    tell the owner's devices immediately (rule #1: zero GCP cost)."""
-    return push.run_budget_alert(body.message.data, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
+    tell the owner's devices immediately (billing is the owner's business)."""
+    with tenant.as_user(auth.owner()):
+        return push.run_budget_alert(body.message.data, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
 
 @router.post("/internal/notify-todo")
 def notify_todo(body: push.HeadsUp) -> dict:
-    """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user)."""
-    return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
+    """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user). `user` is
+    absent on tasks queued before users existed: fall back to the owner rather than crash."""
+    user = (body.user or auth.owner()).lower()
+    if user not in auth.ALLOWED_EMAILS:
+        raise HTTPException(400, "unknown user")
+    with tenant.as_user(user):
+        return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)

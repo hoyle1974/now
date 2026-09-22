@@ -18,7 +18,7 @@ import logging
 import os
 from collections.abc import Callable
 
-from app import push, types
+from app import push, tenant, types
 
 log = logging.getLogger(__name__)
 
@@ -83,7 +83,7 @@ def create_task(todo_id: str, due_iso: str, fire_at: datetime.datetime) -> bool:
         http_request=tasks_v2.HttpRequest(
             url=url + HEADS_UP_PATH, http_method=tasks_v2.HttpMethod.POST,
             headers={"Content-Type": "application/json"},
-            body=json.dumps({"todo_id": todo_id, "due": due_iso}).encode(),
+            body=json.dumps({"todo_id": todo_id, "due": due_iso, "user": tenant.current()}).encode(),
             oidc_token=tasks_v2.OidcToken(service_account_email=caller, audience=url)))
     with contextlib.suppress(exceptions.AlreadyExists):
         _client.create_task(request={"parent": queue, "task": task}, timeout=5)

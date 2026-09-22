@@ -27,9 +27,11 @@ class DeviceRegistration(BaseModel):
 
 
 class HeadsUp(BaseModel):
-    """Body of a Cloud Tasks delivery (app/tasks.py): the todo and the due time the task was made for."""
+    """Body of a Cloud Tasks delivery (app/tasks.py): the todo and the due time the task was
+    made for, and whose todo it is (absent on tasks queued before users existed: the owner)."""
     todo_id: str = Field(min_length=1, max_length=64)
     due: str = Field(min_length=1, max_length=64)
+    user: str | None = Field(None, max_length=320)
 
 
 class TokenOnly(BaseModel):
