@@ -41,7 +41,6 @@ else
   has() { tr ';' '\n' <<<"$names" | grep -qx "$1"; }
   (has ALLOWED_EMAILS || has ALLOWED_EMAIL) && ok "env ALLOWED_EMAILS" || fail "env ALLOWED_EMAILS missing (the server refuses to start without it)"
   has ATTACHMENTS_BUCKET  && ok "env ATTACHMENTS_BUCKET"  || fail "env ATTACHMENTS_BUCKET missing (scripts/create-bucket.sh; uploads fail without it)"
-  has WIDGET_TOKEN        && ok "env WIDGET_TOKEN"        || warn "env WIDGET_TOKEN unset (lock screen widget off)"
   has CALENDAR_TOKEN      && ok "env CALENDAR_TOKEN"      || warn "env CALENDAR_TOKEN unset (calendar feed off: scripts/setup-calendar.sh)"
   has NOTIFY_AUDIENCE && has NOTIFY_CALLER && ok "env NOTIFY_* (reminders)" || warn "NOTIFY_* unset (reminders off: scripts/setup-push.sh)"
   has REMINDER_QUEUE      && ok "env REMINDER_QUEUE"      || warn "env REMINDER_QUEUE unset (no 1-hour heads-ups, only the daily digest: scripts/setup-push.sh)"

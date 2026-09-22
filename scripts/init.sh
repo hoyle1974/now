@@ -5,7 +5,6 @@
 #   scripts/init.sh --dry-run    # print what would change, change nothing
 #   scripts/init.sh              # ask once, then do it
 #   scripts/init.sh --push       # also set up push reminders (Scheduler job, IAM)
-#   scripts/init.sh --widget     # also create the lock screen widget token (Secret Manager)
 #   scripts/init.sh --calendar   # also create the private calendar feed (scripts/setup-calendar.sh)
 # Cost guards (image cleanup policy + monthly budget alert, scripts/setup-cost-guards.sh) always run.
 #
@@ -17,14 +16,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/config.sh
 
-DRY=0; PUSH=0; WIDGET=0; CALENDAR=0
+DRY=0; PUSH=0; CALENDAR=0
 for a in "$@"; do
   case "$a" in
     --dry-run) DRY=1 ;;
     --push) PUSH=1 ;;
-    --widget) WIDGET=1 ;;
     --calendar) CALENDAR=1 ;;
-    *) echo "usage: $0 [--dry-run] [--push] [--widget] [--calendar]" >&2; exit 2 ;;
+    *) echo "usage: $0 [--dry-run] [--push] [--calendar]" >&2; exit 2 ;;
   esac
 done
 
@@ -109,33 +107,12 @@ if [ "$PUSH" = 1 ]; then
   run scripts/setup-push.sh
 fi
 
-if [ "$WIDGET" = 1 ]; then
-  say "5c Widget token (secret widget-token; unlocks only GET /todos/next)"
-  if gcloud secrets describe widget-token --project "$PROJECT" >/dev/null 2>&1; then
-    echo "   secret widget-token exists, keeping it"
-  else
-    if [ "$DRY" = 1 ]; then echo "   [dry-run] create secret widget-token from a random 24-byte token"; else
-      openssl rand -hex 24 | tr -d '\n' | gcloud secrets create widget-token --project "$PROJECT" \
-        --replication-policy automatic --data-file=-
-    fi
-  fi
-  SA="$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
-    --format 'value(spec.template.spec.serviceAccountName)' 2>/dev/null || true)"
-  SA="${SA:-$(gcloud projects describe "$PROJECT" --format 'value(projectNumber)' 2>/dev/null)-compute@developer.gserviceaccount.com}"
-  run gcloud secrets add-iam-policy-binding widget-token --project "$PROJECT" \
-    --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor
-  run gcloud run services update "$SERVICE" --project "$PROJECT" --region "$REGION" \
-    --update-secrets WIDGET_TOKEN=widget-token:latest
-  echo "   read the token to paste into Scriptable with:"
-  echo "   gcloud secrets versions access latest --secret widget-token --project $PROJECT"
-fi
-
 if [ "$CALENDAR" = 1 ]; then
-  say "5d Calendar feed (secret calendar-token; unlocks only GET /calendar/<token>.ics)"
+  say "5c Calendar feed (secret calendar-token; unlocks only GET /calendar/<token>.ics)"
   run scripts/setup-calendar.sh
 fi
 
-say "5e Cost guards (Artifact Registry cleanup policy, monthly budget alert)"
+say "5d Cost guards (Artifact Registry cleanup policy, monthly budget alert)"
 run scripts/setup-cost-guards.sh || echo "   cost guards incomplete (see above); rerun scripts/setup-cost-guards.sh" >&2
 
 say "6/6 Firebase Hosting (serves the app on $HOSTING_SITE.web.app)"
@@ -146,5 +123,5 @@ cat <<MSG
 Done. Two console steps cannot be scripted:
   1. Firebase console > Authentication > Sign-in method: enable Google.
   2. Authentication > Settings > Authorized domains: make sure ${HOSTING_SITE}.web.app is listed.
-Then run scripts/doctor.sh. Optional: WIDGET_TOKEN for the lock screen widget (docs/okf/ops/widget.md).
+Then run scripts/doctor.sh.
 MSG

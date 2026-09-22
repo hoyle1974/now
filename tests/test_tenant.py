@@ -18,10 +18,8 @@ def test_as_user_binds_lowercases_and_restores():
         tenant.current()
 
 
-def _req(path="/todos/root", authorization=None, widget=None, method="GET"):
+def _req(path="/todos/root", authorization=None, method="GET"):
     headers = [(b"authorization", authorization.encode())] if authorization else []
-    if widget:
-        headers.append((b"x-widget-token", widget.encode()))
     return Request({"type": "http", "method": method, "path": path, "headers": headers, "query_string": b""})
 
 
@@ -45,14 +43,6 @@ def test_email_not_on_the_list_is_403(monkeypatch):
     with pytest.raises(auth.HTTPException) as e:
         auth.require_user(_req(authorization="Bearer stranger"))
     assert e.value.status_code == 403
-
-
-def test_widget_token_acts_as_owner(monkeypatch):
-    _two_users(monkeypatch)
-    monkeypatch.setattr(auth, "WIDGET_TOKEN", "s3cret")
-    r = _req("/todos/next", widget="s3cret")
-    auth.require_user(r)
-    assert r.state.user == "me@example.com"
 
 
 def test_calendar_feed_path_is_owner_only(monkeypatch):

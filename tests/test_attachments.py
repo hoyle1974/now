@@ -182,7 +182,6 @@ def test_requires_auth():
         t_id = "00000000-0000-4000-8000-000000000000"
         assert c.post(f"/todos/{t_id}/attachments", files={"file": ("a.png", PNG, "image/png")}).status_code == 401
         assert c.get(f"/todos/{t_id}/attachments/x").status_code == 401
-        assert c.get(f"/todos/{t_id}/attachments/x", headers={"x-widget-token": "anything"}).status_code == 401
     finally:
         act_as(app)
 

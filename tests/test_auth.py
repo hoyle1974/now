@@ -6,10 +6,8 @@ from starlette.requests import Request
 from app import auth
 
 
-def _request(path="/todos/root", authorization=None, widget=None, method="GET"):
+def _request(path="/todos/root", authorization=None, method="GET"):
     headers = [(b"authorization", authorization.encode())] if authorization else []
-    if widget:
-        headers.append((b"x-widget-token", widget.encode()))
     return Request({"type": "http", "method": method, "path": path, "headers": headers, "query_string": b""})
 
 
@@ -46,29 +44,6 @@ def test_bad_token_is_401(monkeypatch):
     monkeypatch.setattr(auth.fb_auth, "verify_id_token", boom)
     with pytest.raises(HTTPException) as e:
         auth.require_user(_request(authorization="Bearer tok"))
-    assert e.value.status_code == 401
-
-
-def test_widget_token_unlocks_only_next_up(monkeypatch):
-    monkeypatch.setattr(auth, "WIDGET_TOKEN", "s3cret")
-    auth.require_user(_request("/todos/next", widget="s3cret"))
-    for kwargs in ({"path": "/todos/root"}, {"path": "/todos/next", "method": "POST"},
-                   {"path": "/todos/next", "widget": "wrong"}):
-        with pytest.raises(HTTPException) as e:
-            auth.require_user(_request(**{"widget": "s3cret", **kwargs}))
-        assert e.value.status_code == 401
-
-
-def test_widget_token_off_when_unset(monkeypatch):
-    monkeypatch.setattr(auth, "WIDGET_TOKEN", "")
-    with pytest.raises(HTTPException):
-        auth.require_user(_request("/todos/next", widget=""))
-
-
-def test_widget_token_non_ascii_header_is_401_not_500(monkeypatch):
-    monkeypatch.setattr(auth, "WIDGET_TOKEN", "s3cret")
-    with pytest.raises(HTTPException) as e:
-        auth.require_user(_request("/todos/next", widget="é"))
     assert e.value.status_code == 401
 
 

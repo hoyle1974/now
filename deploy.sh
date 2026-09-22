@@ -1,6 +1,6 @@
 #!/bin/bash
 # Deploy the current tree to Cloud Run. Env vars and secrets already on the
-# service (ALLOWED_EMAILS, ATTACHMENTS_BUCKET, WIDGET_TOKEN, NOTIFY_*) are kept.
+# service (ALLOWED_EMAILS, ATTACHMENTS_BUCKET, NOTIFY_*) are kept.
 # PROJECT / REGION / SERVICE come from scripts/lib/config.sh (.now.env, .zilch.config).
 #
 # --cpu-throttling (request-based billing): CPU is billed only while a request is being

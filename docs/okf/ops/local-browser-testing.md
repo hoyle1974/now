@@ -77,7 +77,7 @@ Open `http://localhost:8082/` (owner) in one Chrome profile/window and `http://l
 
 **Pre-deploy UI checklist.** For any UI change, walk [the UI feature inventory](../features/ui-inventory.md) for everything the change could touch, at minimum: create an item from the composer; open a row's viewer (Images section present); open Edit from the `...` menu and from the viewer (Images section present, type, dates, color, links); change type and Undo; delete and Undo; open Trash and a trashed item; search for a trashed item. A feature that was on the list before and is not reachable now is a regression even if every test passes.
 
-**Multi-user isolation checklist** (any change touching auth, tenant partitioning, push, or the calendar/widget/budget owner-only paths — [multi-user runbook](multi-user.md)): using the two-port setup above,
+**Multi-user isolation checklist** (any change touching auth, tenant partitioning, push, or the calendar/budget owner-only paths — [multi-user runbook](multi-user.md)): using the two-port setup above,
 - as the owner (8082): the full checklist above passes (add/edit/complete/reorder/trash/undelete/search, More panel incl. calendar link, attachments);
 - as the second user (8083): the list starts empty; none of the owner's todos appear; adding/editing a todo there never appears back on 8082; the More panel has **no** calendar row at all.
 

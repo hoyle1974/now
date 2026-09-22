@@ -14,7 +14,7 @@ invite UI — the list is edited by redeploying, not through the app. See
 allowed users; fine at family scale, must be watched at anything bigger).
 
 **Adding a person.** Redeploy with the fuller, `;`-separated list — the first entry is
-always the owner (widget, calendar feed and budget alerts stay theirs, see below):
+always the owner (calendar feed and budget alerts stay theirs, see below):
 
 ```bash
 ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh
@@ -41,11 +41,11 @@ was verified and logged; if this app is ever forked from a pre-multi-user commit
 needs the same one-time copy, recover it from git history (`git log --all --
 scripts/migrate-to-users.py`) rather than writing it fresh.
 
-**Owner-only surfaces.** The widget token, the calendar feed and budget alerts all bind
+**Owner-only surfaces.** The calendar feed and budget alerts both bind
 `auth.owner()` (the first `ALLOWED_EMAILS` entry) regardless of who is signed in
 elsewhere: the More panel shows no calendar link at all for a non-owner
 ([calendar feed](../features/calendar-feed.md), [ui-inventory](../features/ui-inventory.md)).
-This is by design, not a bug to fix — there is one widget, one calendar subscription URL
+This is by design, not a bug to fix — there is one calendar subscription URL
 and one budget per deployment, not one each.
 
 **Out of scope: a device shared by two family members.** This plan does not address the

@@ -25,7 +25,7 @@ ALLOWED_EMAILS = _parse_emails(os.environ.get("ALLOWED_EMAILS") or os.environ.ge
 
 
 def owner() -> str:
-    """The first allowed email. The widget token, calendar feed and budget alerts are theirs.
+    """The first allowed email. The calendar feed and budget alerts are theirs.
 
     Raises if ALLOWED_EMAILS is empty: check_config() stops the server before this can happen
     in production, so a caller reaching here with nothing configured is a bug, not a user
@@ -41,17 +41,6 @@ def check_config() -> None:
                            "first one is the owner (deploy: ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh)")
 
 _PUBLIC_PATHS = {"/health"}
-
-# Long-lived read-only token for the iOS Scriptable lock screen widget, which
-# can't refresh Firebase ID tokens. Unlocks only GET /todos/next; unset = off.
-WIDGET_TOKEN = os.environ.get("WIDGET_TOKEN", "")
-_WIDGET_PATH = "/todos/next"
-
-def _widget_token_ok(request: Request) -> bool:
-    supplied = request.headers.get("x-widget-token", "")
-    return bool(WIDGET_TOKEN and supplied and request.method == "GET"
-                and request.url.path == _WIDGET_PATH
-                and hmac.compare_digest(supplied.encode(), WIDGET_TOKEN.encode()))
 
 # Secret-URL calendar feed (GET /calendar/<token>.ics): calendar apps can send no
 # headers, so the token is in the path. Unlocks only that route; unset = off.
@@ -102,7 +91,7 @@ def require_user(request: Request) -> None:
     if request.url.path in _SCHEDULER_PATHS:
         verify_scheduler(request)  # no user: the handlers bind one with tenant.as_user
         return
-    if _widget_token_ok(request) or _calendar_token_ok(request):
+    if _calendar_token_ok(request):
         request.state.user = owner()
         return
     header = request.headers.get("authorization", "")

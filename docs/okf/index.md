@@ -39,4 +39,4 @@ like code.
   [event log](features/event-log.md), [push reminders](features/push-reminders.md),
   [calendar feed](features/calendar-feed.md),
   [item types](features/item-types.md), [UI feature inventory](features/ui-inventory.md)
-- Ops: [testing](ops/testing.md), [local server and Chrome testing](ops/local-browser-testing.md), [deploy](ops/deploy.md), [forking and config](ops/forking.md), [multi-user runbook](ops/multi-user.md), [roadmap](ops/roadmap.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)
+- Ops: [testing](ops/testing.md), [local server and Chrome testing](ops/local-browser-testing.md), [deploy](ops/deploy.md), [forking and config](ops/forking.md), [multi-user runbook](ops/multi-user.md), [roadmap](ops/roadmap.md), [monitoring and backups](ops/monitoring-backups.md)

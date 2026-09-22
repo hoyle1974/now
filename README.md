@@ -168,36 +168,6 @@ scripts/e2e.sh                     # engine vs. the running app + emulator
 - **Tree cache.** `get_tree` reuses its result while the `rev` counter is unchanged,
   so an unchanged list costs one Firestore read per request instead of one per todo.
 
-## Lock Screen widget (iOS, Scriptable)
-
-`scripts/scriptable-next-up.js` shows the Next up list on the iOS Lock Screen and
-Home Screen through the free [Scriptable](https://scriptable.app) app.
-
-The app's API needs a Firebase sign-in token that expires hourly, which a widget
-can't refresh. Instead `GET /todos/next` (only that route, read-only) also accepts
-an `X-Widget-Token` header matching the `WIDGET_TOKEN` env var on the Cloud Run
-service (`app/auth.py`). Unset, the token is off.
-
-1. Make a token and set it on the service (this is a secret; don't commit it):
-   ```bash
-   openssl rand -hex 24
-   gcloud run services update <service> --region <region> --update-env-vars WIDGET_TOKEN=<token>
-   ```
-   Rotate it the same way, then update the script. Keep a local copy in
-   `.scriptable-secret` (git-ignored).
-2. In Scriptable, create a script, paste in `scripts/scriptable-next-up.js`, and
-   set `TOKEN` to the token: exactly the token characters, nothing after the
-   closing quote (a stray `.` or space gives "can't load").
-3. Run it once in the app to check it. Then long-press the Lock Screen, Customize,
-   add a Scriptable widget (rectangular: top 3), and choose the script under
-   Script. On the Home Screen, small shows 4 and medium shows 6.
-4. "Next up: can't load" means the request failed: check the token, the `BASE` URL
-   in the script, and that the service is deployed. Test with
-   `curl -H "X-Widget-Token: <token>" https://<your-site>.web.app/todos/next?limit=3`.
-
-iOS decides when widgets refresh (the script asks for ~15 minutes), so the list
-can lag a little.
-
 ## Image attachments
 
 A todo can carry up to 10 images (JPEG, PNG, GIF, WebP, 10 MB each), added from
@@ -244,9 +214,8 @@ gets its own isolated data; there is no sharing between them. Setup is two layer
 2. **The app**, with two commands:
    ```bash
    scripts/init.sh --dry-run   # see what it will do
-   scripts/init.sh --push --widget   # Firebase web app + web/config.js, Hosting, indexes,
-                               # first deploy, bucket; --push adds reminders,
-                               # --widget the lock screen widget token
+   scripts/init.sh --push      # Firebase web app + web/config.js, Hosting, indexes,
+                               # first deploy, bucket; --push adds reminders
    scripts/doctor.sh           # read-only check of everything above
    ```
    `init.sh` cannot enable Google sign-in for you: turn it on in the Firebase console
@@ -255,10 +224,9 @@ gets its own isolated data; there is no sharing between them. Setup is two layer
 
 Per-copy settings live in three git-ignored or generated places: `.zilch.config`
 (project, region, service name), `.now.env` (overrides, see `.now.env.example`) and
-`web/config.js` (Firebase web config, see `web/config.example.js`). The Scriptable
-widget script has a `BASE` to fill in. `init.sh` is newer than the rest of the app and has only
-been exercised in `--dry-run` and against the author's own project, so read it before
-running it on yours.
+`web/config.js` (Firebase web config, see `web/config.example.js`). `init.sh` is newer
+than the rest of the app and has only been exercised in `--dry-run` and against the
+author's own project, so read it before running it on yours.
 
 ## Next: GCP Migration
 
