@@ -4,7 +4,7 @@ title: Firestore collections
 description: Collections and documents used in Firestore.
 resource: app/db_firestore.py
 tags: [data, firestore]
-timestamp: 2026-09-21T00:00:00Z
+timestamp: 2026-09-22T05:37:00Z
 ---
 Every collection below lives under `users/{email}/...` (`db.user_ref(email)` builds the
 parent `users/{email}` document reference; it defaults to the signed-in user bound by

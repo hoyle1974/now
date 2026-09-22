@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T23:30:00Z
+timestamp: 2026-09-22T05:37:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
