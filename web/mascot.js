@@ -208,6 +208,12 @@
   function activity(e) {
     if (e.target.closest?.(".mascot")) return;
     if (Date.now() < tapUntil) return; // he is reacting to a tap: stray events don't send him home
+    if (up && (e.type === "pointerdown" || e.type === "touchstart")) {
+      // A tap or click elsewhere: he looks at it and stays until his timer ends.
+      const pt = e.touches && e.touches[0] ? e.touches[0] : e;
+      if (pt.clientX != null) lookAt(pt.clientX, pt.clientY);
+      return;
+    }
     if (up) hide("activity " + e.type);
     else {
       const t = Date.now();
