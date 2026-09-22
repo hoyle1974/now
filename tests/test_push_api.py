@@ -150,7 +150,7 @@ def test_run_notify_nudges_stale_calendars(monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
     push.run_notify(NINE_LA, send=lambda *a: None)
     assert str(cal.todo_id) in calls
 
@@ -159,7 +159,7 @@ def test_run_notify_nudges_stale_calendars_with_zero_devices(monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
     out = push.run_notify(NINE_LA, send=lambda *a: None)
     assert str(cal.todo_id) in calls
     assert out == {"devices": 0, "sent": 0, "scheduled": 0}

@@ -123,6 +123,9 @@ class TodoReparent(BaseModel):
 class TodoRepeatRequest(BaseModel):
     today: datetime.date | None = Field(None)  # the client's local date; server date if omitted
 
+class SyncNowBody(BaseModel):
+    client_session_id: str | None = Field(None, max_length=64)
+
 class TodoSplit(BaseModel):
     descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
     due_date: datetime.datetime | None = Field(None)

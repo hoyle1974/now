@@ -16,6 +16,7 @@ router = APIRouter()
 class SyncCalendarBody(BaseModel):
     calendar_id: str = Field(min_length=1, max_length=64)
     user: str | None = Field(None, max_length=320)
+    client_session_id: str | None = Field(None, max_length=64)
 
 @router.post("/push/devices")
 def register_push_device(body: push.DeviceRegistration) -> dict:
@@ -72,4 +73,4 @@ def sync_calendar(todo_id: str, body: SyncCalendarBody) -> dict:
     if user not in auth.ALLOWED_EMAILS:
         raise HTTPException(400, "unknown user")
     with tenant.as_user(user):
-        return _cs.run_calendar_sync(body.calendar_id or todo_id)
+        return _cs.run_calendar_sync(body.calendar_id or todo_id, client_session_id=body.client_session_id)

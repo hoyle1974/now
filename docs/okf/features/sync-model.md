@@ -4,7 +4,7 @@ title: Sync model
 description: Optimistic local-first writes, outbox, idempotency, versions, freshness checks.
 resource: web/sync.js
 tags: [sync, client, core]
-timestamp: 2026-09-21T16:00:00Z
+timestamp: 2026-09-22T21:15:00Z
 ---
 Every action applies locally first and syncs in the background. Design spec:
 `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
@@ -20,4 +20,5 @@ Every action applies locally first and syncs in the background. Design spec:
 - **Server instants:** `create_date` arrives with a `Z`; `parseServerInstant` in `web/sync.js` also reads bare strings from trees cached before that as UTC (the old-outbox duplicate check compares them with `queued_at`).
 - **App version:** `/todos/rev` returns `version` from `APP_VERSION` in `web/app.js`, which must equal the `?v=` on assets in `web/index.html` (**bump both on release**). Mismatch → page reloads (holds during edits; once per target version via `sessionStorage`).
 - **Collapse state:** `collapsed` patch skips `If-Match` and version bump (last write wins) but still bumps rev.
+- **Provenance (`triggered_by`):** `GET /todos/rev` also returns `triggered_by`: the `client_session_id` (a client-generated, per-tab/session opaque string, not a user id) attributed to whichever write last bumped rev, or `null` for the overwhelming majority of writes that don't pass one. The only write path that currently passes one is a manual **Sync now** ([calendar sync](calendar-sync.md)) — the request body's `client_session_id` threads through `enqueue_calendar_sync` → the Cloud Task → `run_calendar_sync` → `db.apply_calendar_sync(..., triggered_by=...)` → `db.run_atomic(..., triggered_by=...)`, which stamps it on the `meta/rev` document alongside the bumped `value`. Every other write (`run_atomic`'s other callers) passes no `triggered_by` and so stamps `null`, overwriting whatever the field held before — it reflects only the *last* rev-bumping write, not a durable per-write log. Server: `db.get_rev_info() -> {"value": int, "triggered_by": str | None}` (`app/db_firestore.py`; `db.get_rev()` is now a thin wrapper over it). Intended client use (not yet implemented — see [client-server split](../architecture/client-server-split.md)): a device that just triggered its own Sync now can compare a later `/todos/rev` response's `triggered_by` against the `client_session_id` it sent, and suppress the "changes from another device" framing for a change it caused itself.
 - **No HTTP caching of API reads:** a middleware in `app/main.py` adds `Cache-Control: no-store` to `/todos`, `/push` and `/calendar` responses that don't set their own (attachments and the calendar feed do), and the client's `apiFetch`, Next up and rev-check fetches pass `cache: "no-store"`. Otherwise a browser could serve an old Next up list without a just-added todo.

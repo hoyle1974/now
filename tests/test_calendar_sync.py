@@ -208,7 +208,7 @@ def test_sync_now_enqueues_for_calendar_type(db_setup, monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
     resp = client.post(f"/todos/{cal.todo_id}/sync", headers={"Authorization": "Bearer test"})
     assert resp.status_code == 202
     assert calls == [str(cal.todo_id)]
@@ -225,7 +225,7 @@ def test_get_tree_nudges_stale_calendar(db_setup, monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
     resp = client.get("/todos/tree", headers={"Authorization": "Bearer test"})
     assert resp.status_code == 200
     assert calls == [str(cal.todo_id)]  # last_synced_at is None -> stale
@@ -242,3 +242,54 @@ def test_internal_sync_calendar_requires_scheduler_auth(db_setup):
         if saved is not None:
             app.dependency_overrides[auth.require_user] = saved
     assert resp.status_code in (401, 403)
+
+
+# ---- client-session provenance (triggered_by) ----
+
+def test_rev_reports_who_triggered_it(db_setup, monkeypatch):
+    t = models.Todo(title="x")
+    db.create_todo(t)  # an ordinary write: triggered_by stays None
+    info = db.get_rev_info()
+    assert info["triggered_by"] is None
+
+    # simple.ics's fixed fixture events are on 2026-02-01/03; pin "today" inside that
+    # window (see test_run_calendar_sync_success above) so the sync actually creates
+    # events and bumps rev, rather than depending on the real, drifting today.
+    monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
+    cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"),
+                                    client_session_id="session-abc")
+    info = db.get_rev_info()
+    assert info["triggered_by"] == "session-abc"
+
+    # A later ordinary write (no triggered_by) must not leak the previous write's
+    # attribution: run_atomic's tx.set(rev_ref, {...}) is a full replace, not a merge.
+    # (Rev only moves inside run_atomic's transaction, same as every real route —
+    # a bare db.create_todo() outside one, like the very first write above, never
+    # touches rev at all.)
+    def action() -> tuple[int, dict | None]:
+        db.create_todo(models.Todo(title="y"))
+        return 200, None
+    db.run_atomic(None, action)
+    info = db.get_rev_info()
+    assert info["triggered_by"] is None
+
+
+def test_get_rev_endpoint_exposes_triggered_by(db_setup):
+    resp = client.get("/todos/rev")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "triggered_by" in body
+    assert body["triggered_by"] is None
+
+
+def test_sync_now_threads_client_session_id(db_setup, monkeypatch):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append((cid, csid)) or True)
+    resp = client.post(f"/todos/{cal.todo_id}/sync", json={"client_session_id": "session-xyz"},
+                       headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 202
+    assert calls == [(str(cal.todo_id), "session-xyz")]

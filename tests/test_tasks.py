@@ -241,7 +241,7 @@ def test_notify_todo_route_and_auth_path(monkeypatch):
 def test_enqueue_calendar_sync_stale_triggers():
     calls = []
     ok = tasks.enqueue_calendar_sync("cal-1", None, at("2026-02-01T00:00:00+00:00"),
-                                     create=lambda cid: calls.append(cid) or True)
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
     assert ok is True
     assert calls == ["cal-1"]
 
@@ -250,7 +250,7 @@ def test_enqueue_calendar_sync_fresh_skips():
     calls = []
     recent = at("2026-02-01T00:00:00+00:00")
     ok = tasks.enqueue_calendar_sync("cal-1", recent, recent + dt.timedelta(hours=1),
-                                     create=lambda cid: calls.append(cid) or True)
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
     assert ok is False
     assert calls == []
 
@@ -259,5 +259,13 @@ def test_enqueue_calendar_sync_exactly_at_threshold_triggers():
     base = at("2026-02-01T00:00:00+00:00")
     calls = []
     ok = tasks.enqueue_calendar_sync("cal-1", base, base + tasks.CALENDAR_STALE_AFTER,
-                                     create=lambda cid: calls.append(cid) or True)
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
     assert ok is True
+
+
+def test_enqueue_calendar_sync_threads_client_session_id():
+    calls = []
+    tasks.enqueue_calendar_sync("cal-1", None, at("2026-02-01T00:00:00+00:00"),
+                                client_session_id="s1",
+                                create=lambda cid, csid: calls.append((cid, csid)) or True)
+    assert calls == [("cal-1", "s1")]

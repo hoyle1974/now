@@ -135,13 +135,22 @@ def _now_utc() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+def get_rev_info() -> dict:
+    """Current revision and who last bumped it (a client_session_id, or None
+    for every write path that doesn't pass one — the overwhelming majority).
+    One document read."""
+    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
+    data = snap.to_dict() if snap.exists else {}
+    return {"value": data.get("value", 0), "triggered_by": data.get("triggered_by")}
+
+
 def get_rev() -> int:
     """Current revision (0 before the first write). One document read."""
-    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
-    return snap.to_dict().get("value", 0) if snap.exists else 0
+    return get_rev_info()["value"]
 
 
-def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) -> tuple[int, dict | None, int, int]:
+def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]],
+               triggered_by: str | None = None) -> tuple[int, dict | None, int, int]:
     """Run fn() in one Firestore transaction, at most once per txn_id.
 
     fn returns (status, body). The writes it makes, the txn_log record and the
@@ -178,7 +187,7 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) ->
 
             if _wrote.get()[0]:
                 rev += 1
-                tx.set(rev_ref, {"value": rev})
+                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by})
             if log_ref is not None:
                 tx.set(log_ref, {
                     "status": status,
@@ -766,7 +775,7 @@ def get_calendar_event_children(calendar_id: str) -> dict[str, models.Todo]:
     return out
 
 
-def apply_calendar_sync(calendar_id: str, events) -> dict:
+def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = None) -> dict:
     """Reconcile a calendar's children to exactly `events` (calendar_sync.ParsedEvent list),
     matched by external_uid. Each create/update/delete is a normal todo write, so /todos/rev
     bumps and the existing freshness/remote-diff client machinery picks it up.
@@ -810,7 +819,7 @@ def apply_calendar_sync(calendar_id: str, events) -> dict:
 
         return 200, {"created": len(to_create), "updated": len(to_update), "deleted": len(to_delete)}
 
-    _, body, _, _ = run_atomic(None, action)
+    _, body, _, _ = run_atomic(None, action, triggered_by=triggered_by)
     return body
 
 

@@ -277,14 +277,16 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
     return reply(*result)
 
 @router.post("/todos/{todo_id}/sync", response_model=None)
-def sync_now(todo_id: uuid.UUID, background: BackgroundTasks) -> Response:
+def sync_now(todo_id: uuid.UUID, background: BackgroundTasks, body: models.SyncNowBody | None = None) -> Response:
     """Manual 'Sync now': enqueues immediately, ignoring staleness."""
     todo = db.get_todo(models.TodoId(todo_id))
     if todo is None:
         raise HTTPException(404, "todo not found")
     if todo.type != "calendar":
         raise HTTPException(400, "only a calendar item can be synced")
-    background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None, datetime.datetime.now(datetime.UTC))
+    csid = body.client_session_id if body else None
+    background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None,
+                        datetime.datetime.now(datetime.UTC), client_session_id=csid)
     return Response(status_code=202)
 
 @router.patch("/todos/{todo_id}/move/{direction}", response_model=None)

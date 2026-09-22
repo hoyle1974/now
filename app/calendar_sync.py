@@ -107,7 +107,7 @@ def _http_fetch(url: str) -> str:
     return resp.text
 
 
-def run_calendar_sync(calendar_id: str, fetch=None) -> dict:
+def run_calendar_sync(calendar_id: str, fetch=None, client_session_id: str | None = None) -> dict:
     """Fetch, parse, diff and write. Never raises: failure is recorded on the
     calendar item (last_sync_error) rather than propagated, so a Cloud Task
     delivery always acks and is never retried into a storm."""
@@ -127,6 +127,6 @@ def run_calendar_sync(calendar_id: str, fetch=None) -> dict:
         db.mark_calendar_synced(calendar_id, error=str(e))
         return {"synced": False, "error": str(e)}
 
-    result = db.apply_calendar_sync(calendar_id, events)
+    result = db.apply_calendar_sync(calendar_id, events, triggered_by=client_session_id)
     db.mark_calendar_synced(calendar_id, error=None)
     return {"synced": True, **result}
