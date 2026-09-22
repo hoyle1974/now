@@ -2,11 +2,11 @@
 // No DOM access, so it runs under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
-    module.exports = factory();
+    module.exports = factory(require("./types.js"));
   } else {
-    root.Reorder = factory();
+    root.Reorder = factory(root.Types);
   }
-})(typeof self !== "undefined" ? self : this, function () {
+})(typeof self !== "undefined" ? self : this, function (Types) {
   "use strict";
 
   const byOrder = (a, b) => (a.order_idx ?? 999999) - (b.order_idx ?? 999999);
@@ -44,6 +44,7 @@
     if (inSubtree(model, draggedId, targetId)) return null;
 
     if (zone === "inside") {
+      if (!Types.can(target, "allowsUserChildren")) return null;
       const kids = siblingsOf(model, targetId);
       if (kids.length && kids[kids.length - 1] === node) return null;
       return { parent_id: targetId, index: null };

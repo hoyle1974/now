@@ -152,6 +152,7 @@ function renderViewer(todo, counts, trashed = null) {
   fact("Type", Types.get(todo).label);
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
   if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? Due.format(todo.due_date) : "No due date");
+  if (Types.hasField(todo, "location") && todo.location) fact("Location", todo.location);
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
   if (!trashed && Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
@@ -165,12 +166,12 @@ function renderViewer(todo, counts, trashed = null) {
 
   const buttons = DOM.actionBar(
     DOM.sheetButton("Close", "plain", close),
-    trashed ? DOM.sheetButton("Undelete", "primary", trashed.onRestore)
-      : DOM.sheetButton("Edit", "primary", () => {
-        setActivePanel("edit", todo.todo_id);
-        viewerOrigin = todo.todo_id;
-        renderTree();
-      })
+    ...(trashed ? [DOM.sheetButton("Undelete", "primary", trashed.onRestore)]
+      : Types.can(todo, "editable") ? [DOM.sheetButton("Edit", "primary", () => {
+          setActivePanel("edit", todo.todo_id);
+          viewerOrigin = todo.todo_id;
+          renderTree();
+        })] : [])
   );
 
   const screen = renderSheet(body, buttons);
