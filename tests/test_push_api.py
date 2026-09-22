@@ -3,7 +3,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from app import auth, db, models, push, tenant
+from app import auth, db, models, push, tasks, tenant
 from app.main import app
 from tests.helpers import TEST_USER, act_as, wipe_users
 
@@ -143,6 +143,26 @@ def test_run_notify_sends_one_digest_to_each_device_and_no_heads_up():
     assert sorted(fake.sent) == [("tok", "1 due today"), ("tok2", "1 due today")]
     push.run_notify(dt.datetime(2026, 9, 19, 22, 30, tzinfo=UTC), send=fake)
     assert len(fake.sent) == 2
+
+
+def test_run_notify_nudges_stale_calendars(monkeypatch):
+    register()
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    push.run_notify(NINE_LA, send=lambda *a: None)
+    assert str(cal.todo_id) in calls
+
+
+def test_run_notify_nudges_stale_calendars_with_zero_devices(monkeypatch):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    out = push.run_notify(NINE_LA, send=lambda *a: None)
+    assert str(cal.todo_id) in calls
+    assert out == {"devices": 0, "sent": 0, "scheduled": 0}
 
 
 # ---- scheduler auth ----

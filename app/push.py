@@ -130,6 +130,14 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
     from app import db, tasks
     send = send or send_fcm
     devices = db.list_push_devices()
+    # Calendars have no due_date, so get_due_todos would never surface them; walk the
+    # whole tree (not just get_root_todos) since a calendar can be nested like any item.
+    # Runs regardless of device count: a family member without push set up should still
+    # get their calendar nudged by the daily digest tick, not silently excluded.
+    _, all_todos = db.get_tree()
+    for cal in all_todos.values():
+        if cal.type == "calendar":
+            tasks.enqueue_calendar_sync(str(cal.todo_id), cal.last_synced_at, now_utc)
     if not devices:
         return {"devices": 0, "sent": 0, "scheduled": 0}
     # Two days ahead covers "end of today" in any timezone; each device filters precisely.

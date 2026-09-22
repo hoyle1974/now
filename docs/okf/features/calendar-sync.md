@@ -4,7 +4,7 @@ title: Calendar item sync (inbound ICS)
 description: A `calendar` item mirrors an external ICS feed's events into `calendar_event` children, kept fresh by a staleness-triggered Cloud Task.
 resource: app/calendar_sync.py
 tags: [calendar, ics, sync, cloud-tasks]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-22T01:00:00Z
 ---
 This is the *inbound* counterpart to the outbound [calendar feed](calendar-feed.md) (which exports now's own todos as ICS for external calendar apps to subscribe to). Here, an external ICS feed (e.g. a Google Calendar) is imported *into* now as a `calendar` item and its child `calendar_event` items ([item types](item-types.md)).
 
