@@ -5,23 +5,23 @@ from typing import get_args
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, ics, models, push, tasks, types
-from app.auth import require_user
+from app import db, ics, models, push, tasks, tenant, types
 from app.db_firestore_helpers import doc_to_todo, todo_to_doc
 from app.main import app
 from app.next_up import rank_next_up
+from tests.helpers import TEST_USER, act_as, wipe_users
 
-app.dependency_overrides[require_user] = lambda: None
 client = TestClient(app)
 
 
 @pytest.fixture
 def db_setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 

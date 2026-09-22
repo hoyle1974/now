@@ -2,20 +2,20 @@ import datetime
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app import db
-from app.auth import require_user
+from app import db, tenant
+from tests.helpers import TEST_USER, act_as, wipe_users
 
-app.dependency_overrides[require_user] = lambda: None
 c = TestClient(app)
 
 
 @pytest.fixture(autouse=True)
 def setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 
@@ -36,7 +36,7 @@ def test_real_client_ids_accepted_and_idempotent():
 def test_txn_log_retention_outlasts_offline_devices():
     h = {"X-Txn-Id": "old-1"}
     c.post("/todos", json={"title": "t"}, headers=h)
-    ref = db.get_conn().collection("txn_log").document("old-1")
+    ref = db.user_ref(TEST_USER).collection("txn_log").document("old-1")
     ref.update({"created_at": datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)})
     assert db.prune_txn_log() == 0
     ref.update({"created_at": datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=31)})

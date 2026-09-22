@@ -3,11 +3,11 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.requests import Request
-from app import auth, db, models, push
+from app import auth, db, models, push, tenant
 from app.main import app
+from tests.helpers import TEST_USER, act_as, wipe_users
 
 UTC = dt.timezone.utc
-app.dependency_overrides[auth.require_user] = lambda: None
 c = TestClient(app)
 # 2026-09-19 16:00 UTC is 09:00 in Los Angeles.
 NINE_LA = dt.datetime(2026, 9, 19, 16, 0, tzinfo=UTC)
@@ -15,11 +15,12 @@ NINE_LA = dt.datetime(2026, 9, 19, 16, 0, tzinfo=UTC)
 
 @pytest.fixture(autouse=True)
 def setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta", "push_devices", "push_sent"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 

@@ -7,22 +7,22 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app import db, models
+from app import db, models, tenant
 import uuid
 
-from app.auth import require_user
-app.dependency_overrides[require_user] = lambda: None
+from tests.helpers import TEST_USER, act_as, wipe_users
 
 client = TestClient(app)
 
 @pytest.fixture
 def db_setup():
     # Fresh Firestore emulator state for every test.
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield 0
+    tenant.reset(token)
     db.teardown()
 
 @pytest.fixture
@@ -256,7 +256,7 @@ def test_version_starts_at_1_and_bumps_on_patch(db_setup):
 
 def test_legacy_doc_without_version_reads_as_1_and_bumps_to_2(db_setup):
     id = str(uuid.uuid4())
-    db.get_conn().collection("todos").document(id).set({
+    db.user_ref(TEST_USER).collection("todos").document(id).set({
         "todo_id": id, "title": "old", "done": False,
         "create_date": "2026-01-01T00:00:00", "due_date": None,
         "order_idx": None, "parent_id": None, "deleted": False})
@@ -319,7 +319,7 @@ def test_failed_request_is_not_logged(db_setup):
     missing = str(uuid.uuid4())
     h = {"X-Txn-Id": "txn-4"}
     assert client.patch(f"/todos/{missing}", json={"done": True}, headers=h).status_code == 404
-    assert list(db.get_conn().collection("txn_log").stream()) == []
+    assert list(db.user_ref(TEST_USER).collection("txn_log").stream()) == []
 
 
 def test_split_returns_affected_parent_then_children(db_setup):
@@ -522,7 +522,7 @@ def test_move_touches_only_the_two_swapped_siblings(db_setup):
 def test_move_compacts_legacy_roots_without_order_idx(db_setup):
     ids = [client.post("/todos", json={"title": f"t{i}"}).json()["todo_id"] for i in range(3)]
     for i in ids:
-        db.get_conn().collection("todos").document(i).update({"order_idx": None})
+        db.user_ref(TEST_USER).collection("todos").document(i).update({"order_idx": None})
     client.patch(f"/todos/{ids[2]}/move/up")
     assert [t["todo_id"] for t in client.get("/todos/root").json()] == [ids[0], ids[2], ids[1]]
 

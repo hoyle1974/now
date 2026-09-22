@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from app import db, models
 from app.main import app
 from app.next_up import rank_next_up
+from tests.helpers import act_as, wipe_users
 
 
 def d(day: int) -> datetime.datetime:
@@ -75,11 +76,10 @@ def test_children_follow_order_idx_and_limit_applies():
 
 
 def test_endpoint_returns_ranked_items():
+    act_as(app)
     client = TestClient(app)
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
     client.post("/todos", json={"title": "undated"})
     client.post("/todos", json={"title": "due", "due_date": "2026-09-10"})
     response = client.get("/todos/next")

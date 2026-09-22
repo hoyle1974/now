@@ -2,12 +2,12 @@ import datetime as dt
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from app import auth, db, models, push, tasks
+from app import auth, db, models, push, tasks, tenant
 from app.main import app
+from tests.helpers import TEST_USER, act_as, wipe_users
 
 UTC = dt.timezone.utc
 LA = "America/Los_Angeles"
-app.dependency_overrides[auth.require_user] = lambda: None
 c = TestClient(app)
 
 
@@ -17,11 +17,12 @@ def at(iso_utc):
 
 @pytest.fixture(autouse=True)
 def setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta", "push_devices", "push_sent"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 
@@ -197,7 +198,7 @@ def test_heads_up_is_silent_when_the_todo_changed(change):
     elif change == "moved":
         t.due_date = dt.datetime(2026, 9, 19, 17, 0); db.update_todo(t)
     else:
-        db.get_conn().collection("todos").document(str(t.todo_id)).delete()
+        db.user_ref(TEST_USER).collection("todos").document(str(t.todo_id)).delete()
     s = Sender()
     out = push.run_heads_up(str(t.todo_id), "2026-09-19T15:00:00", at("2026-09-19T21:00:00"), send=s)
     assert out["sent"] == 0 and s.sent == []

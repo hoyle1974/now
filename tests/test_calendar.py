@@ -7,6 +7,7 @@ from starlette.requests import Request
 
 from app import auth, db, ics, models
 from app.main import app
+from tests.helpers import TEST_USER, act_as, wipe_users
 
 STAMP = datetime.datetime(2026, 9, 20, 12, 0, 0)
 TOKEN = "a" * 48
@@ -91,11 +92,9 @@ def test_feed_off_when_unset(monkeypatch):
 
 @pytest.fixture
 def client():
-    app.dependency_overrides[auth.require_user] = lambda: None
+    act_as(app, TEST_USER)
     db.init()
-    for name in ("todos", "todos_archive", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
     yield TestClient(app)
     db.teardown()
 

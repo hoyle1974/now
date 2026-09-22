@@ -2,10 +2,10 @@ import datetime
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app import db, blobstore, models
+from app import db, blobstore, models, tenant
 from app.auth import require_user
+from tests.helpers import TEST_USER, act_as, wipe_users
 
-app.dependency_overrides[require_user] = lambda: None
 c = TestClient(app)
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
@@ -16,12 +16,13 @@ WEBP = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 32
 
 @pytest.fixture(autouse=True)
 def setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "todos_archive", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     blobstore.use_memory()
     yield
+    tenant.reset(token)
     db.teardown()
 
 
@@ -183,7 +184,7 @@ def test_requires_auth():
         assert c.get(f"/todos/{t_id}/attachments/x").status_code == 401
         assert c.get(f"/todos/{t_id}/attachments/x", headers={"x-widget-token": "anything"}).status_code == 401
     finally:
-        app.dependency_overrides[require_user] = lambda: None
+        act_as(app)
 
 
 def test_blobstore_memory_roundtrip_and_prefix_delete():

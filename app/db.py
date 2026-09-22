@@ -34,6 +34,7 @@ from app.db_firestore import (
     undelete_todo,
     update_todo,
     upsert_push_device,
+    user_ref,
 )
 
 __all__ = [
@@ -44,5 +45,5 @@ __all__ = [
     "is_ancestor", "list_push_devices", "maybe_archive_expired", "prune_txn_log",
     "put_push_marker", "reorder_todo", "reparent_todo", "run_atomic",
     "spawn_next_occurrence", "split_into_children", "sweep_orphan_blobs", "teardown",
-    "undelete_todo", "update_todo", "upsert_push_device",
+    "undelete_todo", "update_todo", "upsert_push_device", "user_ref",
 ]

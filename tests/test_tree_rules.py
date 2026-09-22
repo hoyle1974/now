@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from app import db, models
+from app import db, models, tenant
+from tests.helpers import TEST_USER, wipe_users
 
 CASES = json.loads((Path(__file__).parent / "fixtures" / "tree_rules.json").read_text())["cases"]
 _NS = uuid.UUID("00000000-0000-0000-0000-00000000fade")
@@ -22,10 +23,10 @@ def _id(label: str) -> models.TodoId:
 @pytest.fixture
 def clean_db():
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 

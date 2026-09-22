@@ -17,7 +17,7 @@ from typing import Any
 
 from google.cloud import firestore  # type: ignore[attr-defined]
 
-from app import blobstore, db_firestore_helpers, models, recurrence, types
+from app import blobstore, db_firestore_helpers, models, recurrence, tenant, types
 
 log = logging.getLogger(__name__)
 
@@ -27,19 +27,35 @@ class _State:
     """Per-process Firestore state. init() fills it, teardown() clears it."""
     def __init__(self) -> None:
         self.client: Any = None
-        self.todos: Any = None  # the "todos" collection; None until init()
-        # (rev, roots, todosById) of the last full tree read. A tree read costs one
-        # document read per todo, so it is reused for as long as the revision counter
-        # hasn't moved (every write to a todo bumps it in run_atomic).
-        self.tree_cache: tuple | None = None
-        self.archive_checked: float | None = None  # time.monotonic() of the last archive attempt
+        # user email -> (rev, roots, todosById) of that user's last full tree read. A tree
+        # read costs one document read per todo, so it is reused for as long as the
+        # revision counter hasn't moved (every write to a todo bumps it in run_atomic).
+        self.tree_cache: dict[str, tuple] = {}
+        # user email -> time.monotonic() of that user's last archive attempt
+        self.archive_checked: dict[str, float] = {}
 
     def reset(self) -> None:
-        self.tree_cache = None
-        self.archive_checked = None
+        self.tree_cache = {}
+        self.archive_checked = {}
 
 
 _state = _State()
+
+USERS = "users"
+
+
+def user_ref(email: str | None = None):
+    """users/{email}: every collection below belongs to that one person. Defaults to
+    the bound user (app/tenant.py) and raises when none is bound."""
+    return get_conn().collection(USERS).document(email or tenant.current())
+
+
+def _todos():
+    return user_ref().collection("todos")
+
+
+def _sub(name: str):
+    return user_ref().collection(name)
 
 # Todos deleted for ARCHIVE_AFTER_DAYS move (subtree and all) out of "todos", so
 # the live collection, which every tree read scans, stays small.
@@ -96,7 +112,6 @@ def init():
     """Initialize Firestore connection"""
     _state.reset()
     _state.client = firestore.Client()
-    _state.todos = _state.client.collection("todos")
     log.info("firestore: initialized")
 
 def get_conn():
@@ -109,7 +124,6 @@ def teardown():
     if _state.client is not None:
         _state.client.close()
     _state.client = None
-    _state.todos = None
 
 
 def _now_utc() -> datetime.datetime:
@@ -118,7 +132,7 @@ def _now_utc() -> datetime.datetime:
 
 def get_rev() -> int:
     """Current revision (0 before the first write). One document read."""
-    snap = get_conn().collection(REV_COLLECTION).document(REV_DOC).get()
+    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
     return snap.to_dict().get("value", 0) if snap.exists else 0
 
 
@@ -135,8 +149,8 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) ->
     are not logged.
     """
     client = get_conn()
-    log_ref = None if txn_id is None else client.collection(TXN_COLLECTION).document(txn_id)
-    rev_ref = client.collection(REV_COLLECTION).document(REV_DOC)
+    log_ref = None if txn_id is None else _sub(TXN_COLLECTION).document(txn_id)
+    rev_ref = _sub(REV_COLLECTION).document(REV_DOC)
 
     @firestore.transactional
     def run(tx):
@@ -184,14 +198,15 @@ def prune_txn_log(hours: int = 24 * 30) -> int:
     is far past any realistic offline stretch and the records are tiny."""
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
     removed = 0
-    for doc in get_conn().collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
-        doc.reference.delete()
-        removed += 1
+    for user in get_conn().collection(USERS).list_documents():  # includes users with no user doc, only subcollections
+        for doc in user.collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
+            doc.reference.delete()
+            removed += 1
     return removed
 
 
 def _child_docs(parent_id: str | None, include_deleted: bool = False) -> list[dict]:
-    docs = [d.to_dict() for d in _get(_state.todos.where("parent_id", "==", parent_id))]
+    docs = [d.to_dict() for d in _get(_todos().where("parent_id", "==", parent_id))]
     if include_deleted:
         return docs
     return [d for d in docs if not d.get("deleted", False)]
@@ -219,7 +234,7 @@ def create_todo(todo: models.Todo):
     if todo.order_idx is None:
         todo.order_idx = _next_order_idx(None if todo.parent_id is None else str(todo.parent_id))
     doc_data = db_firestore_helpers.todo_to_doc(todo)
-    _set(_state.todos.document(str(todo.todo_id)), doc_data)
+    _set(_todos().document(str(todo.todo_id)), doc_data)
 
 class MoveError(Exception):
     """A move up/down that deliberately can't happen: kind is "missing" (no such
@@ -242,7 +257,7 @@ def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
     if direction not in ("up", "down"):
         raise MoveError("blocked", "direction must be 'up' or 'down'")
 
-    moved_ref = _state.todos.document(str(todo_id))
+    moved_ref = _todos().document(str(todo_id))
     moved_doc = _get(moved_ref)
     if not moved_doc.exists:
         raise MoveError("missing", "Todo not found")
@@ -280,7 +295,7 @@ def reorder_todo(todo_id: models.TodoId, direction: str) -> models.Todo:
         else:
             current = next(d for d in siblings if d["todo_id"] == sibling_id).get("order_idx")
             if current != idx:
-                _update(_state.todos.document(sibling_id), {"order_idx": idx})
+                _update(_todos().document(sibling_id), {"order_idx": idx})
     return moved
 
 def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, int]]]:
@@ -298,7 +313,7 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
     Returns the restored todo and [(todo_id, version)] for every todo restored (the
     todo first, then its ancestors upward).
     """
-    target = _get(_state.todos.document(str(todo_id))).to_dict()
+    target = _get(_todos().document(str(todo_id))).to_dict()
     path = [target]  # the todo, then each ancestor upward
     seen = {str(todo_id)}
     cursor, orphaned = target.get("parent_id"), False
@@ -307,7 +322,7 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
             orphaned = True
             break
         seen.add(cursor)
-        snap = _get(_state.todos.document(cursor))
+        snap = _get(_todos().document(cursor))
         if not snap.exists:
             orphaned = True
             break
@@ -340,12 +355,12 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
             fields.update({"deleted": False, "deleted_at": None})
         if is_top and orphaned:
             fields.update({"parent_id": None, "order_idx": top_order})
-        _update(_state.todos.document(node["todo_id"]), fields)
+        _update(_todos().document(node["todo_id"]), fields)
         affected.append((node["todo_id"], fields["version"]))
         if i == 0:
             restored_fields = fields
     for sibling, when in stay_deleted:
-        _update(_state.todos.document(sibling["todo_id"]),
+        _update(_todos().document(sibling["todo_id"]),
                 {"deleted": True, "deleted_at": when or now, "version": sibling.get("version", 1) + 1})
 
     restored = db_firestore_helpers.doc_to_todo({**target, **restored_fields})
@@ -354,7 +369,7 @@ def undelete_todo(todo_id: models.TodoId) -> tuple[models.Todo, list[tuple[str, 
 
 def _stream_all():
     tx = _tx.get()
-    return _state.todos.stream() if tx is None else _state.todos.stream(transaction=tx)
+    return _todos().stream() if tx is None else _todos().stream(transaction=tx)
 
 def clear_completed() -> list[tuple[str, int]]:
     """Soft-delete every done todo whose whole live subtree is done.
@@ -394,7 +409,7 @@ def clear_completed() -> list[tuple[str, int]]:
         if all_done and has_todo:
             data = live[tid]
             version = data.get("version", 1) + 1
-            _update(_state.todos.document(tid),
+            _update(_todos().document(tid),
                     {"deleted": True, "deleted_at": _now_utc().isoformat(), "version": version})
             cleared.append((tid, version))
         else:
@@ -420,7 +435,7 @@ def _trash_entries():
     # One read of the collection, then a walk in memory: a query per item (one round trip
     # each, in sequence) took ~150 ms per trashed item, 8 s for a page. The tree load already
     # reads the whole collection the same way.
-    docs = [d.to_dict() for d in _state.todos.stream()]
+    docs = [d.to_dict() for d in _todos().stream()]
     children: dict[str | None, list[dict]] = {}
     for data in docs:
         children.setdefault(data.get("parent_id"), []).append(data)
@@ -469,7 +484,7 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
     elif todo.deleted_at is None:
         todo.deleted_at = _now_utc()
     doc_data = db_firestore_helpers.todo_to_doc(todo)
-    _update(_state.todos.document(str(todo.todo_id)), doc_data)
+    _update(_todos().document(str(todo.todo_id)), doc_data)
 
 def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Todo:
     """Create the next occurrence of a repeating todo and mark the original as spawned.
@@ -480,7 +495,7 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
     Deleted subtasks are left behind. Returns the copy's root.
     """
 
-    original_ref = _state.todos.document(str(todo.todo_id))
+    original_ref = _todos().document(str(todo.todo_id))
     parent = None if todo.parent_id is None else str(todo.parent_id)
 
     # All reads first: Firestore rejects a read after a write.
@@ -541,9 +556,9 @@ def spawn_next_occurrence(todo: models.Todo, today: datetime.date) -> models.Tod
     old_idx = {d["todo_id"]: d.get("order_idx") for d in siblings}
     for i, sid in enumerate(ids):
         if sid != str(root.todo_id) and old_idx.get(sid) != i:
-            _update(_state.todos.document(sid), {"order_idx": i})
+            _update(_todos().document(sid), {"order_idx": i})
     for spawned in copies:
-        _set(_state.todos.document(str(spawned.todo_id)), db_firestore_helpers.todo_to_doc(spawned))
+        _set(_todos().document(str(spawned.todo_id)), db_firestore_helpers.todo_to_doc(spawned))
 
     todo.spawned_id = root.todo_id
     todo.version += 1
@@ -583,7 +598,7 @@ def reparent_todo(todo: models.Todo, parent_id: models.TodoId | None, index: int
             if cursor in seen:
                 break
             seen.add(cursor)
-            snap = _get(_state.todos.document(cursor))
+            snap = _get(_todos().document(cursor))
             if not snap.exists or snap.to_dict().get("deleted", False):
                 raise ReparentError("missing")
             cursor = snap.to_dict().get("parent_id")
@@ -595,11 +610,11 @@ def reparent_todo(todo: models.Todo, parent_id: models.TodoId | None, index: int
     old_idx = {d["todo_id"]: d.get("order_idx") for d in siblings}
 
     todo.version += 1
-    _update(_state.todos.document(moved_id), {
+    _update(_todos().document(moved_id), {
         "parent_id": new_parent, "order_idx": position, "version": todo.version})
     for i, sid in enumerate(ids):
         if sid != moved_id and old_idx.get(sid) != i:
-            _update(_state.todos.document(sid), {"order_idx": i})
+            _update(_todos().document(sid), {"order_idx": i})
 
     todo.parent_id = parent_id
     todo.order_idx = position
@@ -613,7 +628,7 @@ def _doc_to_todo_with_children(data: dict, include_deleted_children: bool = Fals
 def get_root_todos() -> list[models.Todo]:
     """Get all root-level todos (parent_id is None), oldest first"""
 
-    docs = _get(_state.todos.where("parent_id", "==", None))
+    docs = _get(_todos().where("parent_id", "==", None))
 
     todos = [
         _doc_to_todo_with_children(doc.to_dict())
@@ -641,17 +656,19 @@ def get_tree(rev: int | None = None) -> tuple[list[models.Todo], dict[str, model
     its contents: a write in between costs one extra reload, never a stale hit.
     Callers get their own copy, so they may modify what they receive.
     """
+    user = tenant.current()
     if rev is None:
         rev = get_rev()
-    if _state.tree_cache is not None and _state.tree_cache[0] == rev:
-        return copy.deepcopy(_state.tree_cache[1:])
+    cached = _state.tree_cache.get(user)
+    if cached is not None and cached[0] == rev:
+        return copy.deepcopy(cached[1:])
     roots, reachable = _read_tree()
-    _state.tree_cache = (rev, roots, reachable)
+    _state.tree_cache[user] = (rev, roots, reachable)
     return copy.deepcopy((roots, reachable))
 
 def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
     live: dict[str, models.Todo] = {}
-    for doc in _state.todos.stream():
+    for doc in _todos().stream():
         data = doc.to_dict()
         if not data.get("deleted", False):
             live[data["todo_id"]] = db_firestore_helpers.doc_to_todo(data)
@@ -681,7 +698,7 @@ def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
 def get_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID (excludes soft-deleted)"""
 
-    doc = _get(_state.todos.document(str(todo_id)))
+    doc = _get(_todos().document(str(todo_id)))
     if not doc.exists:
         return None
 
@@ -694,7 +711,7 @@ def get_todo(todo_id: models.TodoId) -> models.Todo | None:
 def get_deleted_todo(todo_id: models.TodoId) -> models.Todo | None:
     """Get a single todo by ID regardless of deleted status"""
 
-    doc = _get(_state.todos.document(str(todo_id)))
+    doc = _get(_todos().document(str(todo_id)))
     if not doc.exists:
         return None
 
@@ -721,20 +738,20 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
             due_date=due_date,
             type=type,
         )
-        _set(_state.todos.document(str(child_todo.todo_id)),
+        _set(_todos().document(str(child_todo.todo_id)),
              db_firestore_helpers.todo_to_doc(child_todo))
         new_ids.append(child_todo.todo_id)
         affected.append((str(child_todo.todo_id), child_todo.version))
         next_order += 1
 
-    _update(_state.todos.document(str(todo.todo_id)), {"version": todo.version})
+    _update(_todos().document(str(todo.todo_id)), {"version": todo.version})
     todo.child_ids = list(todo.child_ids) + new_ids
     return todo, affected
 
 
 def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
     """Raw docs (deleted or not) for the given ids; None where the id doesn't exist."""
-    return {i: (lambda s: s.to_dict() if s.exists else None)(_get(_state.todos.document(i)))
+    return {i: (lambda s: s.to_dict() if s.exists else None)(_get(_todos().document(i)))
             for i in todo_ids}
 
 def is_ancestor(ancestor_id: str, todo_id: str) -> bool:
@@ -792,27 +809,27 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
     now = now or _now_utc()
     cutoff = now - datetime.timedelta(days=days)
     moving: dict[str, dict] = {}
-    for doc in _state.todos.where("deleted", "==", True).stream():
+    for doc in _todos().where("deleted", "==", True).stream():
         data = doc.to_dict()
         stamp = data.get("deleted_at")
         if stamp is None:
             doc.reference.update({"deleted_at": now.isoformat()})
         elif _parse_aware(stamp) <= cutoff and data["todo_id"] not in moving:
             moving[data["todo_id"]] = data
-            for below in db_firestore_helpers.get_subtree_docs(_state.todos, data["todo_id"]):
+            for below in db_firestore_helpers.get_subtree_docs(_todos(), data["todo_id"]):
                 moving.setdefault(below["todo_id"], below)
 
     docs = list(moving.values())  # parents come before their children
     client = get_conn()
-    archive = client.collection(ARCHIVE_COLLECTION)
-    rev_ref = client.collection(REV_COLLECTION).document(REV_DOC)
+    archive = _sub(ARCHIVE_COLLECTION)
+    rev_ref = _sub(REV_COLLECTION).document(REV_DOC)
     skipped: set[str] = set()
     moved: list[dict] = []
 
     @firestore.transactional
     def move_chunk(tx, chunk: list[dict]) -> list[dict]:
         # All reads first: Firestore rejects a read after a write.
-        fresh = {d["todo_id"]: _state.todos.document(d["todo_id"]).get(transaction=tx).to_dict()
+        fresh = {d["todo_id"]: _todos().document(d["todo_id"]).get(transaction=tx).to_dict()
                  for d in chunk}
         rev_snap = rev_ref.get(transaction=tx)
         going = []
@@ -824,7 +841,7 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
                 skipped.add(data["todo_id"])
         for data in going:
             tx.set(archive.document(data["todo_id"]), {**data, "archived_at": now.isoformat()})
-            tx.delete(_state.todos.document(data["todo_id"]))
+            tx.delete(_todos().document(data["todo_id"]))
         if going:
             prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
             tx.set(rev_ref, {"value": prev + 1})
@@ -848,13 +865,14 @@ def sweep_orphan_blobs(min_age: datetime.timedelta = datetime.timedelta(hours=1)
     cutoff = _now_utc() - min_age
     known: dict[str, set[str]] = {}
     removed = 0
-    for key, created in store.list_blobs("todos/"):
-        parts = key.split("/")
-        if len(parts) != 3 or _aware(created) > cutoff:
+    prefix = blobstore.user_todos_prefix()
+    for key, created in store.list_blobs(prefix):
+        parts = key[len(prefix):].split("/")
+        if len(parts) != 2 or _aware(created) > cutoff:
             continue
-        todo_id, attachment_id = parts[1], parts[2]
+        todo_id, attachment_id = parts
         if todo_id not in known:
-            snap = _state.todos.document(todo_id).get()
+            snap = _todos().document(todo_id).get()
             known[todo_id] = {a["id"] for a in (snap.to_dict() or {}).get("attachments") or []}
         if attachment_id not in known[todo_id]:
             store.delete(key)
@@ -867,7 +885,7 @@ def _claim_archive_run(now: datetime.datetime) -> bool:
     instance holds a live lease (lease_until). The lease is short so a crashed
     or CPU-starved run is retried soon; only _finish_archive_run(ok=True) burns
     the daily claim."""
-    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
+    ref = _sub(REV_COLLECTION).document(ARCHIVE_DOC)
 
     @firestore.transactional
     def claim(tx) -> bool:
@@ -886,7 +904,7 @@ def _claim_archive_run(now: datetime.datetime) -> bool:
 
 def _finish_archive_run(now: datetime.datetime, ok: bool) -> None:
     """Release the lease; on success also record the daily last_success."""
-    ref = get_conn().collection(REV_COLLECTION).document(ARCHIVE_DOC)
+    ref = _sub(REV_COLLECTION).document(ARCHIVE_DOC)
     if ok:
         ref.set({"last_success": now.isoformat(), "lease_until": None})
     else:
@@ -897,13 +915,15 @@ def maybe_archive_expired() -> int:
     instances and one at a time per process. Meant to run off the request path
     (see _load_tree). A failure releases the claim so a later read retries; this
     process backs off for _ARCHIVE_RETRY_SECONDS first."""
+    user = tenant.current()
     now_m = time.monotonic()
-    if _state.archive_checked is not None and now_m - _state.archive_checked < _ARCHIVE_CHECK_SECONDS:
+    checked = _state.archive_checked.get(user)
+    if checked is not None and now_m - checked < _ARCHIVE_CHECK_SECONDS:
         return 0
     if not _archive_lock.acquire(blocking=False):
         return 0
     try:
-        _state.archive_checked = time.monotonic()
+        _state.archive_checked[user] = time.monotonic()
         started = _now_utc()
         if not _claim_archive_run(started):
             return 0
@@ -911,7 +931,7 @@ def maybe_archive_expired() -> int:
             moved = archive_expired(_now_utc())
             sweep_orphan_blobs()
         except Exception:
-            _state.archive_checked = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
+            _state.archive_checked[user] = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
             with contextlib.suppress(Exception):  # the lease expires by itself
                 _finish_archive_run(started, ok=False)
             raise
@@ -927,33 +947,33 @@ PUSH_SENT = "push_sent"
 
 
 def upsert_push_device(dev_id: str, token: str, tz: str, platform: str) -> None:
-    get_conn().collection(PUSH_DEVICES).document(dev_id).set(
+    _sub(PUSH_DEVICES).document(dev_id).set(
         {"token": token, "tz": tz, "platform": platform, "updated_at": _now_utc()})
 
 
 def delete_push_device(dev_id: str) -> None:
-    get_conn().collection(PUSH_DEVICES).document(dev_id).delete()
+    _sub(PUSH_DEVICES).document(dev_id).delete()
 
 
 def list_push_devices() -> list[dict]:
-    return [{"id": d.id, **d.to_dict()} for d in get_conn().collection(PUSH_DEVICES).stream()]
+    return [{"id": d.id, **d.to_dict()} for d in _sub(PUSH_DEVICES).stream()]
 
 
 def get_push_marker(key: str) -> list[str] | None:
     """The todo ids stored with a sent-marker, or None when nothing was sent."""
-    snap = get_conn().collection(PUSH_SENT).document(key).get()
+    snap = _sub(PUSH_SENT).document(key).get()
     return list(snap.to_dict().get("todo_ids") or []) if snap.exists else None
 
 
 def put_push_marker(key: str, todo_ids: list[str], expires_at: datetime.datetime) -> None:
     # expires_at feeds a Firestore TTL policy on this collection.
-    get_conn().collection(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
+    _sub(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
 
 
 def get_due_todos(before: datetime.datetime) -> list[models.Todo]:
     """Open, live todos whose due date sorts before `before` (naive ISO strings, so
     a string range query). Only these documents are read, never the whole collection."""
-    query = (get_conn().collection("todos")
+    query = (_todos()
              .where("done", "==", False).where("deleted", "==", False)
              .where("due_date", "<", before.isoformat()))
     return [db_firestore_helpers.doc_to_todo(d.to_dict()) for d in query.stream()]

@@ -3,12 +3,13 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-21T23:00:00Z
+timestamp: 2026-09-21T23:30:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
 - `models.py` — pydantic models and limits ([Todo](../data/todo.md)).
-- `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep.
+- `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep; every collection is partitioned under `users/{email}/...` ([Firestore collections](../data/firestore.md)), keyed by `tenant.current()`.
+- `tenant.py` — the signed-in user's email, a per-request `ContextVar` set by `auth.bind_user`; every Firestore path and blob key is derived from it (`tenant.current()` raises if nothing is bound).
 - `types.json`, `types.py` — item type registry ([item types](../features/item-types.md)); `scripts/gen_types.py` generates `web/types-data.js`, wrapped by `web/types.js`.
 - `next_up.py` — ranking ([next up](../features/next-up.md)).
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).

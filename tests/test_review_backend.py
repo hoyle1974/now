@@ -4,11 +4,10 @@ import datetime
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app import db, blobstore, models, next_up
+from app import db, blobstore, models, next_up, tenant
 from app import db_firestore
-from app.auth import require_user
+from tests.helpers import TEST_USER, act_as, wipe_users
 
-app.dependency_overrides[require_user] = lambda: None
 c = TestClient(app)
 c500 = TestClient(app, raise_server_exceptions=False)
 
@@ -18,12 +17,13 @@ UTC = datetime.timezone.utc
 
 @pytest.fixture(autouse=True)
 def setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "todos_archive", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     blobstore.use_memory()
     yield
+    tenant.reset(token)
     db.teardown()
 
 
@@ -36,7 +36,7 @@ def upload(todo, **kw):
 
 
 def ref(tid):
-    return db.get_conn().collection("todos").document(tid)
+    return db.user_ref(TEST_USER).collection("todos").document(tid)
 
 
 # A. move errors -----------------------------------------------------------
@@ -143,7 +143,7 @@ def test_archive_skips_todo_undeleted_after_it_was_read(monkeypatch):
     monkeypatch.setattr(db_firestore.db_firestore_helpers, "get_subtree_docs", undelete_meanwhile)
     assert db.archive_expired() == 0
     assert ref(t["todo_id"]).get().exists
-    assert not db.get_conn().collection("todos_archive").document(t["todo_id"]).get().exists
+    assert not db.user_ref(TEST_USER).collection("todos_archive").document(t["todo_id"]).get().exists
 
 
 def test_archive_bumps_rev_when_it_moves_something():
@@ -155,8 +155,8 @@ def test_archive_bumps_rev_when_it_moves_something():
 
 
 def _reset_archive_state():
-    db_firestore._state.archive_checked = None
-    db.get_conn().collection("meta").document("archive").delete()
+    db_firestore._state.archive_checked.pop(TEST_USER, None)
+    db.user_ref(TEST_USER).collection("meta").document("archive").delete()
 
 
 def test_archive_run_claim_is_exclusive_and_success_burns_daily_claim():
@@ -195,11 +195,11 @@ def test_maybe_archive_expired_failure_retries_and_success_sticks(monkeypatch):
     with pytest.raises(RuntimeError):
         db_firestore.maybe_archive_expired()
     # the lease was released, so another attempt may run (in-process backoff aside)
-    db_firestore._state.archive_checked = None
+    db_firestore._state.archive_checked.pop(TEST_USER, None)
     monkeypatch.setattr(db_firestore, "archive_expired", lambda now=None: calls.append(2) or 0)
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
-    db_firestore._state.archive_checked = None
+    db_firestore._state.archive_checked.pop(TEST_USER, None)
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
 

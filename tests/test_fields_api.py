@@ -1,20 +1,19 @@
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
-from app import db, models
-from app.auth import require_user
-
-app.dependency_overrides[require_user] = lambda: None
+from app import db, models, tenant
+from tests.helpers import TEST_USER, act_as, wipe_users
 
 c = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def db_setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "todos_archive", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield
+    tenant.reset(token)
     db.teardown()
 
 def mk(title="t"):

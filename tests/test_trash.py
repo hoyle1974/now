@@ -5,21 +5,21 @@ import datetime as dt
 import pytest
 from fastapi.testclient import TestClient
 
-from app.auth import require_user
 from app.main import app
-from app import db
+from app import db, tenant
+from tests.helpers import TEST_USER, act_as, wipe_users
 
-app.dependency_overrides[require_user] = lambda: None
 client = TestClient(app)
 
 
 @pytest.fixture
 def db_setup():
+    act_as(app)
     db.init()
-    for name in ("todos", "txn_log", "meta"):
-        for doc in db.get_conn().collection(name).stream():
-            doc.reference.delete()
+    wipe_users()
+    token = tenant.set_user(TEST_USER)
     yield 0
+    tenant.reset(token)
     db.teardown()
 
 
@@ -151,7 +151,7 @@ def test_restoring_under_an_archived_ancestor_goes_to_the_top_level(db_setup):
     top = _mk("top")
     leaf = _mk("leaf", parent=top)
     client.delete(f"/todos/{top}")
-    db.get_conn().collection("todos").document(top).delete()      # as if archived
+    db.user_ref(TEST_USER).collection("todos").document(top).delete()      # as if archived
     assert client.patch(f"/todos/{leaf}/undelete").status_code == 200
     by_id = client.get("/todos/tree").json()["todosById"]
     assert by_id[leaf]["parent_id"] is None

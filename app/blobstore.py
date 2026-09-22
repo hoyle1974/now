@@ -1,13 +1,15 @@
 """Where attachment bytes live: a private Cloud Storage bucket in production, an
 in-memory dict in tests and local dev (when ATTACHMENTS_BUCKET is unset).
 
-Keys look like todos/{todo_id}/{attachment_id}. Metadata is kept on the todo,
-so this layer only moves bytes."""
+Keys look like users/{email}/todos/{todo_id}/{attachment_id}. Metadata is kept on
+the todo, so this layer only moves bytes."""
 from __future__ import annotations
 
 import contextlib
 import datetime
 import os
+
+from app import tenant
 
 
 class MemoryStore:
@@ -89,9 +91,13 @@ def use_memory() -> MemoryStore:
     return _store
 
 
+def user_todos_prefix() -> str:
+    return f"users/{tenant.current()}/todos/"
+
+
 def key_for(todo_id: str, attachment_id: str) -> str:
-    return f"todos/{todo_id}/{attachment_id}"
+    return f"{user_todos_prefix()}{todo_id}/{attachment_id}"
 
 
 def todo_prefix(todo_id: str) -> str:
-    return f"todos/{todo_id}/"
+    return f"{user_todos_prefix()}{todo_id}/"
