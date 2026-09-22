@@ -28,7 +28,7 @@ like code.
 ## Concepts
 
 - Principles: [one deployment per family, #1 rule = free in GCP, non-goals](principles.md)
-- Architecture: [stack](architecture/stack.md), [code map](architecture/code-map.md), [zilch-gcp](architecture/zilch-gcp.md)
+- Architecture: [stack](architecture/stack.md), [code map](architecture/code-map.md), [zilch-gcp](architecture/zilch-gcp.md), [client/server split](architecture/client-server-split.md)
 - Data: [Todo](data/todo.md), [Firestore collections](data/firestore.md)
 - API: [routes](api/routes.md)
 - Features: [sync model](features/sync-model.md), [ordering and nesting](features/ordering-nesting.md),

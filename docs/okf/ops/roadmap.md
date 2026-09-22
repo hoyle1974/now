@@ -18,4 +18,5 @@ Context: [forking](forking.md), [zilch-gcp](../architecture/zilch-gcp.md). Order
 **Loose ends found during the review**
 - Firebase still loads as the compat SDK (about 200 KB, cached by the service worker after the first launch); moving `auth.js`/`push.js` to the modular SDK would shrink cold start.
 - Every tree read after a write scans the whole `todos` collection (cached per revision); revisit past a few thousand todos.
+- Search is client-only, scanning the in-memory tree ([client/server split](../architecture/client-server-split.md)); revisit with a real server search endpoint once a user's data grows large enough that this gets slow, or if sharing between users is ever added.
 - zilch `tfplan` file is an untracked leftover in `../zilch-gcp`.
