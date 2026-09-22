@@ -4,7 +4,7 @@ title: Multi-user (family) operations
 description: Adding or removing a person from ALLOWED_EMAILS, migrating existing data into the per-user layout, and what stays owner-only.
 resource: app/auth.py
 tags: [multi-user, migration, auth, runbook]
-timestamp: 2026-09-22T00:15:00Z
+timestamp: 2026-09-22T01:00:00Z
 ---
 One deployment can serve a small family: each Google account in `ALLOWED_EMAILS` gets
 its own fully isolated Firestore/storage partition ([data model](../data/firestore.md),
@@ -41,10 +41,19 @@ service keeps writing to the old collections until the new deploy is live:
    changes nothing).
 3. **Apply, then deploy immediately:** `python scripts/migrate-to-users.py OWNER --apply`
    followed right away by `ALLOWED_EMAILS='owner;kid' ./deploy.sh` — minimize the gap
-   where the old service can still write to the old (now stale) collections.
+   where the old service can still write to the old (now stale) collections. **Stop
+   using the app** (or treat any use during this window as needing manual
+   reconciliation) between this `--apply` and the deploy going live: the catch-up pass
+   below cannot repair the gap on its own.
 4. **Catch up the gap:** `python scripts/migrate-to-users.py OWNER --apply --only-missing`
-   right after the deploy finishes, to copy anything the old service wrote during the
-   gap. `--only-missing` never overwrites anything the new code has since edited.
+   right after the deploy finishes. This only picks up *new* documents the old service
+   created during the gap — it does NOT catch edits made during the gap to a document
+   already copied in step 3 (`--only-missing` skips anything that already exists at the
+   destination, so a stale copy from step 3 stays stale). The one exception is the
+   `meta/rev` revision counter, a small singleton control document that is always
+   refreshed regardless of `--only-missing`, so a client can't be left believing an
+   older revision is current. This is why minimizing and avoiding use of the gap in
+   step 3 matters more than this catch-up pass.
 5. **Verify as the owner:** old todos and images are present and correct.
 6. **Only then clean up:** delete the old top-level collections and the old
    `todos/{id}/...` blobs by hand (not automated — this is a one-way, destructive step).

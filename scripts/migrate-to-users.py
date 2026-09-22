@@ -25,7 +25,11 @@ def migrate(client, store, owner: str, dry_run: bool, only_missing: bool = False
     for name in COLLECTIONS:
         batch, pending = client.batch(), 0
         for snap in client.collection(name).stream():
-            if only_missing and dest.collection(name).document(snap.id).get().exists:
+            # meta/rev is the revision counter, not user data: a stale copy could let a
+            # client believe an old rev is current, so it's always refreshed even under
+            # --only-missing, unlike every other (idempotency-preferring) document here.
+            always_copy = name == "meta" and snap.id == "rev"
+            if only_missing and not always_copy and dest.collection(name).document(snap.id).get().exists:
                 continue
             docs += 1
             if dry_run:
@@ -37,14 +41,25 @@ def migrate(client, store, owner: str, dry_run: bool, only_missing: bool = False
                 batch, pending = client.batch(), 0
         if pending:
             batch.commit()
+    # Under --only-missing, check existence via one listing call rather than a per-blob
+    # get() (which does a full download): re-downloading every already-migrated image
+    # on each catch-up run would be real, avoidable GCS cost.
+    existing = ({key for key, _created in store.list_blobs(f"users/{owner}/todos/")}
+                if only_missing else set())
     for key, _created in store.list_blobs("todos/"):
-        if only_missing and store.get(f"users/{owner}/{key}") is not None:
+        dest_key = f"users/{owner}/{key}"
+        if only_missing and dest_key in existing:
             continue
         blobs += 1
         if dry_run:
             continue
-        data, content_type = store.get(key)
-        store.put(f"users/{owner}/{key}", data, content_type)
+        got = store.get(key)
+        if got is None:
+            # The blob was deleted concurrently between the list above and this copy;
+            # nothing to migrate for it.
+            continue
+        data, content_type = got
+        store.put(dest_key, data, content_type)
     return {"docs": docs, "blobs": blobs, "dry_run": dry_run}
 
 
