@@ -204,14 +204,20 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       setActivePanel(mode, todo.todo_id);
       renderTree();
     };
-    menu.append(
-      menuItem("Add item", "plus", openPanel("add")),
-      menuItem("Add several", "split", openPanel("split")),
-      menuItem("Edit", "pencil", openPanel("edit")),
-      // One entry however many types there are; switching only changes the label:
-      // due date, repeat and done stay, inactive.
-      menuItem(`Type: ${TypeUI.labelOf(Types.nameOf(todo))}`, Types.get(todo).icon, openPanel("type"))
-    );
+    if (Types.can(todo, "allowsUserChildren")) {
+      menu.append(
+        menuItem("Add item", "plus", openPanel("add")),
+        menuItem("Add several", "split", openPanel("split"))
+      );
+    }
+    if (Types.can(todo, "editable")) {
+      menu.append(
+        menuItem("Edit", "pencil", openPanel("edit")),
+        // One entry however many types there are; switching only changes the label:
+        // due date, repeat and done stay, inactive.
+        menuItem(`Type: ${TypeUI.labelOf(Types.nameOf(todo))}`, Types.get(todo).icon, openPanel("type"))
+      );
+    }
 
     menu.append(
       menuItem("Copy with subtasks", "copy", () => {
@@ -221,22 +227,23 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       })
     );
 
-    menu.append(
-      menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
-      menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
-    );
-
-    menu.append(
-      menuItem(
-        "Delete",
-        "trash",
-        () => {
-          setActivePanel(null);
-          reportedFailure(deleteTodo(todo.todo_id));
-        },
-        "todo-menu-item--danger"
-      )
-    );
+    if (Types.can(todo, "editable")) {
+      menu.append(
+        menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
+        menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
+      );
+      menu.append(
+        menuItem(
+          "Delete",
+          "trash",
+          () => {
+            setActivePanel(null);
+            reportedFailure(deleteTodo(todo.todo_id));
+          },
+          "todo-menu-item--danger"
+        )
+      );
+    }
     menuWrap.appendChild(menu);
   }
 

@@ -27,6 +27,8 @@
       "countsInBadge": true,
       "showsProgress": true,
       "notifies": true,
+      "allowsUserChildren": true,
+      "editable": true,
       "description": "Something to do, with a checkbox and an optional due date.",
       "defaultChildType": "todo"
     },
@@ -46,6 +48,8 @@
       "countsInBadge": false,
       "showsProgress": false,
       "notifies": false,
+      "allowsUserChildren": true,
+      "editable": true,
       "description": "A plain group of items, with no checkbox or due date.",
       "defaultChildType": "todo"
     },
@@ -65,8 +69,50 @@
       "countsInBadge": false,
       "showsProgress": true,
       "notifies": false,
+      "allowsUserChildren": true,
+      "editable": true,
       "description": "A group that shows how many of its todos are done.",
       "defaultChildType": "todo"
+    },
+    "calendar": {
+      "label": "Calendar",
+      "icon": "calendar",
+      "fields": [
+        "title",
+        "calendar_url",
+        "color",
+        "links",
+        "references"
+      ],
+      "hasCheckbox": false,
+      "appearsInNextUp": false,
+      "triggersAutodone": false,
+      "countsInBadge": false,
+      "showsProgress": false,
+      "notifies": false,
+      "allowsUserChildren": false,
+      "editable": true,
+      "description": "A live calendar feed; its events sync in automatically.",
+      "defaultChildType": "calendar_event"
+    },
+    "calendar_event": {
+      "label": "Event",
+      "icon": "calendar",
+      "fields": [
+        "title",
+        "due_date",
+        "location"
+      ],
+      "hasCheckbox": false,
+      "appearsInNextUp": true,
+      "triggersAutodone": false,
+      "countsInBadge": false,
+      "showsProgress": false,
+      "notifies": true,
+      "allowsUserChildren": false,
+      "editable": false,
+      "description": "One event from a synced calendar. Read-only.",
+      "defaultChildType": "calendar_event"
     }
   };
 });

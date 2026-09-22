@@ -135,13 +135,22 @@ def _now_utc() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+def get_rev_info() -> dict:
+    """Current revision and who last bumped it (a client_session_id, or None
+    for every write path that doesn't pass one — the overwhelming majority).
+    One document read."""
+    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
+    data = snap.to_dict() if snap.exists else {}
+    return {"value": data.get("value", 0), "triggered_by": data.get("triggered_by")}
+
+
 def get_rev() -> int:
     """Current revision (0 before the first write). One document read."""
-    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
-    return snap.to_dict().get("value", 0) if snap.exists else 0
+    return get_rev_info()["value"]
 
 
-def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) -> tuple[int, dict | None, int, int]:
+def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]],
+               triggered_by: str | None = None) -> tuple[int, dict | None, int, int]:
     """Run fn() in one Firestore transaction, at most once per txn_id.
 
     fn returns (status, body). The writes it makes, the txn_log record and the
@@ -178,7 +187,7 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]]) ->
 
             if _wrote.get()[0]:
                 rev += 1
-                tx.set(rev_ref, {"value": rev})
+                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by})
             if log_ref is not None:
                 tx.set(log_ref, {
                     "status": status,
@@ -752,6 +761,75 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
     _update(_todos().document(str(todo.todo_id)), {"version": todo.version})
     todo.child_ids = list(todo.child_ids) + new_ids
     return todo, affected
+
+
+def get_calendar_event_children(calendar_id: str) -> dict[str, models.Todo]:
+    """Live calendar_event children of a calendar item, keyed by external_uid
+    (children with no external_uid, which should not happen, are skipped)."""
+    docs = _child_docs(calendar_id)
+    out = {}
+    for d in docs:
+        if d.get("type") != "calendar_event" or not d.get("external_uid"):
+            continue
+        out[d["external_uid"]] = db_firestore_helpers.doc_to_todo(d)
+    return out
+
+
+def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = None) -> dict:
+    """Reconcile a calendar's children to exactly `events` (calendar_sync.ParsedEvent list),
+    matched by external_uid. Each create/update/delete is a normal todo write, so /todos/rev
+    bumps and the existing freshness/remote-diff client machinery picks it up.
+
+    Wrapped in one run_atomic so the whole diff (and its rev bump) commits atomically; this
+    runs from a background Cloud Task handler with no client watching for a version conflict,
+    but only this job ever writes a given calendar's calendar_event children, so there's no
+    concurrent user write to race."""
+    from app import calendar_sync
+
+    def action() -> tuple[int, dict | None]:
+        # All reads (existing children, matched via the diff) happen before any write below:
+        # Firestore transactions forbid a read after a write, and existing already holds the
+        # full Todo for every to_update/to_delete id, so no extra per-id _get is needed.
+        existing = get_calendar_event_children(calendar_id)
+        by_todo_id = {str(todo.todo_id): todo for todo in existing.values()}
+        to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
+
+        # order_idx is assigned up front (like split_into_children) rather than left for
+        # create_todo's own "read the current max, then write" default: two or more
+        # creates in this one transaction would otherwise have the second create's read
+        # land after the first create's write, which Firestore transactions forbid.
+        next_order = _next_order_idx(calendar_id)
+        for event in to_create:
+            child = models.Todo(title=event.title, type="calendar_event",
+                                parent_id=models.TodoId(uuid.UUID(calendar_id)),
+                                due_date=event.due_date, external_uid=event.external_uid,
+                                location=event.location, order_idx=next_order)
+            create_todo(child)
+            next_order += 1
+
+        for todo_id, event in to_update:
+            todo = by_todo_id[todo_id]
+            todo.title, todo.due_date, todo.location = event.title, event.due_date, event.location
+            update_todo(todo)
+
+        for todo_id in to_delete:
+            todo = by_todo_id[todo_id]
+            todo.deleted = True
+            update_todo(todo)
+
+        return 200, {"created": len(to_create), "updated": len(to_update), "deleted": len(to_delete)}
+
+    _, body, _, _ = run_atomic(None, action, triggered_by=triggered_by)
+    return body
+
+
+def mark_calendar_synced(calendar_id: str, error: str | None) -> None:
+    """Server-managed sync bookkeeping: skips If-Match/version bump (like `collapsed`),
+    since this isn't user content and must never conflict with a concurrent user edit."""
+    _update(_todos().document(calendar_id), {
+        "last_synced_at": _now_utc().replace(tzinfo=None).isoformat(),
+        "last_sync_error": error,
+    })
 
 
 def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:

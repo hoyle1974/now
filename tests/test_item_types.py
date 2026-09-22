@@ -28,11 +28,34 @@ def db_setup():
 # ---- registry ---------------------------------------------------------------
 
 def test_registry_has_the_three_types_and_flags():
-    assert set(types.NAMES) == {"todo", "list", "project"}
-    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies"}
+    assert set(types.NAMES) == {"todo", "list", "project", "calendar", "calendar_event"}
+    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies", "allowsUserChildren", "editable"}
     for name in types.NAMES:
         assert flags <= set(types.caps(name))
         assert "title" in types.caps(name)["fields"]
+
+
+def test_registry_has_calendar_types_and_new_flags():
+    assert {"calendar", "calendar_event"} <= set(types.NAMES)
+    for name in types.NAMES:
+        assert "allowsUserChildren" in types.caps(name)
+        assert "editable" in types.caps(name)
+    assert types.can_type("todo", "allowsUserChildren") is True
+    assert types.can_type("calendar", "allowsUserChildren") is False
+    assert types.can_type("calendar_event", "allowsUserChildren") is False
+    assert types.can_type("calendar_event", "editable") is False
+    assert types.can_type("calendar", "editable") is True
+    assert types.has_field_type("calendar", "calendar_url")
+    assert types.has_field_type("calendar_event", "location")
+    assert types.has_field_type("calendar_event", "due_date")
+    assert types.can_type("calendar_event", "hasCheckbox") is False
+    assert types.can_type("calendar_event", "appearsInNextUp") is True
+    assert types.can_type("calendar_event", "notifies") is True
+    assert types.can_type("calendar", "appearsInNextUp") is False
+    # No attachments (images) on calendar items: the user doesn't need to add
+    # images to a calendar feed.
+    assert types.caps("calendar")["fields"] == ["title", "calendar_url", "color", "links", "references"]
+    assert not types.has_field_type("calendar", "attachments")
 
 
 def test_unknown_or_missing_type_falls_back_to_todo():
@@ -268,3 +291,116 @@ def test_split_rejects_unknown_type(db_setup):
     parent = client.post("/todos", json={"title": "p"}).json()
     res = client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["a"], "type": "nonsense"})
     assert res.status_code == 422
+
+
+def test_split_rejected_under_calendar(db_setup):
+    parent = models.Todo(title="Family calendar", type="calendar")
+    db.create_todo(parent)
+    resp = client.post(f"/todos/{parent.todo_id}/split", json={"descriptions": ["x"]},
+                       headers={"Authorization": "Bearer test", "X-Txn-Id": "t1"})
+    assert resp.status_code == 400
+    assert "does not accept" in resp.json()["detail"]
+
+
+def test_reparent_rejected_under_calendar(db_setup):
+    parent = models.Todo(title="Family calendar", type="calendar")
+    db.create_todo(parent)
+    child = models.Todo(title="a todo")
+    db.create_todo(child)
+    resp = client.patch(f"/todos/{child.todo_id}/reparent", json={"parent_id": str(parent.todo_id)},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "does not accept" in resp.json()["detail"]
+
+
+def test_reparent_to_top_level_still_allowed(db_setup):
+    """Sanity: the guard only fires for a real parent_id, not parent_id: null."""
+    child = models.Todo(title="a todo", parent_id=None)
+    db.create_todo(child)
+    resp = client.patch(f"/todos/{child.todo_id}/reparent", json={"parent_id": None},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+
+
+# ---- editable: false enforced server-side (Task 12) --------------------------
+
+def test_patch_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"title": "Hacked"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]
+
+
+def test_patch_type_change_away_from_uneditable_rejected(db_setup):
+    """The specific orphaning exploit Task 11's review found: a raw PATCH changing
+    `type` away from calendar_event must be rejected same as any other field edit,
+    not just the fields a naive guard might have special-cased."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"type": "todo"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+
+def test_delete_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.delete(f"/todos/{event.todo_id}", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+
+def test_patch_still_allowed_on_editable_calendar_item(db_setup):
+    """Sanity: the guard only fires for editable: false, not for `calendar` itself
+    (editable: true — you can still rename it, change its color, edit its URL)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    resp = client.patch(f"/todos/{cal.todo_id}", json={"title": "Renamed"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+
+
+def test_collapsed_only_patch_still_allowed_on_uneditable_type(db_setup):
+    """Collapse is view state (per sync-model.md), not content — it must NOT be
+    blocked by the editable guard, or the client can't fold/unfold a calendar_event
+    row (collapsing view state is harmless even on a read-only item)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"collapsed": True},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+
+
+def test_reparent_rejected_for_uneditable_item(db_setup):
+    """A calendar_event can't be dragged out of its calendar and orphaned (C3)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    other = models.Todo(title="Other")
+    db.create_todo(other)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}/reparent", json={"parent_id": str(other.todo_id)},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]
+
+
+def test_move_rejected_for_uneditable_item(db_setup):
+    """A calendar_event can't be reordered within its calendar either (C3)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}/move/down",
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]

@@ -711,6 +711,13 @@ body.menu-room:has(#error:not([hidden])) {
   font-weight: 700;
 }
 
+.calendar-sync-status {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .sheet-full .sheet-actions {
   flex: none;
   width: 100%;

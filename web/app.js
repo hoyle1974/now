@@ -45,6 +45,25 @@ if ("serviceWorker" in navigator) {
 // The one toast (#error). Its owners are showNotice, apiFetch's failures and the Undo toasts.
 const toast = Toast.create(document.getElementById("error"));
 
+// Identifies this browser tab's session so a sync it triggers (via "Sync now")
+// can be told apart from one another window/device caused, and its mascot
+// notification suppressed (see refreshFromRemote). Persisted per tab in
+// sessionStorage so a reload keeps the same id; a fresh id otherwise.
+let _clientSessionId = null;
+function clientSessionId() {
+  if (_clientSessionId) return _clientSessionId;
+  try {
+    _clientSessionId = sessionStorage.getItem("client-session-id");
+    if (!_clientSessionId) {
+      _clientSessionId = crypto.randomUUID();
+      sessionStorage.setItem("client-session-id", _clientSessionId);
+    }
+  } catch (e) {
+    _clientSessionId = crypto.randomUUID(); // private mode / storage blocked: usable for this page load only
+  }
+  return _clientSessionId;
+}
+
 async function apiFetch(path, options = {}) {
   try {
     const response = await fetch(path, { cache: "no-store", ...options });
@@ -53,10 +72,10 @@ async function apiFetch(path, options = {}) {
     }
     // Only clear a failure apiFetch itself showed; never a sync-engine notice or an Undo.
     toast.hideSource("api");
-    if (response.status === 204) {
-      return null;
-    }
-    return await response.json();
+    // Read as text first: a 202 (e.g. POST /todos/{id}/sync) or any other
+    // empty-body response would otherwise throw on response.json().
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   } catch (err) {
     logEvent("fetch-fail", `${path}: ${err.message}`);
     toast.show({ message: "Something went wrong \u2014 " + err.message, level: "error", ttl: 5000, source: "api" });
@@ -180,12 +199,13 @@ function setPhase(next) {
 // The freshness check found that another window or device wrote: re-download the
 // tree, and have the mascot say what changed (not for our own writes: the sync
 // engine already knows those).
-async function refreshFromRemote() {
+async function refreshFromRemote(triggeredBy) {
   const before = RemoteDiff.snapshot(model.todosById);
   await loadAndRender();
   const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)));
   logEvent("remote", said || "refreshed, nothing visible changed");
-  if (said && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
+  const ownSync = Boolean(triggeredBy) && triggeredBy === clientSessionId();
+  if (said && !ownSync && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
 }
 
 const model = Sync.createModel();
@@ -235,7 +255,7 @@ const freshness = Freshness.create({
   fetchRev: async () => {
     const response = await fetch(`${API_BASE}/rev`, { cache: "no-store" });
     if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
-    return response.json(); // { rev, version }
+    return response.json(); // { rev, version, triggered_by }
   },
   appVersion: APP_VERSION,
   reload: () => location.reload(),
@@ -360,6 +380,22 @@ async function saveSplit(todoId, descriptions, dueDate = null, type = null) {
 
 async function moveTodo(todoId, direction) {
   engine.enqueue({ kind: "move", target_id: todoId, payload: { direction } });
+}
+
+// Kicks off an on-demand sync for a calendar item (POST /todos/{id}/sync, Task 6).
+// Fire-and-forget: the sync itself runs server-side (a Cloud Task); this just
+// enqueues it and lets the user know it started, or that it couldn't.
+async function syncCalendarNow(todoId) {
+  try {
+    await apiFetch(`${API_BASE}/${todoId}/sync`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ client_session_id: clientSessionId() }),
+    });
+    showNotice({ level: "info", message: "Syncing…" });
+  } catch (e) {
+    showNotice({ level: "error", message: "Couldn't start sync: " + e.message });
+  }
 }
 
 // #4: Load the full tree in one request

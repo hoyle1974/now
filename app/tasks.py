@@ -127,3 +127,60 @@ def schedule_from_body(body: dict | None) -> None:
                           item_type=body.get("type", "todo"))
     except Exception:
         log.exception("heads-up scheduling skipped")
+
+
+CALENDAR_STALE_AFTER = datetime.timedelta(hours=6)
+SYNC_CALENDAR_PATH = "/internal/sync-calendar"
+
+
+def _sync_task_name(queue: str, calendar_id: str, now_utc: datetime.datetime) -> str:
+    # Bucketed by hour so two page loads in the same hour dedupe to one task
+    # (Cloud Tasks refuses a duplicate name; AlreadyExists is swallowed below).
+    bucket = now_utc.strftime("%Y%m%dT%H")
+    return f"{queue}/tasks/calsync-{calendar_id}-{bucket}"
+
+
+def create_calendar_sync_task(calendar_id: str, client_session_id: str | None = None,
+                              now_utc: datetime.datetime | None = None) -> bool:
+    """Enqueue the sync Cloud Task for one calendar, to run right away.
+    Reuses the reminder queue/OIDC plumbing (no new env vars). False when
+    reminders aren't configured here; an existing task for this hour is fine."""
+    global _client
+    queue = os.environ.get("REMINDER_QUEUE", "")
+    url = os.environ.get("NOTIFY_AUDIENCE", "").rstrip("/")
+    caller = os.environ.get("NOTIFY_CALLER", "")
+    if not (queue and url and caller):
+        return False
+    now_utc = now_utc or datetime.datetime.now(_UTC)
+    from google.api_core import exceptions
+    from google.cloud import tasks_v2
+    if _client is None:
+        _client = tasks_v2.CloudTasksClient()
+    task = tasks_v2.Task(
+        name=_sync_task_name(queue, calendar_id, now_utc),
+        http_request=tasks_v2.HttpRequest(
+            url=url + SYNC_CALENDAR_PATH + f"/{calendar_id}", http_method=tasks_v2.HttpMethod.POST,
+            headers={"Content-Type": "application/json"},
+            body=json.dumps({"calendar_id": calendar_id, "user": tenant.current(),
+                             "client_session_id": client_session_id}).encode(),
+            oidc_token=tasks_v2.OidcToken(service_account_email=caller, audience=url)))
+    with contextlib.suppress(exceptions.AlreadyExists):
+        _client.create_task(request={"parent": queue, "task": task}, timeout=5)
+    return True
+
+
+def enqueue_calendar_sync(calendar_id: str, last_synced_at: datetime.datetime | None,
+                          now_utc: datetime.datetime, threshold: datetime.timedelta = CALENDAR_STALE_AFTER,
+                          client_session_id: str | None = None,
+                          create: Callable[[str, str | None], bool] | None = None) -> bool:
+    """The one staleness check every trigger (list load, manual button, digest) shares.
+    True when a sync was enqueued (or would have been, for the manual button which
+    always calls this with last_synced_at forced stale)."""
+    stale = last_synced_at is None or now_utc - last_synced_at >= threshold
+    if not stale:
+        return False
+    try:
+        return (create or create_calendar_sync_task)(calendar_id, client_session_id)
+    except Exception:
+        log.exception("calendar sync not enqueued for %s", calendar_id)
+        return False

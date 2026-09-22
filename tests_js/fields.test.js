@@ -70,6 +70,18 @@ test("sameIds and changedFields compare id lists order-insensitively", () => {
     { color: null, blocked_by: ["b", "c"] });
 });
 
+test("changedFields includes calendar_url when it changes", () => {
+  const todo = { calendar_url: "https://old.example/f.ics" };
+  const next = { calendar_url: "https://new.example/f.ics" };
+  assert.deepStrictEqual(Fields.changedFields(todo, next), { calendar_url: "https://new.example/f.ics" });
+});
+
+test("changedFields omits calendar_url when unchanged", () => {
+  const todo = { calendar_url: "https://same.example/f.ics" };
+  const next = { calendar_url: "https://same.example/f.ics" };
+  assert.deepStrictEqual(Fields.changedFields(todo, next), {});
+});
+
 test("relativeIds returns a todo's ancestors and descendants, not siblings", () => {
   const m = byId(t("p", { child_ids: ["k", "s"] }), t("k", { parent_id: "p", child_ids: ["g"] }),
     t("s", { parent_id: "p" }), t("g", { parent_id: "k" }), t("x"));

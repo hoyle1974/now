@@ -112,6 +112,7 @@
     if (!sameLinks(todo.links, next.links)) out.links = next.links;
     if (!sameIds(todo.blocked_by, next.blocked_by)) out.blocked_by = next.blocked_by;
     if (!sameIds(todo.references, next.references)) out.references = next.references;
+    if ((todo.calendar_url ?? null) !== (next.calendar_url ?? null)) out.calendar_url = next.calendar_url ?? null;
     return out;
   }
 

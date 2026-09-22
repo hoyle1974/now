@@ -160,6 +160,33 @@ test("a failed refresh keeps the stale flag so the next trigger retries", async 
 });
 
 
+test("attempt() passes fetchRev's triggered_by through to refresh", async () => {
+  const calls = [];
+  let stale = false;
+  let knownRev = 0;
+  const engine = {
+    pending: () => 0,
+    isStale: () => stale,
+    knownRev: () => knownRev,
+    noteRemoteRev: (rev) => { if (rev > knownRev) stale = true; },
+  };
+  const f = Freshness.create({
+    engine,
+    fetchRev: async () => ({ rev: 1, version: null, triggered_by: "session-abc" }),
+    refresh: async (triggeredBy) => { calls.push(triggeredBy); knownRev = 1; stale = false; },
+    editorOpen: () => false,
+    now: () => 1_000_000,
+    minGapMs: 30000,
+    isActive: () => true,
+    onPhase: () => {},
+    onLog: () => {},
+    timers: { setTimeout: () => 0, clearTimeout: () => {} },
+  });
+  await f.check({ force: true });
+  assert.deepStrictEqual(calls, ["session-abc"]);
+});
+
+
 // ---- returning after being away / failed checks ---------------------------
 
 test("a window that was away 5s+ checks even inside the debounce window", async () => {

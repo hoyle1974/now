@@ -15,6 +15,23 @@ from app.routes.common import affected_refs, apply, reply, saved
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+def _check_accepts_children(parent_id) -> None:
+    if parent_id is None:
+        return
+    parent = db.get_todo(models.TodoId(parent_id) if not isinstance(parent_id, models.TodoId) else parent_id)
+    if parent is not None and not types.can(parent, "allowsUserChildren"):
+        raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
+
+def _check_editable(todo: models.Todo, view_only: bool) -> None:
+    """Content edits and deletes are blocked for a type marked read-only in the
+    registry (editable: false — e.g. calendar_event, server-managed by sync).
+    Collapse (view_only) is exempt: it's UI state, not content, and must stay
+    foldable even on a read-only row."""
+    if view_only:
+        return
+    if not types.can(todo, "editable"):
+        raise HTTPException(400, f"{types.caps(todo.type)['label']} is not editable")
+
 @router.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
@@ -30,14 +47,27 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
     return saved(db.run_atomic(x_txn_id, create), background)
 
 @router.get("/todos/root", response_model=list[models.Todo])
-def list_todos() -> list[models.Todo]:
-    return db.get_root_todos()
+def list_todos(background: BackgroundTasks) -> list[models.Todo]:
+    todos = db.get_root_todos()
+    _nudge_stale_calendars(todos, background)
+    return todos
 
 def _housekeeping() -> None:
     try:
         db.maybe_archive_expired()  # housekeeping must never fail a read
     except Exception:
         log.exception("archiving old deleted todos failed")
+
+def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
+    """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
+    Runs as a background task (after the response is sent) so a slow/dead feed URL
+    never adds latency to the read; the Cloud Task enqueue call itself is a fast
+    Cloud Tasks API call, not the ICS fetch."""
+    values = todos.values() if isinstance(todos, dict) else todos
+    now = datetime.datetime.now(datetime.UTC)
+    for t in values:
+        if t.type == "calendar":
+            background.add_task(tasks.enqueue_calendar_sync, str(t.todo_id), t.last_synced_at, now)
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
@@ -64,6 +94,7 @@ def get_tree(background: BackgroundTasks) -> dict:
     # the worst case is one redundant refresh, never a missed change.
     rev = db.get_rev()
     roots, todosById = _load_tree(rev, background)
+    _nudge_stale_calendars(todosById, background)
 
     return {
         "rev": rev,
@@ -133,6 +164,7 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
         if_match = None
 
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, view_only)
         if body.title is not None:
             todo.title = body.title
         if body.done is not None:
@@ -188,6 +220,8 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Move a todo under another parent (or to the top level) at an index."""
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, False)
+        _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
         except db.ReparentError as e:
@@ -203,6 +237,7 @@ def delete_todo(todo_id: uuid.UUID,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # Soft delete - mark as deleted instead of removing
     def action(todo: models.Todo) -> None:
+        _check_editable(todo, False)
         todo.deleted = True
         db.update_todo(todo)
         return None
@@ -228,6 +263,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
     due_date = body.due_date if types.has_field_type(body.type, "due_date") else None
 
     def action(todo: models.Todo) -> dict:
+        _check_accepts_children(todo_id)
         # affected is the parent first, then the new children in description
         # order, so the client can map its temporary child ids to real ones by position.
         parent, affected = db.split_into_children(todo, body.descriptions, due_date, body.type or types.DEFAULT)
@@ -241,6 +277,19 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
                                 {"todo_id": child["todo_id"], "due_date": jsonable_encoder(due_date)})
     return reply(*result)
 
+@router.post("/todos/{todo_id}/sync", response_model=None)
+def sync_now(todo_id: uuid.UUID, background: BackgroundTasks, body: models.SyncNowBody | None = None) -> Response:
+    """Manual 'Sync now': enqueues immediately, ignoring staleness."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    if todo.type != "calendar":
+        raise HTTPException(400, "only a calendar item can be synced")
+    csid = body.client_session_id if body else None
+    background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None,
+                        datetime.datetime.now(datetime.UTC), client_session_id=csid)
+    return Response(status_code=202)
+
 @router.patch("/todos/{todo_id}/move/{direction}", response_model=None)
 def move_todo(todo_id: uuid.UUID, direction: str,
               x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
@@ -249,6 +298,7 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, False)
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except db.MoveError as e:  # only the deliberate refusals; real failures propagate

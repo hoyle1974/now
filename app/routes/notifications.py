@@ -5,11 +5,18 @@ import datetime
 import logging
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from app import auth, db, push, tenant
 
 log = logging.getLogger(__name__)
 router = APIRouter()
+
+
+class SyncCalendarBody(BaseModel):
+    calendar_id: str = Field(min_length=1, max_length=64)
+    user: str | None = Field(None, max_length=320)
+    client_session_id: str | None = Field(None, max_length=64)
 
 @router.post("/push/devices")
 def register_push_device(body: push.DeviceRegistration) -> dict:
@@ -57,3 +64,13 @@ def notify_todo(body: push.HeadsUp) -> dict:
         raise HTTPException(400, "unknown user")
     with tenant.as_user(user):
         return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
+
+@router.post("/internal/sync-calendar/{todo_id}")
+def sync_calendar(todo_id: str, body: SyncCalendarBody) -> dict:
+    """Cloud Tasks delivery for one calendar sync (OIDC-verified in require_user)."""
+    from app import calendar_sync as _cs  # deferred: only this route needs the ICS parser
+    user = (body.user or auth.owner()).lower()
+    if user not in auth.ALLOWED_EMAILS:
+        raise HTTPException(400, "unknown user")
+    with tenant.as_user(user):
+        return _cs.run_calendar_sync(body.calendar_id or todo_id, client_session_id=body.client_session_id)

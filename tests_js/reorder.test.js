@@ -56,6 +56,45 @@ test("unknown ids return null", () => {
   assert.equal(Reorder.planDrop(model(), "a", "zzz", "before"), null);
 });
 
+test("planDrop refuses to drop inside a type that disallows children", () => {
+  const model = {
+    roots: [
+      { todo_id: "a", parent_id: null, child_ids: [], order_idx: 0, type: "todo" },
+      { todo_id: "cal", parent_id: null, child_ids: [], order_idx: 1, type: "calendar" },
+    ],
+    todosById: new Map(),
+  };
+  for (const t of model.roots) model.todosById.set(t.todo_id, t);
+  assert.strictEqual(Reorder.planDrop(model, "a", "cal", "inside"), null);
+});
+
+test("planDrop still allows reordering before/after a no-children type", () => {
+  const model = {
+    roots: [
+      { todo_id: "cal", parent_id: null, child_ids: [], order_idx: 0, type: "calendar" },
+      { todo_id: "a", parent_id: null, child_ids: [], order_idx: 1, type: "todo" },
+    ],
+    todosById: new Map(),
+  };
+  for (const t of model.roots) model.todosById.set(t.todo_id, t);
+  assert.deepStrictEqual(Reorder.planDrop(model, "a", "cal", "before"), { parent_id: null, index: 0 });
+});
+
+test("planDrop refuses to move an uneditable node, in any zone", () => {
+  const model = {
+    roots: [
+      { todo_id: "cal", parent_id: null, child_ids: ["ev"], order_idx: 0, type: "calendar" },
+      { todo_id: "ev", parent_id: "cal", child_ids: [], order_idx: 0, type: "calendar_event" },
+      { todo_id: "a", parent_id: null, child_ids: [], order_idx: 1, type: "todo" },
+    ],
+    todosById: new Map(),
+  };
+  for (const t of model.roots) model.todosById.set(t.todo_id, t);
+  assert.strictEqual(Reorder.planDrop(model, "ev", "a", "inside"), null);
+  assert.strictEqual(Reorder.planDrop(model, "ev", "a", "before"), null);
+  assert.strictEqual(Reorder.planDrop(model, "ev", "a", "after"), null);
+});
+
 test("zoneFor splits a row into before / inside / after", () => {
   const rect = { top: 100, height: 50 };
   assert.equal(Reorder.zoneFor(rect, 105), "before");

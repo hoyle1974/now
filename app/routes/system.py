@@ -30,5 +30,9 @@ APP_VERSION = _read_app_version()
 @router.get("/todos/rev")
 def get_rev() -> dict:
     """Cheap change check: one document read. Compare rev with the last seen
-    value; a different version means the page is running old code and must reload."""
-    return {"rev": db.get_rev(), "version": APP_VERSION}
+    value; a different version means the page is running old code and must
+    reload. triggered_by is the client_session_id of whoever's write last
+    bumped rev, or null — used to suppress the "changes from another device"
+    framing for a client's own manually-triggered calendar sync."""
+    info = db.get_rev_info()
+    return {"rev": info["value"], "version": APP_VERSION, "triggered_by": info["triggered_by"]}

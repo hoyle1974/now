@@ -94,6 +94,11 @@ httpx==0.28.1
     # via firebase-admin
 hyperframe==6.1.0
     # via h2
+icalendar==6.1.1
+    # via
+    #   -r requirements.in
+    #   recurring-ical-events
+    #   x-wr-timezone
 idna==3.20
     # via
     #   anyio
@@ -129,13 +134,24 @@ pydantic-core==2.46.5
     # via pydantic
 pyjwt==2.14.0
     # via firebase-admin
+python-dateutil==2.9.0.post0
+    # via
+    #   icalendar
+    #   recurring-ical-events
 python-multipart==0.0.32
+    # via -r requirements.in
+pytz==2026.3.post1
+    # via x-wr-timezone
+recurring-ical-events==2.2.3
     # via -r requirements.in
 requests==2.34.2
     # via
+    #   -r requirements.in
     #   cachecontrol
     #   google-api-core
     #   google-cloud-storage
+six==1.17.0
+    # via python-dateutil
 starlette==1.6.0
     # via fastapi
 typing-extensions==4.16.0
@@ -151,7 +167,13 @@ typing-inspection==0.4.4
     # via
     #   fastapi
     #   pydantic
+tzdata==2026.4
+    # via
+    #   icalendar
+    #   recurring-ical-events
 urllib3==2.8.0
     # via requests
 uvicorn==0.53.0
     # via -r requirements.in
+x-wr-timezone==0.0.7
+    # via recurring-ical-events

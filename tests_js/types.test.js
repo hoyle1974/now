@@ -64,7 +64,8 @@ test("every type has a label, description, icon and a known default child type",
 
 test("every type keeps the fields the UI promises (images, links, color) so the viewer and Edit sheet offer them", () => {
   // If this fails, a refactor dropped a capability: see docs/okf/features/ui-inventory.md.
-  for (const name of Types.names) {
+  // calendar and calendar_event are excluded: they are read-only/minimal types by design, not a regression.
+  for (const name of Types.names.filter(n => !["calendar", "calendar_event"].includes(n))) {
     for (const field of ["title", "attachments", "links", "color", "references"]) {
       assert.ok(Types.hasField({ type: name }, field), `${name} lost "${field}"`);
     }

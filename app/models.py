@@ -26,7 +26,7 @@ class Repeat(BaseModel):
     every: int = Field(1, ge=1, le=999)
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
 COLORS = get_args(Color)
-ItemType = Literal["todo", "list", "project"]  # keep in step with app/types.json
+ItemType = Literal["todo", "list", "project", "calendar", "calendar_event"]  # keep in step with app/types.json
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
 MAX_LABEL_LEN = 200
@@ -83,6 +83,7 @@ class TodoUpdate(BaseModel):
     repeat: Repeat | None = Field(None)  # explicit null clears the rule
     color: Color | None = Field(None)  # explicit null clears
     type: ItemType | None = Field(None)        # only the label changes; due_date, repeat and done stay
+    calendar_url: str | None = Field(None, max_length=MAX_URL_LEN)  # explicit null clears
     links: list[Link] | None = Field(None)     # replaces the whole list
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
     references: list[TodoId] | None = Field(None)  # replaces the whole list
@@ -104,12 +105,26 @@ class TodoUpdate(BaseModel):
             raise ValueError(f"at most {MAX_REFS} ids")
         return [TodoId(uuid.UUID(i)) for i in out]
 
+    @field_validator("calendar_url")
+    @classmethod
+    def _check_calendar_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        u = urlparse(v)
+        if not v or u.scheme not in ("http", "https") or not u.netloc:
+            raise ValueError("calendar_url must be an http(s) URL")
+        return v
+
 class TodoReparent(BaseModel):
     parent_id: TodoId | None = Field(None)  # null moves to the top level
     index: int | None = Field(None)         # position among the new siblings; null = last
 
 class TodoRepeatRequest(BaseModel):
     today: datetime.date | None = Field(None)  # the client's local date; server date if omitted
+
+class SyncNowBody(BaseModel):
+    client_session_id: str | None = Field(None, max_length=64)
 
 class TodoSplit(BaseModel):
     descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
@@ -140,6 +155,11 @@ class Todo(BaseModel):
     blocked_by: list[TodoId] = Field([])
     references: list[TodoId] = Field([])
     attachments: list[Attachment] = Field([])  # only changed via the attachment endpoints
+    calendar_url: str | None = Field(None)  # calendar type: the source ICS feed URL
+    location: str | None = Field(None)      # calendar_event type: from the source ICS event
+    external_uid: str | None = Field(None)  # calendar_event type: stable id from the source feed, for sync matching
+    last_synced_at: datetime.datetime | None = Field(None)  # calendar type: server-managed
+    last_sync_error: str | None = Field(None)  # calendar type: server-managed
     blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree
 
     @field_serializer("create_date", when_used="json")

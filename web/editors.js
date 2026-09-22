@@ -152,6 +152,7 @@ function renderViewer(todo, counts, trashed = null) {
   fact("Type", Types.get(todo).label);
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
   if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? Due.format(todo.due_date) : "No due date");
+  if (Types.hasField(todo, "location") && todo.location) fact("Location", todo.location);
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
   if (!trashed && Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");
@@ -161,16 +162,39 @@ function renderViewer(todo, counts, trashed = null) {
     if (trashed.deleted_with) fact("Deleted with", trashed.deleted_with);
   }
   body.appendChild(facts);
+
+  if (todo.type === "calendar" && !trashed) {
+    const sync = document.createElement("div");
+    sync.className = "calendar-sync-status";
+    const status = document.createElement("p");
+    status.className = "sheet-subtitle";
+    status.textContent = todo.last_sync_error
+      ? `Last sync failed: ${todo.last_sync_error}`
+      : todo.last_synced_at
+        // Server instant (naive UTC), like trashed.trashed_at above — not a due_date's
+        // bare wall-clock string, so Due.format is the wrong tool here.
+        ? `Last synced ${new Date(todo.last_synced_at).toLocaleString(undefined,
+            { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+        : "Not yet synced";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-plain";
+    btn.textContent = "Sync now";
+    btn.addEventListener("click", () => syncCalendarNow(todo.todo_id));
+    sync.append(status, btn);
+    body.appendChild(sync);
+  }
+
   body.appendChild(FieldsUI.renderDetail(todo, { trashed: Boolean(trashed) }));
 
   const buttons = DOM.actionBar(
     DOM.sheetButton("Close", "plain", close),
-    trashed ? DOM.sheetButton("Undelete", "primary", trashed.onRestore)
-      : DOM.sheetButton("Edit", "primary", () => {
-        setActivePanel("edit", todo.todo_id);
-        viewerOrigin = todo.todo_id;
-        renderTree();
-      })
+    ...(trashed ? [DOM.sheetButton("Undelete", "primary", trashed.onRestore)]
+      : Types.can(todo, "editable") ? [DOM.sheetButton("Edit", "primary", () => {
+          setActivePanel("edit", todo.todo_id);
+          viewerOrigin = todo.todo_id;
+          renderTree();
+        })] : [])
   );
 
   const screen = renderSheet(body, buttons);

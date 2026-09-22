@@ -234,3 +234,38 @@ def test_notify_todo_route_and_auth_path(monkeypatch):
     r = c.post("/internal/notify-todo", json={"todo_id": str(t.todo_id), "due": "2026-09-19T15:00:00"})
     assert r.status_code == 200 and "sent" in r.json()
     assert "/internal/notify-todo" in auth._SCHEDULER_PATHS
+
+
+# ---- calendar sync enqueue ----
+
+def test_enqueue_calendar_sync_stale_triggers():
+    calls = []
+    ok = tasks.enqueue_calendar_sync("cal-1", None, at("2026-02-01T00:00:00+00:00"),
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
+    assert ok is True
+    assert calls == ["cal-1"]
+
+
+def test_enqueue_calendar_sync_fresh_skips():
+    calls = []
+    recent = at("2026-02-01T00:00:00+00:00")
+    ok = tasks.enqueue_calendar_sync("cal-1", recent, recent + dt.timedelta(hours=1),
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
+    assert ok is False
+    assert calls == []
+
+
+def test_enqueue_calendar_sync_exactly_at_threshold_triggers():
+    base = at("2026-02-01T00:00:00+00:00")
+    calls = []
+    ok = tasks.enqueue_calendar_sync("cal-1", base, base + tasks.CALENDAR_STALE_AFTER,
+                                     create=lambda cid, csid=None: calls.append(cid) or True)
+    assert ok is True
+
+
+def test_enqueue_calendar_sync_threads_client_session_id():
+    calls = []
+    tasks.enqueue_calendar_sync("cal-1", None, at("2026-02-01T00:00:00+00:00"),
+                                client_session_id="s1",
+                                create=lambda cid, csid: calls.append((cid, csid)) or True)
+    assert calls == [("cal-1", "s1")]
