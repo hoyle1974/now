@@ -22,6 +22,16 @@ def _check_accepts_children(parent_id) -> None:
     if parent is not None and not types.can(parent, "allowsUserChildren"):
         raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
 
+def _check_editable(todo: models.Todo, view_only: bool) -> None:
+    """Content edits and deletes are blocked for a type marked read-only in the
+    registry (editable: false — e.g. calendar_event, server-managed by sync).
+    Collapse (view_only) is exempt: it's UI state, not content, and must stay
+    foldable even on a read-only row."""
+    if view_only:
+        return
+    if not types.can(todo, "editable"):
+        raise HTTPException(400, f"{types.caps(todo.type)['label']} is not editable")
+
 @router.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
@@ -154,6 +164,7 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
         if_match = None
 
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, view_only)
         if body.title is not None:
             todo.title = body.title
         if body.done is not None:
@@ -225,6 +236,7 @@ def delete_todo(todo_id: uuid.UUID,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # Soft delete - mark as deleted instead of removing
     def action(todo: models.Todo) -> None:
+        _check_editable(todo, False)
         todo.deleted = True
         db.update_todo(todo)
         return None

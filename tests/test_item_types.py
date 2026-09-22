@@ -316,3 +316,61 @@ def test_reparent_to_top_level_still_allowed(db_setup):
     resp = client.patch(f"/todos/{child.todo_id}/reparent", json={"parent_id": None},
                         headers={"Authorization": "Bearer test"})
     assert resp.status_code == 200
+
+
+# ---- editable: false enforced server-side (Task 12) --------------------------
+
+def test_patch_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"title": "Hacked"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]
+
+
+def test_patch_type_change_away_from_uneditable_rejected(db_setup):
+    """The specific orphaning exploit Task 11's review found: a raw PATCH changing
+    `type` away from calendar_event must be rejected same as any other field edit,
+    not just the fields a naive guard might have special-cased."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"type": "todo"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+
+def test_delete_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.delete(f"/todos/{event.todo_id}", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+
+def test_patch_still_allowed_on_editable_calendar_item(db_setup):
+    """Sanity: the guard only fires for editable: false, not for `calendar` itself
+    (editable: true — you can still rename it, change its color, edit its URL)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    resp = client.patch(f"/todos/{cal.todo_id}", json={"title": "Renamed"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+
+
+def test_collapsed_only_patch_still_allowed_on_uneditable_type(db_setup):
+    """Collapse is view state (per sync-model.md), not content — it must NOT be
+    blocked by the editable guard, or the client can't fold/unfold a calendar_event
+    row (collapsing view state is harmless even on a read-only item)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"collapsed": True},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
