@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "96";
+const APP_VERSION = "97";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -274,15 +274,27 @@ async function toggleDone(todoId, done) {
   if (done) reactToDoneCount(count, model.todosById.get(todoId));
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { done } });
   if (!done) return; // one-way: un-doing a subtask never reopens its parent
-  // Finishing the last open subtask finishes the parent (and so on upward).
-  const completed = [todoId];
-  for (const parentId of Autodone.ancestorsToComplete(model, todoId)) {
-    celebrate(parentId);
-    engine.enqueue({ kind: "patch", target_id: parentId, payload: { done: true } });
-    completed.push(parentId);
-  }
-  // A repeating todo that just got completed spawns its next occurrence.
-  for (const id of completed) spawnNextOccurrence(id);
+  spawnNextOccurrence(todoId);
+  // Finishing the last open subtask can finish the parent (and so on upward),
+  // but each step asks first, naming the parent, rather than completing it
+  // silently. Declining stops the chain; a later child change asks again.
+  confirmAncestors(Autodone.ancestorsToComplete(model, todoId));
+}
+
+function confirmAncestors(ancestorIds) {
+  if (!ancestorIds.length) return;
+  const [parentId, ...rest] = ancestorIds;
+  const parent = model.todosById.get(parentId);
+  if (!parent) return;
+  ConfirmDialog.open({
+    message: `Mark "${parent.title}" complete?`,
+    onConfirm: () => {
+      celebrate(parentId);
+      engine.enqueue({ kind: "patch", target_id: parentId, payload: { done: true } });
+      spawnNextOccurrence(parentId);
+      confirmAncestors(rest); // completing this one may make the next ancestor eligible too
+    },
+  });
 }
 
 // Once per todo: the server ignores a second request and the local model
