@@ -2,11 +2,15 @@ import datetime as dt
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
-from app import calendar_sync, db, models, tenant
+from app import auth, calendar_sync, db, models, tenant
+from app.main import app
 from tests.helpers import TEST_USER, act_as, wipe_users
 
 FIXTURES = Path(__file__).parent / "fixtures" / "calendar"
+
+client = TestClient(app)
 
 
 @pytest.fixture
@@ -157,3 +161,16 @@ def test_mark_calendar_synced(db_setup):
     db.mark_calendar_synced(str(cal.todo_id), error=None)
     refreshed = db.get_todo(cal.todo_id)
     assert refreshed.last_sync_error is None
+
+
+def test_internal_sync_calendar_requires_scheduler_auth(db_setup):
+    # db_setup's act_as() overrides auth.require_user app-wide for TestClient convenience
+    # (every other test in this module wants that); pop it here so this one call exercises
+    # the real require_user -> verify_scheduler gate instead of the no-op override.
+    saved = app.dependency_overrides.pop(auth.require_user, None)
+    try:
+        resp = client.post("/internal/sync-calendar/does-not-matter", json={"calendar_id": "x", "user": TEST_USER})
+    finally:
+        if saved is not None:
+            app.dependency_overrides[auth.require_user] = saved
+    assert resp.status_code in (401, 403)

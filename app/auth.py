@@ -63,6 +63,7 @@ def calendar_feed_path(user: str) -> str | None:
 # so the deployed env vars (and tests) decide; either unset turns the route off.
 # Callers: Scheduler (daily digest), Cloud Tasks (heads-ups), Pub/Sub (budget alerts).
 _SCHEDULER_PATHS = {"/internal/notify", "/internal/notify-todo", "/internal/budget-alert"}
+_SCHEDULER_PATH_PREFIXES = ("/internal/sync-calendar/",)
 
 
 def _verify_oidc(token: str, audience: str) -> dict:
@@ -88,7 +89,7 @@ def verify_scheduler(request: Request) -> None:
 def require_user(request: Request) -> None:
     if request.url.path in _PUBLIC_PATHS:
         return
-    if request.url.path in _SCHEDULER_PATHS:
+    if request.url.path in _SCHEDULER_PATHS or request.url.path.startswith(_SCHEDULER_PATH_PREFIXES):
         verify_scheduler(request)  # no user: the handlers bind one with tenant.as_user
         return
     if _calendar_token_ok(request):

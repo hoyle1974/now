@@ -94,3 +94,8 @@ def diff_events(desired: list[ParsedEvent], existing: dict[str, models.Todo],
     ]
     to_delete = [str(t.todo_id) for uid, t in existing.items() if uid not in desired_by_uid]
     return to_create, to_update, to_delete
+
+
+def run_calendar_sync(calendar_id: str) -> dict:
+    """Stub; Task 6 fetches the feed and calls db.apply_calendar_sync."""
+    return {"synced": False}
