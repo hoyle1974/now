@@ -754,6 +754,69 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
     return todo, affected
 
 
+def get_calendar_event_children(calendar_id: str) -> dict[str, models.Todo]:
+    """Live calendar_event children of a calendar item, keyed by external_uid
+    (children with no external_uid, which should not happen, are skipped)."""
+    docs = _child_docs(calendar_id)
+    out = {}
+    for d in docs:
+        if d.get("type") != "calendar_event" or not d.get("external_uid"):
+            continue
+        out[d["external_uid"]] = db_firestore_helpers.doc_to_todo(d)
+    return out
+
+
+def apply_calendar_sync(calendar_id: str, events) -> dict:
+    """Reconcile a calendar's children to exactly `events` (calendar_sync.ParsedEvent list),
+    matched by external_uid. Each create/update/delete is a normal todo write, so /todos/rev
+    bumps and the existing freshness/remote-diff client machinery picks it up.
+
+    Wrapped in one run_atomic so the whole diff (and its rev bump) commits atomically; this
+    runs from a background Cloud Task handler with no client watching for a version conflict,
+    but only this job ever writes a given calendar's calendar_event children, so there's no
+    concurrent user write to race."""
+    from app import calendar_sync
+
+    def action() -> tuple[int, dict | None]:
+        # All reads (existing children, matched via the diff) happen before any write below:
+        # Firestore transactions forbid a read after a write, and existing already holds the
+        # full Todo for every to_update/to_delete id, so no extra per-id _get is needed.
+        existing = get_calendar_event_children(calendar_id)
+        by_todo_id = {str(todo.todo_id): todo for todo in existing.values()}
+        to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
+
+        for event in to_create:
+            child = models.Todo(title=event.title, type="calendar_event",
+                                parent_id=models.TodoId(uuid.UUID(calendar_id)),
+                                due_date=event.due_date, external_uid=event.external_uid,
+                                location=event.location)
+            create_todo(child)
+
+        for todo_id, event in to_update:
+            todo = by_todo_id[todo_id]
+            todo.title, todo.due_date, todo.location = event.title, event.due_date, event.location
+            update_todo(todo)
+
+        for todo_id in to_delete:
+            todo = by_todo_id[todo_id]
+            todo.deleted = True
+            update_todo(todo)
+
+        return 200, {"created": len(to_create), "updated": len(to_update), "deleted": len(to_delete)}
+
+    _, body, _, _ = run_atomic(None, action)
+    return body
+
+
+def mark_calendar_synced(calendar_id: str, error: str | None) -> None:
+    """Server-managed sync bookkeeping: skips If-Match/version bump (like `collapsed`),
+    since this isn't user content and must never conflict with a concurrent user edit."""
+    _update(_todos().document(calendar_id), {
+        "last_synced_at": _now_utc().replace(tzinfo=None).isoformat(),
+        "last_sync_error": error,
+    })
+
+
 def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
     """Raw docs (deleted or not) for the given ids; None where the id doesn't exist."""
     return {i: (lambda s: s.to_dict() if s.exists else None)(_get(_todos().document(i)))
