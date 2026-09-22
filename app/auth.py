@@ -25,8 +25,14 @@ ALLOWED_EMAILS = _parse_emails(os.environ.get("ALLOWED_EMAILS") or os.environ.ge
 
 
 def owner() -> str:
-    """The first allowed email. The widget token, calendar feed and budget alerts are theirs."""
-    return ALLOWED_EMAILS[0] if ALLOWED_EMAILS else ""
+    """The first allowed email. The widget token, calendar feed and budget alerts are theirs.
+
+    Raises if ALLOWED_EMAILS is empty: check_config() stops the server before this can happen
+    in production, so a caller reaching here with nothing configured is a bug, not a user
+    input, and should fail loudly rather than bind requests to an empty-string "owner"."""
+    if not ALLOWED_EMAILS:
+        raise RuntimeError("owner() called with no ALLOWED_EMAILS configured")
+    return ALLOWED_EMAILS[0]
 
 
 def check_config() -> None:

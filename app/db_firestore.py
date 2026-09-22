@@ -24,7 +24,12 @@ log = logging.getLogger(__name__)
 
 
 class _State:
-    """Per-process Firestore state. init() fills it, teardown() clears it."""
+    """Per-process Firestore state. init() fills it, teardown() clears it.
+
+    Deliberately unlocked: FastAPI's threadpool can touch these dicts from several
+    requests (even several users) at once, but the GIL makes a single dict assignment
+    atomic, and a lost race only costs one redundant reload/sweep, never wrong data.
+    A lock here would serialize unrelated users' reads for no correctness benefit."""
     def __init__(self) -> None:
         self.client: Any = None
         # user email -> (rev, roots, todosById) of that user's last full tree read. A tree

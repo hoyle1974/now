@@ -568,6 +568,9 @@
     }
 
     function tryCoalesce(op) {
+      // Only the *most recent* op on this target is a coalesce candidate: ops on one
+      // target must apply in queue order, so merging past an earlier, non-coalescable
+      // op (e.g. a delete) would reorder its effect relative to what's in between.
       for (let i = ops.length - 1; i >= 0; i--) {
         const prev = ops[i];
         if (prev.target_id !== op.target_id) continue;
