@@ -49,6 +49,7 @@
     // Set when the server reports different code than this page is running;
     // kept across a held (editor open) attempt so poke() can finish the reload.
     let newVersion = null;
+    let triggeredBy = null;
 
     function clearRetry() {
       if (retryTimer !== null) {
@@ -97,6 +98,7 @@
             if (res !== null && typeof res === "object") {
               rev = res.rev;
               version = res.version ?? null;
+              triggeredBy = res.triggered_by ?? null;
             } else {
               rev = res;
             }
@@ -153,8 +155,10 @@
         onPhase("refreshing");
         onLog("refresh", "start");
         const refreshStart = now();
+        const forThisRefresh = triggeredBy;
+        triggeredBy = null;
         try {
-          await refresh();
+          await refresh(forThisRefresh);
           onLog("refresh", `ok (${now() - refreshStart}ms)`);
           onPhase("idle");
         } catch (e) {
