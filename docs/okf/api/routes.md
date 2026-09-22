@@ -4,7 +4,7 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-22T00:00:00Z
+timestamp: 2026-09-22T21:00:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -35,4 +35,4 @@ Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` an
 
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
 
-`PATCH /todos/{id}` also accepts `type` (`todo`/`list`/`project`, else 422); it changes only the type ([item types](../features/item-types.md)).
+`PATCH /todos/{id}` also accepts `type` (any registry type — `todo`/`list`/`project`/`calendar`/`calendar_event`, else 422); it changes only the type ([item types](../features/item-types.md)).

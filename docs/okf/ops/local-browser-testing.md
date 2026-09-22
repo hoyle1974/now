@@ -3,7 +3,7 @@ type: Runbook
 title: Local server and Chrome testing
 description: How to run the app locally against the Firestore emulator and drive it in Chrome, signed in as one or two test users.
 tags: [tests, local, chrome, multi-user]
-timestamp: 2026-09-22T00:15:00Z
+timestamp: 2026-09-22T21:00:00Z
 ---
 Unit tests do not cover `web/app.js` and the other top-level UI scripts, so any UI change needs a look in a real browser before it ships. A refactor once deleted the engine setup from `app.js`; every test still passed and only the browser showed a blank app. Do this before deploying UI changes. Never point it at production: it uses the emulator and a copy of `web/`.
 
@@ -76,6 +76,14 @@ Open `http://localhost:8082/` (owner) in one Chrome profile/window and `http://l
 6. Close the tab when done.
 
 **Pre-deploy UI checklist.** For any UI change, walk [the UI feature inventory](../features/ui-inventory.md) for everything the change could touch, at minimum: create an item from the composer; open a row's viewer (Images section present); open Edit from the `...` menu and from the viewer (Images section present, type, dates, color, links); change type and Undo; delete and Undo; open Trash and a trashed item; search for a trashed item. A feature that was on the list before and is not reachable now is a regression even if every test passes.
+
+**Calendar checklist** (any change touching [calendar sync](../features/calendar-sync.md) or [item types](../features/item-types.md)' `allowsUserChildren`/`editable` flags):
+- Create an item, set its type to **Calendar** (Type panel or the composer/new-item type picker), then Edit it and set `calendar_url` to a real, reachable `.ics` URL (a public Google Calendar secret address works). Save.
+- Open the calendar item's row menu `...`: confirm **Add item** and **Add several** are both absent (a `calendar` has `allowsUserChildren: false`); confirm dragging another row onto it does not offer it as a drop target.
+- Open the calendar item's **viewer**: confirm a last-synced status line (or a sync error) and a **Sync now** button are present. Tap **Sync now**; it should not block or show a spinner (the request is fire-and-forget). Reload the tree (pull to refresh, or a fresh `GET /todos/tree`) after a few seconds and confirm `calendar_event` children now appear under the calendar (may need the emulator's Cloud Tasks path stubbed/dispatched — if Cloud Tasks isn't wired up locally, confirm at least that the button POSTs `/todos/{id}/sync` with `read_network_requests` and returns 202, since the async sync itself needs a real queue).
+- Open a synced `calendar_event` row (once present): confirm **no checkbox**, tapping the row opens a **read-only viewer** with no Edit button, and its row menu `...` has **no** Edit, Type, Move up/down or Delete entries — only Copy with subtasks. Confirm it cannot be dragged to reorder.
+- Confirm a `calendar_event` with a due date shows up in **Next up** like an ordinary todo (`appearsInNextUp: true`), and if push/digest is testable locally, that it would be included in the digest (`notifies: true`) — code-review-only is acceptable here if the local emulator has no push devices registered.
+- This checklist has not been run against a real browser as part of Task 11 of the calendar-type plan (documentation-only pass, no browser tool available in that environment) — run it before deploying the calendar feature.
 
 **Multi-user isolation checklist** (any change touching auth, tenant partitioning, push, or the calendar/budget owner-only paths — [multi-user runbook](multi-user.md)): using the two-port setup above,
 - as the owner (8082): the full checklist above passes (add/edit/complete/reorder/trash/undelete/search, More panel incl. calendar link, attachments);
