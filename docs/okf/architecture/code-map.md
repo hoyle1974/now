@@ -15,7 +15,7 @@ timestamp: 2026-09-21T23:30:00Z
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).
 - `tasks.py` — Cloud Tasks heads-up scheduling (`fire_time`, `schedule_heads_up`); `push.py` — digest planner, heads-up handler and FCM sender ([push reminders](../features/push-reminders.md)).
 - `ics.py` — iCalendar rendering ([calendar feed](../features/calendar-feed.md)).
-- `auth.py` — Firebase token, widget token, Scheduler OIDC.
+- `auth.py` — Firebase token, widget token, Scheduler OIDC, `ALLOWED_EMAILS`/`owner()` (multi-email allowlist; the first entry is the owner).
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).
 
 **Client (`web/`)** — vanilla JS, no build step. `index.html` loads the scripts as classic scripts sharing one global scope, with `?v=` cache-busting ([sync model](../features/sync-model.md)).

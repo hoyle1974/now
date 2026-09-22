@@ -15,6 +15,12 @@ args=(--source . --project "$PROJECT" --region "$REGION" --cpu-throttling)
 # Set these only when exporting them, e.g. ALLOWED_EMAILS='me@example.com;kid@example.com' ./deploy.sh
 ALLOWED_EMAILS="${ALLOWED_EMAILS:-${ALLOWED_EMAIL:-$(_cfg .now.env ALLOWED_EMAILS)}}"
 ALLOWED_EMAILS="${ALLOWED_EMAILS:-$(_cfg .now.env ALLOWED_EMAIL)}"
+if [[ "${ALLOWED_EMAILS:-}" == *,* ]]; then
+  echo "error: ALLOWED_EMAILS must not contain a comma - gcloud's --update-env-vars splits" >&2
+  echo "on commas, so a comma-separated list would corrupt the env vars. Use ';' to separate" >&2
+  echo "multiple emails, e.g. ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh" >&2
+  exit 1
+fi
 env_vars=""
 [ -n "${ALLOWED_EMAILS:-}" ] && env_vars+="ALLOWED_EMAILS=${ALLOWED_EMAILS},"
 [ -n "${ATTACHMENTS_BUCKET:-}" ] && env_vars+="ATTACHMENTS_BUCKET=${ATTACHMENTS_BUCKET},"

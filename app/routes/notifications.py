@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 
 from app import auth, db, push, tenant
 
+log = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.post("/push/devices")
@@ -34,7 +35,7 @@ def notify() -> dict:
             with tenant.as_user(email):
                 out = push.run_notify(now, send=push.send_fcm)
         except Exception:
-            logging.exception("digest failed for one user; the others still get theirs")
+            log.exception("digest failed for %s; the others still get theirs", email)
             continue
         for key in total:
             total[key] += out.get(key, 0)

@@ -19,6 +19,9 @@ is shared across users.
 - `meta/archive` — `last_success` (set only after a sweep succeeds) and `lease_until` (15-minute lease taken in a transaction), so one instance sweeps per day per user and a failed run is retried.
 - `meta/rev` — bumped by every data-changing transaction for that user; `get_tree` caches its result per user while rev is unchanged.
 - `push_devices` — one doc per installed device: `token`, `tz`, `platform`, `updated_at` ([push reminders](../features/push-reminders.md)).
-- `push_sent` — sent-markers with `todo_ids` and `expires_at` (Firestore TTL, 3 days).
+- `push_sent` — sent-markers with `todo_ids` and `expires_at` (Firestore TTL, 3 days). The
+  TTL policy survives the `users/{email}/...` nesting because it is set with
+  `--collection-group=push_sent` (`scripts/setup-push.sh`), which matches `push_sent` at any
+  path depth, not just at the top level.
 
 Index: `todos` composite `done, deleted, due_date` (`firestore.indexes.json`) for the reminders' due-window query. A per-collection-ID index applies to every `todos` subcollection regardless of path, so no change was needed for the `users/{email}/todos` nesting.

@@ -119,4 +119,7 @@ async def bind_user(request: Request) -> None:
     so the ContextVar it sets is copied into the worker thread that runs a sync route."""
     email = getattr(request.state, "user", None)
     if email:
+        # No paired tenant.reset(): each request runs in its own asyncio Task with a
+        # copied context (and run_in_threadpool copies that context into worker threads
+        # too), so this binding never leaks into another request.
         tenant.set_user(email)
