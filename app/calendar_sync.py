@@ -6,6 +6,7 @@ from __future__ import annotations
 import datetime
 import uuid
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo
 
 from app import db, models
 
@@ -22,10 +23,18 @@ class ParsedEvent:
     location: str | None
 
 
-def parse_ics(raw: str, window_start: datetime.date, window_end: datetime.date) -> list[ParsedEvent]:
-    """Every occurrence (recurring events expanded) starting in [window_start, window_end)."""
+def parse_ics(raw: str, window_start: datetime.date, window_end: datetime.date,
+              tz: ZoneInfo | None = None) -> list[ParsedEvent]:
+    """Every occurrence (recurring events expanded) starting in [window_start, window_end).
+    `due_date` is a floating wall-clock time everywhere in this app (see due-time.md and
+    app/ics.py's outbound feed), never a UTC instant. A timezone-aware DTSTART is therefore
+    converted to `tz`'s (the home timezone's, per app/push.py) wall-clock time, not UTC —
+    `tz` defaults to UTC so a floating-time fixture/caller is unaffected (floating times have
+    no tzinfo and never go through this conversion at all)."""
     import icalendar
     import recurring_ical_events
+
+    tz = tz or ZoneInfo("UTC")
 
     try:
         cal = icalendar.Calendar.from_ical(raw)
@@ -59,7 +68,7 @@ def parse_ics(raw: str, window_start: datetime.date, window_end: datetime.date) 
         all_day = not isinstance(start, datetime.datetime)
         due = (datetime.datetime.combine(start, datetime.time(0, 0)) if all_day
                else start.replace(tzinfo=None) if start.tzinfo is None
-               else start.astimezone(datetime.UTC).replace(tzinfo=None))
+               else start.astimezone(tz).replace(tzinfo=None))
         base_uid = str(occ.get("UID", ""))
         if not base_uid:
             continue  # an event with no UID can never be matched on the next sync; skip it
@@ -120,9 +129,11 @@ def run_calendar_sync(calendar_id: str, fetch=None, client_session_id: str | Non
 
     today = models.utc_now().date()
     window_end = today + datetime.timedelta(days=WINDOW_DAYS)
+    from app import push, tasks
+    zone = push._zone(tasks.home_tz(db.list_push_devices()) or "UTC")
     try:
         raw = fetch(cal.calendar_url)
-        events = parse_ics(raw, today, window_end)
+        events = parse_ics(raw, today, window_end, zone)
     except Exception as e:
         db.mark_calendar_synced(calendar_id, error=str(e))
         return {"synced": False, "error": str(e)}

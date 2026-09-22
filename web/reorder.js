@@ -41,6 +41,7 @@
     const node = model.todosById.get(draggedId);
     const target = model.todosById.get(targetId);
     if (!node || !target || draggedId === targetId) return null;
+    if (!Types.can(node, "editable")) return null;
     if (inSubtree(model, draggedId, targetId)) return null;
 
     if (zone === "inside") {

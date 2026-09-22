@@ -220,6 +220,7 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Move a todo under another parent (or to the top level) at an index."""
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, False)
         _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
@@ -297,6 +298,7 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
     def action(todo: models.Todo) -> dict:
+        _check_editable(todo, False)
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except db.MoveError as e:  # only the deliberate refusals; real failures propagate

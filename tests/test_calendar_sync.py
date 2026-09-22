@@ -78,6 +78,25 @@ def test_parse_bad_input_raises():
         calendar_sync.parse_ics("not an ics file", dt.date(2026, 1, 1), dt.date(2026, 3, 1))
 
 
+def test_parse_tzaware_dtstart_converts_to_home_tz_wall_clock():
+    """A tz-aware DTSTART (here TZID=America/Chicago 15:00) must become the HOME
+    timezone's wall-clock time (a floating time, like everywhere else in the app —
+    see due-time.md), not a UTC instant. Converting to a different home tz
+    (America/Los_Angeles, 2h behind Chicago in February) must shift the wall-clock
+    hour, proving this isn't just leaving it unconverted (C4)."""
+    from zoneinfo import ZoneInfo
+    events = calendar_sync.parse_ics(read("tzid.ics"), dt.date(2026, 1, 1), dt.date(2026, 3, 1),
+                                     tz=ZoneInfo("America/Los_Angeles"))
+    assert events[0].due_date == dt.datetime(2026, 2, 1, 13, 0, 0)
+
+
+def test_parse_tzaware_dtstart_without_tz_arg_defaults_to_utc():
+    """No `tz` given (existing callers/tests): a tz-aware DTSTART falls back to the
+    previous UTC behaviour rather than erroring."""
+    events = calendar_sync.parse_ics(read("tzid.ics"), dt.date(2026, 1, 1), dt.date(2026, 3, 1))
+    assert events[0].due_date == dt.datetime(2026, 2, 1, 21, 0, 0)
+
+
 def _todo(uid, title, due, location=None):
     return models.Todo(title=title, type="calendar_event", external_uid=uid,
                        due_date=due, location=location)
