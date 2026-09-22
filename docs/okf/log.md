@@ -105,3 +105,4 @@ timestamp: 2026-09-19T12:00:00Z
 - 2026-09-21: Mascot tilt gaze is relative to the pose at pop-up (app v92; a tap now keeps him up 2.4s instead of 0.9s so he visibly looks at the finger): before, an upright phone read as a constant downward gaze and hid the tilt. Gain raised (30 degrees = pupil at the edge).
 - 2026-09-21: Mascot (app v93): for 2.4s after a tap on him, stray pointer/touch events no longer dismiss him; every hide writes a 'mascot hid: <reason>' line to the event log so a 'tap hides him' report can be diagnosed from the More panel.
 - 2026-09-21: Mascot (app v94): a tap or click anywhere on screen while he is up no longer sends him home; his eyes follow it and he leaves on his timer. Typing and scrolling still dismiss him.
+- 2026-09-21: Mascot (app v96): his speech bubble is attached to him: it slides up and down with the same spring as his body (behind the bar, clipped) instead of fading on its own timer. Cosmetic.
