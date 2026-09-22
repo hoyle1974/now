@@ -52,6 +52,10 @@ def test_registry_has_calendar_types_and_new_flags():
     assert types.can_type("calendar_event", "appearsInNextUp") is True
     assert types.can_type("calendar_event", "notifies") is True
     assert types.can_type("calendar", "appearsInNextUp") is False
+    # No attachments (images) on calendar items: the user doesn't need to add
+    # images to a calendar feed.
+    assert types.caps("calendar")["fields"] == ["title", "calendar_url", "color", "links", "references"]
+    assert not types.has_field_type("calendar", "attachments")
 
 
 def test_unknown_or_missing_type_falls_back_to_todo():
@@ -374,3 +378,29 @@ def test_collapsed_only_patch_still_allowed_on_uneditable_type(db_setup):
     resp = client.patch(f"/todos/{event.todo_id}", json={"collapsed": True},
                         headers={"Authorization": "Bearer test"})
     assert resp.status_code == 200
+
+
+def test_reparent_rejected_for_uneditable_item(db_setup):
+    """A calendar_event can't be dragged out of its calendar and orphaned (C3)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    other = models.Todo(title="Other")
+    db.create_todo(other)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}/reparent", json={"parent_id": str(other.todo_id)},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]
+
+
+def test_move_rejected_for_uneditable_item(db_setup):
+    """A calendar_event can't be reordered within its calendar either (C3)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}/move/down",
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]

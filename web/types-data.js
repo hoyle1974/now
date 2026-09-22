@@ -82,8 +82,7 @@
         "calendar_url",
         "color",
         "links",
-        "references",
-        "attachments"
+        "references"
       ],
       "hasCheckbox": false,
       "appearsInNextUp": false,
