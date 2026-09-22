@@ -362,6 +362,18 @@ async function moveTodo(todoId, direction) {
   engine.enqueue({ kind: "move", target_id: todoId, payload: { direction } });
 }
 
+// Kicks off an on-demand sync for a calendar item (POST /todos/{id}/sync, Task 6).
+// Fire-and-forget: the sync itself runs server-side (a Cloud Task); this just
+// enqueues it and lets the user know it started, or that it couldn't.
+async function syncCalendarNow(todoId) {
+  try {
+    await apiFetch(`${API_BASE}/${todoId}/sync`, { method: "POST" });
+    showNotice({ level: "info", message: "Syncing…" });
+  } catch (e) {
+    showNotice({ level: "error", message: "Couldn't start sync: " + e.message });
+  }
+}
+
 // #4: Load the full tree in one request
 async function fetchTree() {
   const response = await apiFetch(`${API_BASE}/tree`);

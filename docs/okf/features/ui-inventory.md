@@ -3,7 +3,7 @@ type: Feature
 title: UI feature inventory
 description: Every user-facing capability and where to reach it; the checklist to run before shipping a UI change.
 tags: [ui, checklist, regression]
-timestamp: 2026-09-22T00:15:00Z
+timestamp: 2026-09-22T02:00:00Z
 ---
 Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this list. When a capability is added or moved, update this file in the same commit; removing one needs the user's explicit yes. Run through it in Chrome ([local browser testing](../ops/local-browser-testing.md)) before deploying UI changes.
 
@@ -13,7 +13,7 @@ Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this l
 
 **A row**
 - Checkbox (todos) / type icon (containers); swipe left to delete; long-press drag to reorder or re-parent; chevron to fold; progress chip, due chip, repeat chip, Blocked chip.
-- Tap the row body → **viewer** (read-only): Type, Status, Due, Repeats, Subtasks n of m, Blocked; links, blocked-by, references (tap to jump); **Images** (add, view full size, remove); buttons Close and Edit.
+- Tap the row body → **viewer** (read-only): Type, Status, Due, Repeats, Subtasks n of m, Blocked; links, blocked-by, references (tap to jump); **Images** (add, view full size, remove); buttons Close and Edit. A `calendar` item's viewer also shows last-synced status (or the sync error) and a **Sync now** button that POSTs `/todos/{id}/sync` ([calendar sync](calendar-sync.md)).
 
 **Row menu `...`**: Add item, Add several, **Edit**, **Type: X** (panel, applies at once, Undo), Copy with subtasks (outline to clipboard), Move up, Move down, Delete (Undo).
 

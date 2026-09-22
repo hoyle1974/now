@@ -162,6 +162,29 @@ function renderViewer(todo, counts, trashed = null) {
     if (trashed.deleted_with) fact("Deleted with", trashed.deleted_with);
   }
   body.appendChild(facts);
+
+  if (todo.type === "calendar" && !trashed) {
+    const sync = document.createElement("div");
+    sync.className = "calendar-sync-status";
+    const status = document.createElement("p");
+    status.className = "sheet-subtitle";
+    status.textContent = todo.last_sync_error
+      ? `Last sync failed: ${todo.last_sync_error}`
+      : todo.last_synced_at
+        // Server instant (naive UTC), like trashed.trashed_at above — not a due_date's
+        // bare wall-clock string, so Due.format is the wrong tool here.
+        ? `Last synced ${new Date(todo.last_synced_at).toLocaleString(undefined,
+            { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+        : "Not yet synced";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-plain";
+    btn.textContent = "Sync now";
+    btn.addEventListener("click", () => syncCalendarNow(todo.todo_id));
+    sync.append(status, btn);
+    body.appendChild(sync);
+  }
+
   body.appendChild(FieldsUI.renderDetail(todo, { trashed: Boolean(trashed) }));
 
   const buttons = DOM.actionBar(
