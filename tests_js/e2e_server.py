@@ -9,7 +9,7 @@ import sys
 
 if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
     sys.exit("refusing to run without FIRESTORE_EMULATOR_HOST (use scripts/e2e.sh)")
-os.environ.setdefault("ALLOWED_EMAIL", "e2e@example.com")
+os.environ.setdefault("ALLOWED_EMAILS", "e2e@example.com")
 
 from app.auth import require_user  # noqa: E402
 from app.main import app  # noqa: E402

@@ -73,7 +73,7 @@ def test_widget_token_non_ascii_header_is_401_not_500(monkeypatch):
 
 
 def test_unset_allowed_email_denies_everyone_and_fails_startup(monkeypatch):
-    monkeypatch.setattr(auth, "ALLOWED_EMAIL", "")
+    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ())
     monkeypatch.setattr(auth.fb_auth, "verify_id_token", lambda t: {"email": "", "email_verified": True})
     monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
     with pytest.raises(HTTPException) as e:

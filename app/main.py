@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, models
-from app.auth import require_user
+from app.auth import bind_user, require_user
 from app.routes import attachments, calendar, notifications, system, todos
 from app.routes.common import check_txn_id
 
@@ -32,7 +32,7 @@ async def lifespan(_app: FastAPI):
     yield
     db.teardown()
 
-app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(check_txn_id)])
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(bind_user), Depends(check_txn_id)])
 
 _UPLOAD_PATH_RE = re.compile(r"^/todos/[^/]+/attachments$")
 

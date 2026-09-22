@@ -1,5 +1,6 @@
-"""Single-user gate: every API request must carry a Firebase ID token for
-ALLOWED_EMAIL. Static files stay public (they hold no data)."""
+"""Family gate: every API request must carry a Firebase ID token for an email in
+ALLOWED_EMAILS (legacy: ALLOWED_EMAIL). The email is the data partition key
+(app/tenant.py). Static files stay public (they hold no data)."""
 from __future__ import annotations
 
 import hmac
@@ -10,14 +11,28 @@ import firebase_admin
 from fastapi import HTTPException, Request
 from firebase_admin import auth as fb_auth
 
-# The one Google account allowed in. No default: an unset value denies everyone
+from app import tenant
+
+
+def _parse_emails(raw: str) -> tuple[str, ...]:
+    """Split on ; , or whitespace ( ';' because gcloud splits env vars on commas), lower-case, de-duplicate."""
+    return tuple(dict.fromkeys(e.strip().lower() for e in re.split(r"[;,\s]+", raw) if e.strip()))
+
+
+# The Google accounts allowed in. No default: an empty list denies everyone
 # (require_user) and stops the server at startup (check_config).
-ALLOWED_EMAIL = os.environ.get("ALLOWED_EMAIL", "").strip().lower()
+ALLOWED_EMAILS = _parse_emails(os.environ.get("ALLOWED_EMAILS") or os.environ.get("ALLOWED_EMAIL", ""))
+
+
+def owner() -> str:
+    """The first allowed email. The widget token, calendar feed and budget alerts are theirs."""
+    return ALLOWED_EMAILS[0] if ALLOWED_EMAILS else ""
+
 
 def check_config() -> None:
-    if not ALLOWED_EMAIL:
-        raise RuntimeError("ALLOWED_EMAIL is not set: export the Google account that may sign in "
-                           "(deploy: ALLOWED_EMAIL=you@example.com ./deploy.sh)")
+    if not ALLOWED_EMAILS:
+        raise RuntimeError("ALLOWED_EMAILS is not set: export the Google accounts that may sign in, "
+                           "first one is the owner (deploy: ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh)")
 
 _PUBLIC_PATHS = {"/health"}
 
@@ -42,9 +57,10 @@ def _calendar_token_ok(request: Request) -> bool:
     return bool(CALENDAR_TOKEN and m and request.method == "GET"
                 and hmac.compare_digest(m.group(1).encode(), CALENDAR_TOKEN.encode()))
 
-def calendar_feed_path() -> str | None:
-    """The secret feed path for the signed-in app to show, or None when the feed is off."""
-    if not CALENDAR_TOKEN or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", CALENDAR_TOKEN):
+def calendar_feed_path(user: str) -> str | None:
+    """The secret feed path for that signed-in user to show, or None when the feed is off
+    or the user is not the owner (the token is the owner's)."""
+    if user != owner() or not CALENDAR_TOKEN or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", CALENDAR_TOKEN):
         return None
     return f"/calendar/{CALENDAR_TOKEN}.ics"
 
@@ -78,9 +94,10 @@ def require_user(request: Request) -> None:
     if request.url.path in _PUBLIC_PATHS:
         return
     if request.url.path in _SCHEDULER_PATHS:
-        verify_scheduler(request)
+        verify_scheduler(request)  # no user: the handlers bind one with tenant.as_user
         return
     if _widget_token_ok(request) or _calendar_token_ok(request):
+        request.state.user = owner()
         return
     header = request.headers.get("authorization", "")
     if not header.lower().startswith("bearer "):
@@ -92,5 +109,14 @@ def require_user(request: Request) -> None:
     except Exception:
         raise HTTPException(401, "Invalid or expired token") from None
     email = (claims.get("email") or "").lower()
-    if not ALLOWED_EMAIL or not claims.get("email_verified") or email != ALLOWED_EMAIL:
+    if not claims.get("email_verified") or email not in ALLOWED_EMAILS:
         raise HTTPException(403, "Not allowed")
+    request.state.user = email
+
+
+async def bind_user(request: Request) -> None:
+    """Runs after require_user. Async on purpose: it executes in the request's own task,
+    so the ContextVar it sets is copied into the worker thread that runs a sync route."""
+    email = getattr(request.state, "user", None)
+    if email:
+        tenant.set_user(email)
