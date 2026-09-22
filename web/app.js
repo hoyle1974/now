@@ -72,10 +72,10 @@ async function apiFetch(path, options = {}) {
     }
     // Only clear a failure apiFetch itself showed; never a sync-engine notice or an Undo.
     toast.hideSource("api");
-    if (response.status === 204) {
-      return null;
-    }
-    return await response.json();
+    // Read as text first: a 202 (e.g. POST /todos/{id}/sync) or any other
+    // empty-body response would otherwise throw on response.json().
+    const text = await response.text();
+    return text ? JSON.parse(text) : null;
   } catch (err) {
     logEvent("fetch-fail", `${path}: ${err.message}`);
     toast.show({ message: "Something went wrong \u2014 " + err.message, level: "error", ttl: 5000, source: "api" });
