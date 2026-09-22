@@ -8,7 +8,8 @@
 #   OLD_SERVICE=now SERVICE=now-app scripts/migrate-service.sh
 #
 # What it does, in order (each step is idempotent):
-#   1. deploy this tree to the new service, copying ALLOWED_EMAIL / ATTACHMENTS_BUCKET
+#   1. deploy this tree to the new service, copying ALLOWED_EMAILS (or legacy
+#      ALLOWED_EMAIL) / ATTACHMENTS_BUCKET
 #   2. bucket grant for the new service's service account  (create-bucket.sh)
 #   3. reminders: FCM role, NOTIFY_* env, Scheduler job re-pointed  (setup-push.sh)
 #   4. widget secret: access + secret reference, if the old service has WIDGET_TOKEN
@@ -42,13 +43,14 @@ gcloud run services describe "$OLD_SERVICE" --project "$PROJECT" --region "$REGI
 gcloud run services describe "$NEW_SERVICE" --project "$PROJECT" --region "$REGION" >/dev/null 2>&1 \
   || echo "note: $NEW_SERVICE does not exist yet; deploy will create it (zilch normally creates it first)"
 
-ALLOWED_EMAIL="$(svc_env_value "$OLD_SERVICE" ALLOWED_EMAIL)"
+ALLOWED_EMAILS="$(svc_env_value "$OLD_SERVICE" ALLOWED_EMAILS)"
+ALLOWED_EMAILS="${ALLOWED_EMAILS:-$(svc_env_value "$OLD_SERVICE" ALLOWED_EMAIL)}"
 BUCKET_VALUE="$(svc_env_value "$OLD_SERVICE" ATTACHMENTS_BUCKET)"
-[ -n "$ALLOWED_EMAIL" ] || { echo "old service has no ALLOWED_EMAIL; set it first" >&2; exit 1; }
+[ -n "$ALLOWED_EMAILS" ] || { echo "old service has no ALLOWED_EMAILS/ALLOWED_EMAIL; set it first" >&2; exit 1; }
 [ -n "$BUCKET_VALUE" ] || echo "note: old service has no ATTACHMENTS_BUCKET; create-bucket.sh will set the default"
 
 say "1/6 Deploy to $NEW_SERVICE"
-ALLOWED_EMAIL="$ALLOWED_EMAIL" ATTACHMENTS_BUCKET="$BUCKET_VALUE" run ./deploy.sh
+ALLOWED_EMAILS="$ALLOWED_EMAILS" ATTACHMENTS_BUCKET="$BUCKET_VALUE" run ./deploy.sh
 
 say "2/6 Attachments bucket access for $NEW_SERVICE's service account"
 BUCKET="${BUCKET_VALUE:-${PROJECT}-attachments}" run scripts/create-bucket.sh

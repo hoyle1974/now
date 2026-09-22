@@ -3,11 +3,11 @@ type: Index
 title: now — knowledge bundle
 description: Curated knowledge about the "now" todo app, in Open Knowledge Format v0.1.
 tags: [okf, index]
-timestamp: 2026-09-21T21:30:00Z
+timestamp: 2026-09-22T00:15:00Z
 ---
 # now
 
-A personal todo app for one user (its owner), used daily: FastAPI + vanilla-JS frontend, Firestore on GCP Cloud Run. No multi-tenancy; others clone and run their own. **It must cost nothing in GCP** ([principles](principles.md)).
+A personal todo app, used daily: FastAPI + vanilla-JS frontend, Firestore on GCP Cloud Run. One deployment can serve a small family (`ALLOWED_EMAILS`, each person's data isolated); still no sharing, roles or invite UI, and reads scale with the number of allowed users. Others clone and run their own deployment. **It must cost nothing in GCP** ([principles](principles.md)).
 This directory is an [Open Knowledge Format](https://cloud.google.com/blog/products/data-analytics/how-the-open-knowledge-format-can-improve-data-sharing)
 bundle: markdown files with YAML frontmatter (`type` is the only required field),
 linked to each other with ordinary markdown links. It is checked in and curated
@@ -27,7 +27,7 @@ like code.
 
 ## Concepts
 
-- Principles: [one user, #1 rule = free in GCP, non-goals](principles.md)
+- Principles: [one deployment per family, #1 rule = free in GCP, non-goals](principles.md)
 - Architecture: [stack](architecture/stack.md), [code map](architecture/code-map.md), [zilch-gcp](architecture/zilch-gcp.md)
 - Data: [Todo](data/todo.md), [Firestore collections](data/firestore.md)
 - API: [routes](api/routes.md)
@@ -39,4 +39,4 @@ like code.
   [event log](features/event-log.md), [push reminders](features/push-reminders.md),
   [calendar feed](features/calendar-feed.md),
   [item types](features/item-types.md), [UI feature inventory](features/ui-inventory.md)
-- Ops: [testing](ops/testing.md), [local server and Chrome testing](ops/local-browser-testing.md), [deploy](ops/deploy.md), [forking and config](ops/forking.md), [roadmap](ops/roadmap.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)
+- Ops: [testing](ops/testing.md), [local server and Chrome testing](ops/local-browser-testing.md), [deploy](ops/deploy.md), [forking and config](ops/forking.md), [multi-user runbook](ops/multi-user.md), [roadmap](ops/roadmap.md), [Lock Screen widget](ops/widget.md), [monitoring and backups](ops/monitoring-backups.md)

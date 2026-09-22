@@ -3,9 +3,9 @@ type: Architecture
 title: Stack
 description: Technologies and how the pieces fit together.
 tags: [architecture]
-timestamp: 2026-09-21T14:00:00Z
+timestamp: 2026-09-22T00:15:00Z
 ---
-Single-user by design, zero GCP cost is the #1 rule ([principles](../principles.md)).
+One deployment shared by a family (each person's data isolated), zero GCP cost is the #1 rule ([principles](../principles.md)).
 
 - **Backend:** FastAPI (`app/main.py`, routes in `app/routes/`), Python 3.13, pydantic models ([Todo](../data/todo.md)).
 - **Database:** Firestore ([collections](../data/firestore.md)). Tests use the emulator ([testing](../ops/testing.md)).
@@ -15,5 +15,5 @@ Single-user by design, zero GCP cost is the #1 rule ([principles](../principles.
   ([sync model](../features/sync-model.md)).
 - **Hosting:** Cloud Run service `now-app` (zilch's `app_name`) in `us-central1`, fronted by Firebase Hosting
   at `now-app.web.app` ([deploy](../ops/deploy.md)).
-- **Auth:** Firebase sign-in token on API calls (`app/auth.py`, `web/auth.js`), accepted only for env `ALLOWED_EMAIL` (required: unset denies everyone and the server refuses to start; set on the Cloud Run service);
-  a read-only widget token exists for one route ([widget](../ops/widget.md)), and a secret-URL token for the [calendar feed](../features/calendar-feed.md).
+- **Auth:** Firebase sign-in token on API calls (`app/auth.py`, `web/auth.js`), accepted only for an email in env `ALLOWED_EMAILS` (`;`-separated list, first is the owner; legacy single-value `ALLOWED_EMAIL` still works; required: an empty list denies everyone and the server refuses to start; set on the Cloud Run service). The signed-in email is the data partition key (`app/tenant.py`, [data model](../data/firestore.md), [multi-user](../ops/multi-user.md)) — there is no sharing between the emails on the list;
+  a read-only widget token exists for one route ([widget](../ops/widget.md)), and a secret-URL token for the [calendar feed](../features/calendar-feed.md) (owner-only, see that page).

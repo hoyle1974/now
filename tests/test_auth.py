@@ -1,4 +1,4 @@
-"""require_user gate: token required, only ALLOWED_EMAIL accepted."""
+"""require_user gate: token required, only an ALLOWED_EMAILS entry accepted."""
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request

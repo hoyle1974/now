@@ -4,7 +4,7 @@ A minimal todo app built with **FastAPI** + a vanilla-JS frontend, backed by **F
 
 Started as a learning project; it is now a real app used every day.
 
-**Single user, by design.** There is one user (the owner); multi-tenancy is a non-goal. To use it yourself, clone it, create your own GCP project, and deploy and manage it there. **The #1 rule: it must cost nothing in GCP at personal-use volume.** See `docs/okf/principles.md`.
+**One deployment, one family, by design.** Each allowed Google account gets its own isolated data; there is still no sharing, no roles, no invite UI. To use it yourself, clone it, create your own GCP project, and deploy and manage it there. **The #1 rule: it must cost nothing in GCP at personal-use volume.** See `docs/okf/principles.md`.
 
 ## Stack
 
@@ -18,7 +18,7 @@ Started as a learning project; it is now a real app used every day.
 python3.13 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements-dev.txt   # requirements.txt alone is the runtime set
-export ALLOWED_EMAIL=you@example.com  # the one Google account that may sign in (required)
+export ALLOWED_EMAILS=you@example.com  # Google accounts that may sign in; first is the owner (required)
 uvicorn app.main:app --reload
 ```
 
@@ -227,15 +227,15 @@ queued offline, and a todo that hasn't synced yet can't take images.
 ## Deploy
 
 ```bash
-ALLOWED_EMAIL=you@example.com ./deploy.sh   # first deploy; later ones keep it
+ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh   # first deploy; later ones keep it
 ```
 
 Project, region and service come from `.zilch.config` (see below) and `.now.env`.
 
 ## Running your own copy
 
-MIT licensed; fork it. It is a single-user app: one Google account (`ALLOWED_EMAIL`)
-owns all the data. Setup is two layers:
+MIT licensed; fork it. Each Google account in `ALLOWED_EMAILS` (first is the owner)
+gets its own isolated data; there is no sharing between them. Setup is two layers:
 
 1. **Infrastructure** with [zilch-gcp](https://github.com/hoyle1974/zilch-gcp) (Cloud Shell
    is easiest): project, Cloud Run, Firestore, Firebase Auth APIs, Scheduler, monitoring.

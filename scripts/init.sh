@@ -11,7 +11,7 @@
 #
 # Prerequisites: gcloud and firebase logged in; a project with billing and a Firestore
 # database (zilch creates both); a Firebase project on it (console: "Add Firebase").
-# Settings come from scripts/lib/config.sh; ALLOWED_EMAIL from the environment,
+# Settings come from scripts/lib/config.sh; ALLOWED_EMAILS from the environment,
 # .now.env, or a prompt. Finish with scripts/doctor.sh.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -34,15 +34,16 @@ run()  { if [ "$DRY" = 1 ]; then printf '   [dry-run] %s\n' "$*"; else "$@"; fi;
 HOSTING_SITE="${HOSTING_SITE:-$(_cfg .now.env HOSTING_SITE)}"
 HOSTING_SITE="${HOSTING_SITE:-$(_cfg .zilch.config app_name)}"
 HOSTING_SITE="${HOSTING_SITE:-$SERVICE}"
-ALLOWED_EMAIL="${ALLOWED_EMAIL:-$(_cfg .now.env ALLOWED_EMAIL)}"
+ALLOWED_EMAILS="${ALLOWED_EMAILS:-${ALLOWED_EMAIL:-$(_cfg .now.env ALLOWED_EMAILS)}}"
+ALLOWED_EMAILS="${ALLOWED_EMAILS:-$(_cfg .now.env ALLOWED_EMAIL)}"
 
 echo "project=$PROJECT region=$REGION service=$SERVICE hosting site=$HOSTING_SITE"
-if [ -z "$ALLOWED_EMAIL" ]; then
-  if [ "$DRY" = 1 ]; then ALLOWED_EMAIL="(you@example.com)"
-  else read -r -p "Google account allowed to sign in: " ALLOWED_EMAIL; fi
+if [ -z "$ALLOWED_EMAILS" ]; then
+  if [ "$DRY" = 1 ]; then ALLOWED_EMAILS="(you@example.com)"
+  else read -r -p "Google accounts allowed to sign in (first is the owner, separate with ;): " ALLOWED_EMAILS; fi
 fi
-[ -n "$ALLOWED_EMAIL" ] || { echo "ALLOWED_EMAIL is required" >&2; exit 1; }
-export ALLOWED_EMAIL
+[ -n "$ALLOWED_EMAILS" ] || { echo "ALLOWED_EMAILS is required" >&2; exit 1; }
+export ALLOWED_EMAILS
 
 if [ "$DRY" = 0 ]; then
   read -r -p "This changes project $PROJECT (Firebase app, Hosting, Cloud Run, bucket). Continue? [y/N] " yn

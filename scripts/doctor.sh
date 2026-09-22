@@ -39,7 +39,7 @@ if [ -z "$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region
 else
   ok "Cloud Run service $SERVICE"
   has() { tr ';' '\n' <<<"$names" | grep -qx "$1"; }
-  has ALLOWED_EMAIL       && ok "env ALLOWED_EMAIL"       || fail "env ALLOWED_EMAIL missing (the server refuses to start without it)"
+  (has ALLOWED_EMAILS || has ALLOWED_EMAIL) && ok "env ALLOWED_EMAILS" || fail "env ALLOWED_EMAILS missing (the server refuses to start without it)"
   has ATTACHMENTS_BUCKET  && ok "env ATTACHMENTS_BUCKET"  || fail "env ATTACHMENTS_BUCKET missing (scripts/create-bucket.sh; uploads fail without it)"
   has WIDGET_TOKEN        && ok "env WIDGET_TOKEN"        || warn "env WIDGET_TOKEN unset (lock screen widget off)"
   has CALENDAR_TOKEN      && ok "env CALENDAR_TOKEN"      || warn "env CALENDAR_TOKEN unset (calendar feed off: scripts/setup-calendar.sh)"

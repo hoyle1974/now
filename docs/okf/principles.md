@@ -1,13 +1,15 @@
 ---
 type: Principles
 title: Principles and non-goals
-description: What this project is for (one user, real daily use), the #1 rule (must cost nothing in GCP), and what it will never be.
-tags: [principles, cost, single-user, non-goals]
-timestamp: 2026-09-21T06:00:00Z
+description: What this project is for (one deployment, a family, real daily use), the #1 rule (must cost nothing in GCP), and what it will never be.
+tags: [principles, cost, multi-user, non-goals]
+timestamp: 2026-09-22T00:15:00Z
 ---
 **Status.** `now` began as a learning project. It is now a **real project the owner uses every day**. Treat it that way: data safety, reliability and a low maintenance burden matter more than novelty.
 
-**One user, by design.** There is exactly one user: the owner. Multi-tenancy is a non-goal, not a backlog item. Auth accepts a single Google account (`ALLOWED_EMAIL`, [stack](architecture/stack.md)); there are no accounts, sharing, roles or per-user isolation, and none will be added. Anyone else who wants to use it clones the repo, creates **their own GCP project**, deploys it and runs it themselves ([forking](ops/forking.md)). Fork-friendliness means "easy for one person to run their own copy", never "one deployment serving many people".
+**One deployment, a family, by design.** Auth accepts a small, fixed list of Google accounts (`ALLOWED_EMAILS`, `;`-separated, first is the owner; legacy single-account `ALLOWED_EMAIL` still works, [stack](architecture/stack.md)). Each allowed email's data is fully isolated under its own Firestore/storage partition ([data model](data/firestore.md)) — but there is still no sharing between people, no roles, no invite UI, and none will be added; the list is edited by redeploying with a new `ALLOWED_EMAILS` value, not through the app. Anyone else who wants to use it clones the repo, creates **their own GCP project**, deploys it and runs it themselves ([forking](ops/forking.md)). Fork-friendliness means "easy for one household to run their own copy", never "a multi-tenant SaaS serving strangers". A device shared by two people in the same household is out of scope — each person is expected to use their own device ([multi-user runbook](ops/multi-user.md)).
+
+**Cost note: reads scale with the number of allowed users.** Every allowed email is looped over on every notify/digest pass ([push reminders](features/push-reminders.md)) and, per the sync/tree-read model, costs roughly one Firestore tree read per user per rev change. This is negligible and acceptable at family scale (a handful of people), but it is a multiplier on the read count the cost guards below watch — it is not free just because the app is.
 
 **No rollback.** Rollback is not a feature. The owner always runs the latest deploy, so only the newest container image is kept (Artifact Registry cleanup policy, [deploy](ops/deploy.md)). To go back, redeploy an older commit.
 

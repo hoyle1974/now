@@ -11,7 +11,16 @@ if not os.environ.get("FIRESTORE_EMULATOR_HOST"):
     sys.exit("refusing to run without FIRESTORE_EMULATOR_HOST (use scripts/e2e.sh)")
 os.environ.setdefault("ALLOWED_EMAILS", "e2e@example.com")
 
-from app.auth import require_user  # noqa: E402
-from app.main import app  # noqa: E402
+from fastapi import Request
 
-app.dependency_overrides[require_user] = lambda: None
+from app.auth import require_user
+from app.main import app
+
+
+def _fake_require_user(request: Request) -> None:
+    # Sets request.state.user directly, exactly as the real require_user does,
+    # so bind_user still binds a tenant (app/tenant.py) for data access.
+    request.state.user = os.environ["ALLOWED_EMAILS"].split(";")[0]
+
+
+app.dependency_overrides[require_user] = _fake_require_user
