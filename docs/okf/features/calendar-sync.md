@@ -1,0 +1,24 @@
+---
+type: Feature
+title: Calendar item sync (inbound ICS)
+description: A `calendar` item mirrors an external ICS feed's events into `calendar_event` children, kept fresh by a staleness-triggered Cloud Task.
+resource: app/calendar_sync.py
+tags: [calendar, ics, sync, cloud-tasks]
+timestamp: 2026-09-22T00:00:00Z
+---
+This is the *inbound* counterpart to the outbound [calendar feed](calendar-feed.md) (which exports now's own todos as ICS for external calendar apps to subscribe to). Here, an external ICS feed (e.g. a Google Calendar) is imported *into* now as a `calendar` item and its child `calendar_event` items ([item types](item-types.md)).
+
+**Parsing/diffing (pure, no I/O).** `app/calendar_sync.py`: `parse_ics(raw, window_start, window_end)` expands recurrence (`icalendar` + `recurring_ical_events`) into `ParsedEvent`s for every occurrence starting in `[window_start, window_end)`, window is `[today, today + 60 days)` (`WINDOW_DAYS`). A recurring VEVENT's `external_uid` folds in its own occurrence start time (`base_uid:iso_start`) so it stays stable across syncs even as the window slides (a bare UID would flip between "one occurrence in window" and "two" as a bounded series' tail passes out of view, breaking the create/update match on the next sync); a non-recurring event keeps its bare UID. All-day events land at midnight ([due time](due-time.md) convention). `diff_events(desired, existing)` matches by `external_uid` against the calendar's current `calendar_event` children and returns `(to_create, to_update, to_delete_ids)` — `to_update` only includes an event whose title/due_date/location actually changed, so an unchanged occurrence gets no write at all.
+
+**Writing.** `db.apply_calendar_sync(calendar_id, events)` (`app/db_firestore.py`) runs the whole diff in one `run_atomic` transaction: a changed-but-still-present event is patched in place (same `todo_id`, `version` bumped once), never deleted+recreated — `remote-diff.js` identifies items by `todo_id`, so a delete+recreate would make every routine resync of an unchanged calendar look like a spurious "N changes from another device" on other clients. New children get `order_idx` assigned up front (like `split_into_children`), not read lazily per-create, because Firestore forbids a read after a write inside one transaction and a sync can create several events in the same call. `db.mark_calendar_synced(calendar_id, error)` records `last_synced_at`/`last_sync_error` as a server-managed field (no `If-Match`/version bump, like `collapsed` — must never conflict with a concurrent user edit).
+
+**Fetching.** `calendar_sync.run_calendar_sync(calendar_id, fetch=None)` (`fetch` defaults to `_http_fetch`, a 10s-timeout `requests.get`) ties it together: no-ops with `{"synced": False, "reason": "no calendar_url"}` if the calendar has none; on any exception (fetch or parse) it records `last_sync_error` and returns `{"synced": False, "error": ...}` **without touching existing events** — a dead/slow feed degrades to "stale" rather than wiping the calendar's children. It never raises (mirrors `push.py`'s internal-job convention): a Cloud Task delivery always acks, never retries into a storm.
+
+**Triggers — one shared staleness check.** `tasks.enqueue_calendar_sync(calendar_id, last_synced_at, now_utc, threshold=CALENDAR_STALE_AFTER)` (`CALENDAR_STALE_AFTER = 6h`) is the single staleness predicate every caller shares:
+- `GET /todos/tree` and `GET /todos/root` ([routes](../api/routes.md)) each nudge every live `calendar` in the just-loaded list, via `BackgroundTasks` (`app/routes/todos.py`'s `_nudge_stale_calendars`) — runs after the response is sent, so a slow feed adds no read latency (`enqueue_calendar_sync` itself is a fast Cloud Tasks API call, not the ICS fetch). `GET /todos/next` is deliberately excluded: `calendar`s never `appearsInNextUp`, so nudging there would be redundant with the tree/root nudges.
+- `POST /todos/{id}/sync` ("Sync now") calls it with `last_synced_at=None`, forcing the staleness check to always trigger.
+- The daily digest (`app/push.py`'s `run_notify`) also nudges every `calendar` in the tree once a day, so a calendar with no client ever open still refreshes.
+
+`tasks.create_calendar_sync_task` enqueues a Cloud Task at `/internal/sync-calendar/{calendar_id}` (reuses the reminder queue/OIDC plumbing), bucketed by hour so repeat page loads in the same hour dedupe to one task. `POST /internal/sync-calendar/{id}` (`app/routes/notifications.py`, Cloud Tasks OIDC auth only) calls `run_calendar_sync`.
+
+**Tests.** `tests/test_calendar_sync.py` covers parsing/diffing, `apply_calendar_sync`/`mark_calendar_synced`, `run_calendar_sync` (success, no-URL no-op, fetch-failure-keeps-existing-events, via a dependency-injected `fetch`), the `POST /todos/{id}/sync` route (202/400) and the tree-read nudge. Manually verified `_http_fetch` against a real Google Calendar ICS URL: valid ICS, 115 events parsed in the 60-day window.

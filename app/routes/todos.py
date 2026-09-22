@@ -37,14 +37,27 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
     return saved(db.run_atomic(x_txn_id, create), background)
 
 @router.get("/todos/root", response_model=list[models.Todo])
-def list_todos() -> list[models.Todo]:
-    return db.get_root_todos()
+def list_todos(background: BackgroundTasks) -> list[models.Todo]:
+    todos = db.get_root_todos()
+    _nudge_stale_calendars(todos, background)
+    return todos
 
 def _housekeeping() -> None:
     try:
         db.maybe_archive_expired()  # housekeeping must never fail a read
     except Exception:
         log.exception("archiving old deleted todos failed")
+
+def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
+    """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
+    Runs as a background task (after the response is sent) so a slow/dead feed URL
+    never adds latency to the read; the Cloud Task enqueue call itself is a fast
+    Cloud Tasks API call, not the ICS fetch."""
+    values = todos.values() if isinstance(todos, dict) else todos
+    now = datetime.datetime.now(datetime.UTC)
+    for t in values:
+        if t.type == "calendar":
+            background.add_task(tasks.enqueue_calendar_sync, str(t.todo_id), t.last_synced_at, now)
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
@@ -71,6 +84,7 @@ def get_tree(background: BackgroundTasks) -> dict:
     # the worst case is one redundant refresh, never a missed change.
     rev = db.get_rev()
     roots, todosById = _load_tree(rev, background)
+    _nudge_stale_calendars(todosById, background)
 
     return {
         "rev": rev,
@@ -249,6 +263,17 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
             background.add_task(tasks.schedule_from_body,
                                 {"todo_id": child["todo_id"], "due_date": jsonable_encoder(due_date)})
     return reply(*result)
+
+@router.post("/todos/{todo_id}/sync", response_model=None)
+def sync_now(todo_id: uuid.UUID, background: BackgroundTasks) -> Response:
+    """Manual 'Sync now': enqueues immediately, ignoring staleness."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    if todo.type != "calendar":
+        raise HTTPException(400, "only a calendar item can be synced")
+    background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None, datetime.datetime.now(datetime.UTC))
+    return Response(status_code=202)
 
 @router.patch("/todos/{todo_id}/move/{direction}", response_model=None)
 def move_todo(todo_id: uuid.UUID, direction: str,

@@ -785,12 +785,18 @@ def apply_calendar_sync(calendar_id: str, events) -> dict:
         by_todo_id = {str(todo.todo_id): todo for todo in existing.values()}
         to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
 
+        # order_idx is assigned up front (like split_into_children) rather than left for
+        # create_todo's own "read the current max, then write" default: two or more
+        # creates in this one transaction would otherwise have the second create's read
+        # land after the first create's write, which Firestore transactions forbid.
+        next_order = _next_order_idx(calendar_id)
         for event in to_create:
             child = models.Todo(title=event.title, type="calendar_event",
                                 parent_id=models.TodoId(uuid.UUID(calendar_id)),
                                 due_date=event.due_date, external_uid=event.external_uid,
-                                location=event.location)
+                                location=event.location, order_idx=next_order)
             create_todo(child)
+            next_order += 1
 
         for todo_id, event in to_update:
             todo = by_todo_id[todo_id]

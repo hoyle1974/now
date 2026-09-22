@@ -4,9 +4,10 @@ ParsedEvents-vs-existing-Todos into a create/update/delete plan)."""
 from __future__ import annotations
 
 import datetime
+import uuid
 from dataclasses import dataclass
 
-from app import models
+from app import db, models
 
 
 class CalendarSyncError(Exception):
@@ -96,6 +97,36 @@ def diff_events(desired: list[ParsedEvent], existing: dict[str, models.Todo],
     return to_create, to_update, to_delete
 
 
-def run_calendar_sync(calendar_id: str) -> dict:
-    """Stub; Task 6 fetches the feed and calls db.apply_calendar_sync."""
-    return {"synced": False}
+WINDOW_DAYS = 60
+
+
+def _http_fetch(url: str) -> str:
+    import requests
+    resp = requests.get(url, timeout=10)
+    resp.raise_for_status()
+    return resp.text
+
+
+def run_calendar_sync(calendar_id: str, fetch=None) -> dict:
+    """Fetch, parse, diff and write. Never raises: failure is recorded on the
+    calendar item (last_sync_error) rather than propagated, so a Cloud Task
+    delivery always acks and is never retried into a storm."""
+    fetch = fetch or _http_fetch
+    cal = db.get_todo(models.TodoId(uuid.UUID(calendar_id)))
+    if cal is None:
+        return {"synced": False, "reason": "calendar not found"}
+    if not cal.calendar_url:
+        return {"synced": False, "reason": "no calendar_url"}
+
+    today = models.utc_now().date()
+    window_end = today + datetime.timedelta(days=WINDOW_DAYS)
+    try:
+        raw = fetch(cal.calendar_url)
+        events = parse_ics(raw, today, window_end)
+    except Exception as e:
+        db.mark_calendar_synced(calendar_id, error=str(e))
+        return {"synced": False, "error": str(e)}
+
+    result = db.apply_calendar_sync(calendar_id, events)
+    db.mark_calendar_synced(calendar_id, error=None)
+    return {"synced": True, **result}

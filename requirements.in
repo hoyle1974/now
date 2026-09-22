@@ -9,4 +9,5 @@ google-cloud-storage==3.14.1
 google-cloud-tasks==2.24.0
 icalendar==6.1.1
 recurring-ical-events==2.2.3
+requests==2.34.2
 

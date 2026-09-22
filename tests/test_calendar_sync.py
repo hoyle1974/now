@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, calendar_sync, db, models, tenant
+from app import auth, calendar_sync, db, models, tasks, tenant
 from app.main import app
 from tests.helpers import TEST_USER, act_as, wipe_users
 
@@ -161,6 +161,74 @@ def test_mark_calendar_synced(db_setup):
     db.mark_calendar_synced(str(cal.todo_id), error=None)
     refreshed = db.get_todo(cal.todo_id)
     assert refreshed.last_sync_error is None
+
+
+def test_run_calendar_sync_success(db_setup, monkeypatch):
+    # simple.ics's fixed fixture events are on 2026-02-01/03 (shared with the parse_ics
+    # tests above, which pin their own explicit window); run_calendar_sync computes its
+    # own window from the real clock, so pin "today" to fall inside that fixture's dates
+    # rather than the (unrelated, drifting) real today.
+    monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
+    cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    assert result["created"] == 2
+    refreshed = db.get_todo(cal.todo_id)
+    assert refreshed.last_sync_error is None
+    assert refreshed.last_synced_at is not None
+
+
+def test_run_calendar_sync_no_url_noops(db_setup):
+    cal = models.Todo(title="Family", type="calendar")  # calendar_url never set
+    db.create_todo(cal)
+    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: (_ for _ in ()).throw(AssertionError("should not fetch")))
+    assert result == {"synced": False, "reason": "no calendar_url"}
+
+
+def test_run_calendar_sync_fetch_failure_keeps_existing_events(db_setup, monkeypatch):
+    monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
+    cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    before = db.get_calendar_event_children(str(cal.todo_id))
+
+    def failing_fetch(url):
+        raise OSError("network down")
+
+    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=failing_fetch)
+    assert result["synced"] is False
+    after = db.get_calendar_event_children(str(cal.todo_id))
+    assert set(after) == set(before)  # untouched
+    refreshed = db.get_todo(cal.todo_id)
+    assert "network down" in refreshed.last_sync_error
+    assert refreshed.last_synced_at is not None  # updated even on failure, per spec
+
+
+def test_sync_now_enqueues_for_calendar_type(db_setup, monkeypatch):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    resp = client.post(f"/todos/{cal.todo_id}/sync", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 202
+    assert calls == [str(cal.todo_id)]
+
+
+def test_sync_now_rejects_non_calendar(db_setup):
+    t = models.Todo(title="a todo")
+    db.create_todo(t)
+    resp = client.post(f"/todos/{t.todo_id}/sync", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+
+def test_get_tree_nudges_stale_calendar(db_setup, monkeypatch):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid: calls.append(cid) or True)
+    resp = client.get("/todos/tree", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+    assert calls == [str(cal.todo_id)]  # last_synced_at is None -> stale
 
 
 def test_internal_sync_calendar_requires_scheduler_auth(db_setup):

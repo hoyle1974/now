@@ -146,6 +146,7 @@ recurring-ical-events==2.2.3
     # via -r requirements.in
 requests==2.34.2
     # via
+    #   -r requirements.in
     #   cachecontrol
     #   google-api-core
     #   google-cloud-storage
