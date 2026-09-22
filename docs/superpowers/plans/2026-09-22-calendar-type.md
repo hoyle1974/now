@@ -1746,6 +1746,153 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
+## Task 12: Server — enforce `editable: false` on PATCH/DELETE
+
+**Added after Task 11's review**, which found that `editable: false` (meant to make `calendar_event` read-only, per the spec's "no edit sheet, no manual move/delete, no type switch") was enforced only client-side (Task 9's UI hiding) — a raw `PATCH /todos/{id}` or `DELETE /todos/{id}` on a `calendar_event` succeeds server-side with no guard. The task reviewer traced the blast radius: a manually-edited `title`/`due_date`/`location` self-heals on the next sync (overwritten via `diff_events`' uid match), but a manually-changed `type` does NOT self-heal — `get_calendar_event_children`'s `type != "calendar_event"` filter drops the document from `existing` permanently, so the next sync creates a duplicate and orphans the original. User direction: server-side enforcement is wanted for data validation, not just UI hiding.
+
+**Files:**
+- Modify: `app/routes/todos.py` (`update_todo`, `delete_todo`)
+- Modify: `docs/okf/features/item-types.md` (fix the Task 11 wording that overstates self-healing for the type-change case, now that this task removes that exposure entirely)
+- Test: `tests/test_item_types.py`
+
+**Interfaces:**
+- Consumes: `types.can(todo, "editable")` (registry flag, Task 1). `db.get_todo` (existing).
+- Produces: nothing new consumed by later tasks — this is a leaf enforcement point, same shape as Task 2's `allowsUserChildren` guard.
+
+**Design (mirrors Task 2 exactly, same file, same pattern):**
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/test_item_types.py`:
+
+```python
+def test_patch_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"title": "Hacked"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "not editable" in resp.json()["detail"]
+
+def test_patch_type_change_away_from_uneditable_rejected(db_setup):
+    """The specific orphaning exploit Task 11's review found: a raw PATCH changing
+    `type` away from calendar_event must be rejected same as any other field edit,
+    not just the fields a naive guard might have special-cased."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"type": "todo"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+def test_delete_rejected_on_uneditable_type(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.delete(f"/todos/{event.todo_id}", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+
+def test_patch_still_allowed_on_editable_calendar_item(db_setup):
+    """Sanity: the guard only fires for editable: false, not for `calendar` itself
+    (editable: true — you can still rename it, change its color, edit its URL)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    resp = client.patch(f"/todos/{cal.todo_id}", json={"title": "Renamed"},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+
+def test_collapsed_only_patch_still_allowed_on_uneditable_type(db_setup):
+    """Collapse is view state (per sync-model.md), not content — it must NOT be
+    blocked by the editable guard, or the client can't fold/unfold a calendar_event
+    row (collapsing view state is harmless even on a read-only item)."""
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    resp = client.patch(f"/todos/{event.todo_id}", json={"collapsed": True},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+```
+
+(Match whatever exact `client.patch`/`client.delete` header/auth style Task 2's tests already established in this same file — copy it verbatim rather than guessing, per that task's own precedent.)
+
+- [ ] **Step 2: Run tests, confirm they fail**
+
+Run: `scripts/test.sh tests/test_item_types.py -v` (or filtered, quoted as one argument per `scripts/test.sh`'s argument-joining quirk documented in earlier tasks' briefs)
+Expected: the four `_rejected_` tests FAIL (currently 200, not 400); the two `_still_allowed_`/`_collapsed_` tests should already PASS (nothing to break yet)
+
+- [ ] **Step 3: Implement the guard in `app/routes/todos.py`**
+
+Add near `_check_accepts_children` (same neighborhood, same file):
+
+```python
+def _check_editable(todo: models.Todo, view_only: bool) -> None:
+    """Content edits and deletes are blocked for a type marked read-only in the
+    registry (editable: false — e.g. calendar_event, server-managed by sync).
+    Collapse (view_only) is exempt: it's UI state, not content, and must stay
+    foldable even on a read-only row."""
+    if view_only:
+        return
+    if not types.can(todo, "editable"):
+        raise HTTPException(400, f"{types.caps(todo.type)['label']} is not editable")
+```
+
+In `update_todo`, inside `action(todo)`, as the first line (before any field is applied) — note `view_only` is already computed above the function, from `body.model_fields_set == {"collapsed"}`:
+
+```python
+    def action(todo: models.Todo) -> dict:
+        _check_editable(todo, view_only)
+        if body.title is not None:
+            ...
+```
+
+In `delete_todo`, inside `action(todo)`, as the first line (delete has no `view_only` concept, always pass `False`):
+
+```python
+    def action(todo: models.Todo) -> None:
+        _check_editable(todo, False)
+        todo.deleted = True
+        ...
+```
+
+Both guards run inside `run_atomic`'s `action` closure (same transactional-read pattern Task 2's fix established for `split_todo` — read the todo, check the flag, all before any write), consistent with the codebase's "all reads before any write" Firestore transaction convention.
+
+- [ ] **Step 4: Run tests, confirm they pass**
+
+Run: `scripts/test.sh tests/test_item_types.py -v`
+Expected: all 6 new tests PASS
+
+- [ ] **Step 5: Run the full Python suite**
+
+Run: `scripts/test.sh`
+Expected: all PASS — pay attention to any EXISTING test that PATCHes or DELETEs a `list`/`project`/`todo` item (all `editable: true`, so unaffected) or, more importantly, any existing test that PATCHes/DELETEs a `calendar_event`-typed todo for an unrelated reason (e.g. an attachment or trash test using a generic todo that happens to get typed as something read-only) — none should exist today since `calendar_event` didn't exist before this plan, but confirm.
+
+- [ ] **Step 6: Fix the Task 11 doc wording this task makes true**
+
+In `docs/okf/features/item-types.md`, find the `editable` paragraph (added by Task 11) that says a synced event "is expected to be overwritten by the next sync regardless" — this is no longer even a relevant caveat, since raw edits are now rejected outright rather than silently allowed-then-overwritten. Rewrite that sentence to state the new, stronger guarantee: `editable: false` is enforced server-side (`PATCH`/`DELETE` both 400), not just hidden in the UI — no self-healing caveat needed because there's nothing to heal. Bump the file's `timestamp`. Add one line to `docs/okf/log.md` (dated, appended) noting the enforcement was added and why (Task 11's review finding).
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add app/routes/todos.py tests/test_item_types.py docs/okf/features/item-types.md docs/okf/log.md
+git commit -m "feat: reject PATCH/DELETE on a type marked read-only in the registry
+
+editable: false (calendar_event) was previously enforced only by
+hiding the UI (Task 9); a raw API call could still edit or delete a
+synced event, and changing its type away from calendar_event
+permanently orphaned it (not self-healing, unlike other field edits).
+Server now rejects both, matching the allowsUserChildren guard's
+existing shape. Collapse (view-only state) stays exempt.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+```
+
+---
+
 ## Task 13: Server — client-session provenance (`triggered_by`)
 
 **Files:**
