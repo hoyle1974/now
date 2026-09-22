@@ -1746,7 +1746,326 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
 
 ---
 
-## Task 12: Full verification and deploy
+## Task 13: Server — client-session provenance (`triggered_by`)
+
+**Files:**
+- Modify: `app/db_firestore.py` (`run_atomic`, `get_rev`, `apply_calendar_sync`)
+- Modify: `app/db.py` (re-export `get_rev_info` if needed — same check as Task 4 Step 1)
+- Modify: `app/calendar_sync.py` (`run_calendar_sync`)
+- Modify: `app/models.py` (`SyncNowBody`)
+- Modify: `app/routes/todos.py` (`sync_now`)
+- Modify: `app/routes/notifications.py` (`SyncCalendarBody`, `sync_calendar`)
+- Modify: `app/routes/system.py` (`get_rev`)
+- Modify: `app/tasks.py` (`create_calendar_sync_task`, `enqueue_calendar_sync`)
+- Modify: `tests/test_tasks.py`, `tests/test_calendar_sync.py` (update the `create` callable lambdas from Tasks 5–7 to accept the new second argument)
+
+**Interfaces:**
+- Consumes: everything from Tasks 4–7 (this task changes several of their signatures — see "Signature changes" below).
+- Produces: `db.run_atomic(txn_id, fn, triggered_by=None)`; `db.get_rev_info() -> {"value": int, "triggered_by": str | None}`; `db.apply_calendar_sync(calendar_id, events, triggered_by=None)`; `calendar_sync.run_calendar_sync(calendar_id, fetch=None, client_session_id=None)`; `tasks.create_calendar_sync_task(calendar_id, client_session_id=None, now_utc=None)`; `tasks.enqueue_calendar_sync(calendar_id, last_synced_at, now_utc, threshold=..., client_session_id=None, create=None)` — note `create`'s callable signature changes from `Callable[[str], bool]` to `Callable[[str, str | None], bool]`.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add to `tests/test_calendar_sync.py`:
+
+```python
+def test_rev_reports_who_triggered_it(db_setup):
+    t = models.Todo(title="x")
+    db.create_todo(t)  # an ordinary write: triggered_by stays None
+    info = db.get_rev_info()
+    assert info["triggered_by"] is None
+
+    cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"),
+                                    client_session_id="session-abc")
+    info = db.get_rev_info()
+    assert info["triggered_by"] == "session-abc"
+
+
+def test_get_rev_endpoint_exposes_triggered_by(db_setup):
+    resp = client.get("/todos/rev")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "triggered_by" in body
+    assert body["triggered_by"] is None
+
+
+def test_sync_now_threads_client_session_id(db_setup, monkeypatch):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append((cid, csid)) or True)
+    resp = client.post(f"/todos/{cal.todo_id}/sync", json={"client_session_id": "session-xyz"},
+                       headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 202
+    assert calls == [(str(cal.todo_id), "session-xyz")]
+```
+
+Add to `tests/test_tasks.py`:
+
+```python
+def test_enqueue_calendar_sync_threads_client_session_id():
+    calls = []
+    tasks.enqueue_calendar_sync("cal-1", None, at("2026-02-01T00:00:00+00:00"),
+                                client_session_id="s1",
+                                create=lambda cid, csid: calls.append((cid, csid)) or True)
+    assert calls == [("cal-1", "s1")]
+```
+
+- [ ] **Step 2: Run tests, confirm they fail**
+
+Run: `scripts/test.sh -k "triggered_it or endpoint_exposes_triggered_by or threads_client_session_id"`
+Expected: FAIL (`triggered_by` missing from `get_rev_info`/`AttributeError`, `TypeError` on the two-arg `create` lambdas since current `enqueue_calendar_sync` calls `create(calendar_id)` with one arg)
+
+- [ ] **Step 3: Signature changes in `app/db_firestore.py`**
+
+`run_atomic`: add `triggered_by: str | None = None` as a keyword param; in the `if _wrote.get()[0]:` block, change `tx.set(rev_ref, {"value": rev})` to `tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by})`.
+
+Replace `get_rev`:
+
+```python
+def get_rev_info() -> dict:
+    """Current revision and who last bumped it (a client_session_id, or None
+    for every write path that doesn't pass one — the overwhelming majority).
+    One document read."""
+    snap = _sub(REV_COLLECTION).document(REV_DOC).get()
+    data = snap.to_dict() if snap.exists else {}
+    return {"value": data.get("value", 0), "triggered_by": data.get("triggered_by")}
+
+
+def get_rev() -> int:
+    """Current revision (0 before the first write). One document read."""
+    return get_rev_info()["value"]
+```
+
+`apply_calendar_sync` (Task 4): add `triggered_by: str | None = None` to its signature, and change its final line from `_, body, _, _ = run_atomic(None, action)` to `_, body, _, _ = run_atomic(None, action, triggered_by=triggered_by)`.
+
+- [ ] **Step 4: `app/calendar_sync.py`**
+
+`run_calendar_sync`: add `client_session_id: str | None = None` to its signature, and change `result = db.apply_calendar_sync(calendar_id, events)` to `result = db.apply_calendar_sync(calendar_id, events, triggered_by=client_session_id)`.
+
+- [ ] **Step 5: `app/tasks.py`**
+
+`create_calendar_sync_task`: add `client_session_id: str | None = None` as its second positional param (before `now_utc`), and include it in the task body: `body=json.dumps({"calendar_id": calendar_id, "user": tenant.current(), "client_session_id": client_session_id}).encode()`.
+
+`enqueue_calendar_sync`: add `client_session_id: str | None = None` to its signature (after `threshold`, before `create`), and change `return (create or create_calendar_sync_task)(calendar_id)` to `return (create or create_calendar_sync_task)(calendar_id, client_session_id)`.
+
+Update every existing call site from Tasks 5–7 that constructs a `create=lambda cid: ...` (in `tests/test_tasks.py` and `tests/test_calendar_sync.py`) to `create=lambda cid, csid=None: ...`, and the production call sites in `app/routes/todos.py` (`_nudge_stale_calendars`, `sync_now`) and `app/push.py` (`run_notify`'s calendar loop) stay as positional `(str(t.todo_id), t.last_synced_at, now)` calls with no `client_session_id` kwarg — they correctly default to `None` (no client to attribute a staleness/digest-triggered sync to, per spec).
+
+- [ ] **Step 6: `app/models.py`**
+
+Add, near `TodoRepeatRequest`:
+
+```python
+class SyncNowBody(BaseModel):
+    client_session_id: str | None = Field(None, max_length=64)
+```
+
+- [ ] **Step 7: `app/routes/todos.py`**
+
+Change `sync_now`'s signature and body:
+
+```python
+@router.post("/todos/{todo_id}/sync", response_model=None)
+def sync_now(todo_id: uuid.UUID, background: BackgroundTasks, body: models.SyncNowBody | None = None) -> Response:
+    """Manual 'Sync now': enqueues immediately, ignoring staleness."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    if todo.type != "calendar":
+        raise HTTPException(400, "only a calendar item can be synced")
+    csid = body.client_session_id if body else None
+    background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None,
+                        datetime.datetime.now(datetime.UTC), client_session_id=csid)
+    return Response(status_code=202)
+```
+
+- [ ] **Step 8: `app/routes/notifications.py`**
+
+Add `client_session_id` to `SyncCalendarBody`:
+
+```python
+class SyncCalendarBody(BaseModel):
+    calendar_id: str = Field(min_length=1, max_length=64)
+    user: str | None = Field(None, max_length=320)
+    client_session_id: str | None = Field(None, max_length=64)
+```
+
+Update `sync_calendar`'s body:
+
+```python
+    with tenant.as_user(user):
+        return _cs.run_calendar_sync(body.calendar_id or todo_id, client_session_id=body.client_session_id)
+```
+
+- [ ] **Step 9: `app/routes/system.py`**
+
+```python
+@router.get("/todos/rev")
+def get_rev() -> dict:
+    """Cheap change check: one document read. Compare rev with the last seen
+    value; a different version means the page is running old code and must
+    reload. triggered_by is the client_session_id of whoever's write last
+    bumped rev, or null — used to suppress the "changes from another device"
+    framing for a client's own manually-triggered calendar sync."""
+    info = db.get_rev_info()
+    return {"rev": info["value"], "version": APP_VERSION, "triggered_by": info["triggered_by"]}
+```
+
+- [ ] **Step 10: Run tests, confirm they pass**
+
+Run: `scripts/test.sh -k "triggered_it or endpoint_exposes_triggered_by or threads_client_session_id"`
+Expected: PASS
+
+- [ ] **Step 11: Run the full Python suite**
+
+Run: `scripts/test.sh`
+Expected: all PASS — pay attention to any other test in the suite that constructs a `create=lambda cid: ...` single-arg callable for `enqueue_calendar_sync`/`create_calendar_sync_task` (Tasks 5–7's tests) and update it to accept the second arg.
+
+- [ ] **Step 12: Commit**
+
+```bash
+git add app/db_firestore.py app/db.py app/calendar_sync.py app/models.py app/routes/todos.py app/routes/notifications.py app/routes/system.py app/tasks.py tests/test_tasks.py tests/test_calendar_sync.py
+git commit -m "feat: attribute a rev bump to the client that triggered a manual sync
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+```
+
+---
+
+## Task 14: Client — suppress \"changes from another device\" for your own Sync now
+
+**Files:**
+- Modify: `web/app.js` (`clientSessionId`, `syncCalendarNow`, `refreshFromRemote`, `fetchRev`)
+- Modify: `web/freshness.js` (thread `triggered_by` through to `refresh()`)
+- Test: `tests_js/freshness.test.js`
+
+**Interfaces:**
+- Consumes: `GET /todos/rev`'s new `triggered_by` field (Task 13); `RemoteDiff.diff`/`describe` (existing).
+- Produces: `refresh(triggeredBy)` — every caller of `Freshness.create({ refresh, ... })` now receives one argument on each call, `app.js`'s being `refreshFromRemote(triggeredBy)`.
+
+- [ ] **Step 1: Write the failing freshness test**
+
+Read `tests_js/freshness.test.js` first (13.3K — it already drives `Freshness.create` with fake `fetchRev`/`refresh`/timers; match its harness exactly) and add:
+
+```js
+test("attempt() passes fetchRev's triggered_by through to refresh", async () => {
+  const calls = [];
+  const f = Freshness.create({
+    engine: { pending: () => 0, isStale: () => false, knownRev: () => 0, noteRemoteRev: () => {} },
+    fetchRev: async () => ({ rev: 1, version: null, triggered_by: "session-abc" }),
+    refresh: async (triggeredBy) => { calls.push(triggeredBy); },
+    // ...fill in whatever other required options this file's existing tests already pass
+    // (now/timers/onPhase/onLog stubs) — copy them from a neighboring test rather than
+    // guessing, since Freshness.create's full option list is longer than shown here.
+  });
+  await f.check({ force: true });
+  assert.deepStrictEqual(calls, ["session-abc"]);
+});
+```
+
+(If `engine.isStale()` returning `false` before the fetch, but the code path requires it to become stale after `noteRemoteRev` to reach the refresh — check `engine.noteRemoteRev` needs to actually flip a stateful `isStale()`; use a small stateful fake engine object instead of static functions, matching how the file's existing tests fake `engine` — read a couple of its existing tests for the pattern before writing this one.)
+
+- [ ] **Step 2: Run it, confirm it fails**
+
+Run: `node --test tests_js/freshness.test.js -t "passes fetchRev's triggered_by"`
+Expected: FAIL (`refresh` currently called with no arguments; `calls` is `[undefined]`)
+
+- [ ] **Step 3: Implement in `web/freshness.js`**
+
+Add a module-level `let triggeredBy = null;` alongside the existing `let newVersion = null;` declaration. In the fetch block, alongside `version = res.version ?? null;`, add `triggeredBy = res.triggered_by ?? null;`. Right before the final `await refresh();` call, capture and clear it so a later unrelated refresh doesn't reuse a stale value:
+
+```js
+        deferred = false;
+        onPhase("refreshing");
+        onLog("refresh", "start");
+        const refreshStart = now();
+        const forThisRefresh = triggeredBy;
+        triggeredBy = null;
+        try {
+          await refresh(forThisRefresh);
+```
+
+- [ ] **Step 4: Run it, confirm it passes**
+
+Run: `node --test tests_js/freshness.test.js`
+Expected: all PASS (including every pre-existing test in the file — `refresh` gaining a parameter that existing fakes simply ignore must not break them)
+
+- [ ] **Step 5: Client-session id + suppression in `web/app.js`**
+
+Add near the top-level state (alongside `let activePanel = null;` or similar module-level declarations):
+
+```js
+let _clientSessionId = null;
+function clientSessionId() {
+  if (_clientSessionId) return _clientSessionId;
+  try {
+    _clientSessionId = sessionStorage.getItem("client-session-id");
+    if (!_clientSessionId) {
+      _clientSessionId = crypto.randomUUID();
+      sessionStorage.setItem("client-session-id", _clientSessionId);
+    }
+  } catch (e) {
+    _clientSessionId = crypto.randomUUID(); // private mode / storage blocked: usable for this page load only
+  }
+  return _clientSessionId;
+}
+```
+
+Change `refreshFromRemote` to take and use the triggering id:
+
+```js
+async function refreshFromRemote(triggeredBy) {
+  const before = RemoteDiff.snapshot(model.todosById);
+  await loadAndRender();
+  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)));
+  logEvent("remote", said || "refreshed, nothing visible changed");
+  const ownSync = Boolean(triggeredBy) && triggeredBy === clientSessionId();
+  if (said && !ownSync && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
+}
+```
+
+Update the `fetchRev` comment in the `Freshness.create({...})` call (Task's earlier read of this block, around where `refresh: refreshFromRemote,` sits) from `// { rev, version }` to `// { rev, version, triggered_by }` — no code change needed there since it already forwards the whole parsed body.
+
+Update `syncCalendarNow` (Task 10) to send the id:
+
+```js
+async function syncCalendarNow(todoId) {
+  try {
+    await apiFetch(`${API_BASE}/${todoId}/sync`, {
+      method: "POST",
+      body: JSON.stringify({ client_session_id: clientSessionId() }),
+    });
+    showNotice({ level: "info", message: "Syncing…" });
+  } catch (e) {
+    showNotice({ level: "error", message: "Couldn't start sync: " + e.message });
+  }
+}
+```
+
+Check `apiFetch`'s existing signature (grep for another `apiFetch(url, { method: "POST", body: ...})` call elsewhere in `web/*.js`, e.g. how a PATCH/POST with a JSON body is already sent) to confirm whether it JSON-stringifies for you (in which case pass `{ client_session_id: clientSessionId() }` directly instead of double-encoding with `JSON.stringify`) and sets `Content-Type: application/json` automatically — match that exactly rather than guessing.
+
+- [ ] **Step 6: Run the full JS suite**
+
+Run: `node --test tests_js/*.test.js`
+Expected: all PASS
+
+- [ ] **Step 7: Manual smoke check**
+
+Locally: open two browser windows signed in as the same user, click "Sync now" in one — confirm that window does *not* show the "changes from another device" mascot bubble for the resulting update, while the *other* window (which didn't trigger it) still does.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add web/app.js web/freshness.js tests_js/freshness.test.js
+git commit -m "feat: suppress remote-change framing for your own triggered sync
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>"
+```
+
+---
+
+## Task 15: Full verification and deploy
 
 **Files:** none (verification + deploy only)
 
