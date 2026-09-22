@@ -287,3 +287,32 @@ def test_split_rejects_unknown_type(db_setup):
     parent = client.post("/todos", json={"title": "p"}).json()
     res = client.post(f"/todos/{parent['todo_id']}/split", json={"descriptions": ["a"], "type": "nonsense"})
     assert res.status_code == 422
+
+
+def test_split_rejected_under_calendar(db_setup):
+    parent = models.Todo(title="Family calendar", type="calendar")
+    db.create_todo(parent)
+    resp = client.post(f"/todos/{parent.todo_id}/split", json={"descriptions": ["x"]},
+                       headers={"Authorization": "Bearer test", "X-Txn-Id": "t1"})
+    assert resp.status_code == 400
+    assert "does not accept" in resp.json()["detail"]
+
+
+def test_reparent_rejected_under_calendar(db_setup):
+    parent = models.Todo(title="Family calendar", type="calendar")
+    db.create_todo(parent)
+    child = models.Todo(title="a todo")
+    db.create_todo(child)
+    resp = client.patch(f"/todos/{child.todo_id}/reparent", json={"parent_id": str(parent.todo_id)},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 400
+    assert "does not accept" in resp.json()["detail"]
+
+
+def test_reparent_to_top_level_still_allowed(db_setup):
+    """Sanity: the guard only fires for a real parent_id, not parent_id: null."""
+    child = models.Todo(title="a todo", parent_id=None)
+    db.create_todo(child)
+    resp = client.patch(f"/todos/{child.todo_id}/reparent", json={"parent_id": None},
+                        headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200

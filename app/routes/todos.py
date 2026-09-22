@@ -15,6 +15,13 @@ from app.routes.common import affected_refs, apply, reply, saved
 log = logging.getLogger(__name__)
 router = APIRouter()
 
+def _check_accepts_children(parent_id) -> None:
+    if parent_id is None:
+        return
+    parent = db.get_todo(models.TodoId(parent_id) if not isinstance(parent_id, models.TodoId) else parent_id)
+    if parent is not None and not types.can(parent, "allowsUserChildren"):
+        raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
+
 @router.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
@@ -188,6 +195,7 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Move a todo under another parent (or to the top level) at an index."""
     def action(todo: models.Todo) -> dict:
+        _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
         except db.ReparentError as e:
@@ -228,6 +236,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
     due_date = body.due_date if types.has_field_type(body.type, "due_date") else None
 
     def action(todo: models.Todo) -> dict:
+        _check_accepts_children(todo_id)
         # affected is the parent first, then the new children in description
         # order, so the client can map its temporary child ids to real ones by position.
         parent, affected = db.split_into_children(todo, body.descriptions, due_date, body.type or types.DEFAULT)
