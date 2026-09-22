@@ -28,11 +28,30 @@ def db_setup():
 # ---- registry ---------------------------------------------------------------
 
 def test_registry_has_the_three_types_and_flags():
-    assert set(types.NAMES) == {"todo", "list", "project"}
-    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies"}
+    assert set(types.NAMES) == {"todo", "list", "project", "calendar", "calendar_event"}
+    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies", "allowsUserChildren", "editable"}
     for name in types.NAMES:
         assert flags <= set(types.caps(name))
         assert "title" in types.caps(name)["fields"]
+
+
+def test_registry_has_calendar_types_and_new_flags():
+    assert {"calendar", "calendar_event"} <= set(types.NAMES)
+    for name in types.NAMES:
+        assert "allowsUserChildren" in types.caps(name)
+        assert "editable" in types.caps(name)
+    assert types.can_type("todo", "allowsUserChildren") is True
+    assert types.can_type("calendar", "allowsUserChildren") is False
+    assert types.can_type("calendar_event", "allowsUserChildren") is False
+    assert types.can_type("calendar_event", "editable") is False
+    assert types.can_type("calendar", "editable") is True
+    assert types.has_field_type("calendar", "calendar_url")
+    assert types.has_field_type("calendar_event", "location")
+    assert types.has_field_type("calendar_event", "due_date")
+    assert types.can_type("calendar_event", "hasCheckbox") is False
+    assert types.can_type("calendar_event", "appearsInNextUp") is True
+    assert types.can_type("calendar_event", "notifies") is True
+    assert types.can_type("calendar", "appearsInNextUp") is False
 
 
 def test_unknown_or_missing_type_falls_back_to_todo():

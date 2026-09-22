@@ -29,6 +29,12 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         blocked_by=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("blocked_by") or []],
         references=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("references") or []],
         attachments=[models.Attachment(**a) for a in doc_dict.get("attachments") or []],
+        calendar_url=doc_dict.get("calendar_url"),
+        location=doc_dict.get("location"),
+        external_uid=doc_dict.get("external_uid"),
+        last_synced_at=(None if doc_dict.get("last_synced_at") is None
+                        else datetime.datetime.fromisoformat(doc_dict["last_synced_at"])),
+        last_sync_error=doc_dict.get("last_sync_error"),
         child_ids=[]
     )
 
@@ -54,6 +60,11 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "blocked_by": [str(i) for i in todo.blocked_by],
         "references": [str(i) for i in todo.references],
         "attachments": [a.model_dump() for a in todo.attachments],
+        "calendar_url": todo.calendar_url,
+        "location": todo.location,
+        "external_uid": todo.external_uid,
+        "last_synced_at": None if todo.last_synced_at is None else todo.last_synced_at.isoformat(),
+        "last_sync_error": todo.last_sync_error,
     }
 
 def get_subtree_docs(todos_collection, parent_id: str, getter=None) -> list[dict]:
