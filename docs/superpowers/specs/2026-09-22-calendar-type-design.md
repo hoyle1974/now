@@ -77,7 +77,55 @@ trust boundary as the existing digest/heads-up internal endpoints in
 `/todos/rev` like any other write; the existing freshness poll
 (`web/freshness.js`) picks it up on next focus/visible/online and reloads,
 showing the normal "changes from another device" mascot note via
-`remote-diff.js`.
+`remote-diff.js` — **except** for a sync the same client just triggered with
+the manual button (see "Provenance for manual Sync now" below), where the
+data still refreshes but the "someone else did this" framing is suppressed.
+
+### Provenance for manual Sync now (addendum, 2026-09-22)
+
+Problem: `POST /todos/{id}/sync` enqueues a Cloud Task and returns
+immediately; the write happens later, server-side, outside the browser's
+outbox/ack path. The client has no way to tell "a sync I just triggered
+finished" from "someone else's device wrote this," so it always shows "N
+changes from another device," even to the user who clicked Sync now.
+
+- **Client-session id:** on first load, the client generates a UUID
+  (`crypto.randomUUID()`) and persists it in `sessionStorage` (not
+  `localStorage` — it identifies this tab's session, not the device/user
+  permanently, so a stale id from days ago can't cause a false "this was
+  me" match). Call it `client_session_id`.
+- **Attach it to the trigger:** `POST /todos/{id}/sync` sends
+  `client_session_id` in the body. The route passes it through as part of
+  the enqueued Cloud Task's payload.
+- **Thread it to the write:** `POST /internal/sync-calendar/{id}` receives
+  `client_session_id` alongside the calendar id. The one shared rev-bump
+  path (`db_firestore.run_atomic`) gains an optional `triggered_by` value,
+  stamped onto the same `meta/rev` document the rev counter already lives
+  in (`{"value": rev, "triggered_by": triggered_by}`) on whichever write
+  provides it — every other write path continues to pass nothing, which
+  clears it back to null. This means `triggered_by` reflects only the
+  *most recent* rev-bumping write, not a full history; two writes racing
+  between two client freshness polls could misattribute the merged diff.
+  Acceptable: this is a single-family app, and the common case (nobody
+  else editing at the exact moment you tap Sync now) is what the feature
+  is for. Staleness-triggered (`GET /todos`) and digest-triggered syncs
+  pass no `client_session_id` — `triggered_by` stays null for those, which
+  is the correct "genuinely anonymous/remote" case; a GET request's own
+  staleness-triggered background sync is never attributed to *that*
+  request's client either, since the fetch returns cached data immediately
+  per the mechanism above and isn't really "that client's write."
+- **Surface it back:** `GET /todos/rev` returns `{rev, version,
+  triggered_by}` instead of just `{rev, version}` (one extra field read off
+  the same document it already reads — no new read cost).
+- **Client comparison:** on a freshness poll, if the returned
+  `triggered_by` equals the client's own `client_session_id`, suppress the
+  "changes from another device" mascot line (or soften it, e.g. "Synced")
+  while still running the normal `refreshFromRemote()` re-render — the data
+  still needs to update, only the "someone else did this" framing is
+  wrong. Any mismatch or absence keeps current behavior unchanged.
+
+Client/server split: unchanged (sync stays server-owned reconciliation);
+this only adds provenance metadata to state the server already owns.
 
 ## Enforcing `allowsUserChildren: false`
 
@@ -102,9 +150,14 @@ showing the normal "changes from another device" mascot note via
 ## API surface
 
 - `POST /todos/{id}/sync` — normal user auth, `calendar` type only. Manual
-  trigger.
+  trigger. Body: `{client_session_id: str | null}`, threaded through to the
+  Cloud Task so the resulting write can be attributed back to this client
+  (see "Provenance for manual Sync now" above).
 - `POST /internal/sync-calendar/{id}` — internal only (Cloud Tasks OIDC).
-  Does the actual fetch/diff/write.
+  Does the actual fetch/diff/write; body carries `client_session_id`
+  (null for staleness/digest-triggered syncs).
+- `GET /todos/rev` — response gains `triggered_by` (the `client_session_id`
+  of whichever write last bumped rev, or null).
 - `POST /todos` / `/split` / reparent — extended to 400 on
   `allowsUserChildren: false` parent (non-internal caller).
 
