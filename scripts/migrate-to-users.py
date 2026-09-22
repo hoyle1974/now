@@ -13,6 +13,12 @@ Take a backup first: gcloud firestore export gs://<bucket>/backup-$(date +%F)
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+
+# Running this file directly (`python scripts/migrate-to-users.py`) puts scripts/ on
+# sys.path, not the repo root, so `from app import blobstore` would fail. Fix that up
+# front so the script works the way its own docstring says to invoke it.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 COLLECTIONS = ("todos", "todos_archive", "txn_log", "meta", "push_devices", "push_sent")
 BATCH = 400  # Firestore allows 500 writes per batch
