@@ -14,6 +14,15 @@ test("every registry field except title has an input group in the item form", ()
   }
 });
 
+test("FIELD_GROUPS covers every field calendar/calendar_event declare", () => {
+  for (const type of ["calendar", "calendar_event"]) {
+    for (const field of TypesData[type].fields) {
+      if (field === "title") continue; // title has its own input, not a FIELD_GROUPS entry
+      assert.ok(ItemForm.FIELD_GROUPS.includes(field), `${type} field "${field}" has no input`);
+    }
+  }
+});
+
 test("every registry icon exists in the icon set", () => {
   const src = fs.readFileSync(path.join(__dirname, "../web/ui-helpers.js"), "utf8");
   const set = new Set([...src.slice(src.indexOf("const ICONS")).matchAll(/^\s{2}([a-z]+):/gm)].map((m) => m[1]));

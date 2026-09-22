@@ -6,7 +6,7 @@
 const ItemForm = (() => {
   // Every editable field a type may list, in the order the sheet shows them. A field named in
   // types.json that is missing here has no input yet (tests/item-form.test.js checks this).
-  const FIELD_GROUPS = ["due_date", "repeat", "color", "links", "blocked_by", "references", "attachments"];
+  const FIELD_GROUPS = ["due_date", "calendar_url", "repeat", "color", "links", "blocked_by", "references", "attachments", "location"];
   // A new item only asks for what is needed to file it; the rest is one Edit away.
   const CREATE_FIELDS = ["due_date"];
 

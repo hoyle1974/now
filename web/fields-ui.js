@@ -145,6 +145,17 @@ const FieldsUI = (() => {
     return wrap;
   }
 
+  function renderUrlField(state, key, placeholder) {
+    const input = el("input");
+    input.type = "url";
+    input.inputMode = "url";
+    input.placeholder = placeholder;
+    input.value = state[key] || "";
+    input.autocapitalize = "off";
+    input.addEventListener("input", () => { state[key] = input.value; });
+    return input;
+  }
+
   // Searchable multi-select of the other todos.
   function renderTodoPicker(todo, ids, exclude = new Set()) {
     const { todosById } = deps.model;
@@ -215,6 +226,7 @@ const FieldsUI = (() => {
     const state = {
       color: Fields.COLORS.includes(todo.color) ? todo.color : null,
       links: (todo.links || []).map((l) => ({ url: l.url, label: l.label || "" })),
+      calendar_url: todo.calendar_url || "",
     };
     const blocked = new Set(base.blocked_by);
     const refs = new Set(base.references);
@@ -225,12 +237,14 @@ const FieldsUI = (() => {
       links: [label("Links"), renderLinksEditor(state)],
       blocked_by: [label("Blocked by"), renderTodoPicker(todo, blocked, blockerExclusions(todosById, todo))],
       references: [label("References"), renderTodoPicker(todo, refs)],
+      calendar_url: [label("Calendar URL"), renderUrlField(state, "calendar_url", "https://…/calendar.ics")],
     };
     function changes() {
       const cleaned = Fields.cleanLinks(state.links);
       if (cleaned.error) return { error: cleaned.error };
       return { fields: Fields.changedFields(base, {
         color: state.color, links: cleaned.links, blocked_by: [...blocked], references: [...refs],
+        calendar_url: state.calendar_url.trim() || null,
       }) };
     }
     return { groups, changes };
