@@ -207,6 +207,34 @@ def test_create_date_is_sent_as_an_explicit_utc_instant(db_setup):
     assert client.get(f"/todos/{created['todo_id']}").json()["create_date"].endswith("Z")
 
 
+def test_utc_instants_carry_a_z_and_wall_clock_times_stay_bare():
+    import datetime
+    when = datetime.datetime(2026, 9, 23, 15, 58)
+    dumped = models.Todo(
+        title="t", create_date=when, deleted_at=when, last_synced_at=when,
+        due_date=datetime.datetime(2026, 9, 23, 9, 30),
+        end_date=datetime.datetime(2026, 9, 23, 10, 0),
+    ).model_dump(mode="json")
+    assert dumped["create_date"] == "2026-09-23T15:58:00Z"
+    assert dumped["deleted_at"] == "2026-09-23T15:58:00Z"
+    assert dumped["last_synced_at"] == "2026-09-23T15:58:00Z"
+    assert dumped["due_date"] == "2026-09-23T09:30:00"
+    assert dumped["end_date"] == "2026-09-23T10:00:00"
+    assert models.as_utc_instant(when.replace(tzinfo=datetime.UTC)) == "2026-09-23T15:58:00Z"
+    fresh = models.Todo(title="t").model_dump(mode="json")
+    assert fresh["deleted_at"] is None and fresh["last_synced_at"] is None
+
+
+def test_trash_and_last_synced_stamps_are_explicit_utc(db_setup):
+    cal = client.post("/todos", json={"title": "cal", "type": "calendar"}).json()
+    db.mark_calendar_synced(cal["todo_id"], None)
+    synced = client.get("/todos/tree").json()["todosById"][cal["todo_id"]]["last_synced_at"]
+    assert synced.endswith("Z")
+    client.delete(f"/todos/{cal['todo_id']}")
+    item = client.get("/todos/trash").json()["items"][0]
+    assert item["deleted_at"].endswith("Z") and item["trashed_at"].endswith("Z")
+
+
 def test_due_date_stays_a_bare_wall_clock_time(db_setup):
     todo = client.post("/todos", json={"title": "t", "due_date": "2026-09-20T09:30:00"}).json()
     assert todo["due_date"] == "2026-09-20T09:30:00"

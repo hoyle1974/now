@@ -199,8 +199,8 @@ function renderViewer(todo, counts, trashed = null) {
     status.textContent = todo.last_sync_error
       ? `Last sync failed: ${todo.last_sync_error}`
       : todo.last_synced_at
-        // Server instant (naive UTC), like trashed.trashed_at above — not a due_date's
-        // bare wall-clock string, so Due.format is the wrong tool here.
+        // UTC instant (...Z), like trashed.trashed_at above — not a due_date's bare
+        // wall-clock string, so Due.format is the wrong tool here.
         ? `Last synced ${new Date(todo.last_synced_at).toLocaleString(undefined,
             { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
         : "Not yet synced";

@@ -16,6 +16,17 @@ def utc_now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC).replace(tzinfo=None)
 
 
+def as_utc_instant(v: datetime.datetime | None) -> str | None:
+    """A stored UTC instant for the wire, always with `Z`. Naive means UTC.
+    Without a marker a browser reads the digits as its own local time.
+    Wall-clock fields (due_date, end_date) must not use this."""
+    if v is None:
+        return None
+    if v.tzinfo is not None:
+        v = v.astimezone(datetime.UTC).replace(tzinfo=None)
+    return v.isoformat() + "Z"
+
+
 class TodoId(RootModel[uuid.UUID]):
     def __str__(self) -> str:
         return str(self.root)
@@ -180,9 +191,7 @@ class Todo(BaseModel):
     last_sync_error: str | None = Field(None)  # calendar type: server-managed
     blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree
 
-    @field_serializer("create_date", when_used="json")
-    def _create_date_as_utc(self, v: datetime.datetime) -> str:
-        # Stored naive but always UTC: say so on the wire ("Z"), or a browser reads
-        # the bare string as its own local time. due_date stays bare on purpose: it
-        # is the user's wall-clock time, not an instant.
-        return v.isoformat() + "Z" if v.tzinfo is None else v.isoformat()
+    @field_serializer("create_date", "deleted_at", "last_synced_at", when_used="json")
+    def _instants_as_utc(self, v: datetime.datetime | None) -> str | None:
+        # due_date and end_date stay bare: they are the user's wall-clock time.
+        return as_utc_instant(v)

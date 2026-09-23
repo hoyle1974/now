@@ -35,7 +35,8 @@ def _event(todo: models.Todo, parent_title: str | None, stamp: str) -> list[str]
     due = todo.due_date
     assert due is not None  # callers only pass dated todos
     lines = ["BEGIN:VEVENT", f"UID:{todo.todo_id}@now", f"DTSTAMP:{stamp}", f"SEQUENCE:{todo.version}"]
-    # A synced calendar_event knows its real end; everything else gets a default length.
+    # An item that carries end_date uses it. Otherwise a timed due lasts 30 minutes
+    # and an all-day due lasts one day.
     end = todo.end_date if todo.end_date and todo.end_date > due else None
     if due.time() == _MIDNIGHT:  # all-day (see docs/okf/features/due-time.md)
         last = end.date() if end and end.date() > due.date() else due.date() + datetime.timedelta(days=1)
@@ -52,15 +53,22 @@ def _event(todo: models.Todo, parent_title: str | None, stamp: str) -> list[str]
     return lines
 
 
+# A calendar subscribed to this feed would re-import its own events. `calendar` already
+# has notifies off; `calendar_event` does not, so the type check is what breaks the loop.
+_NOT_EXPORTED = frozenset({"calendar", "calendar_event"})
+
+
 def build_calendar(todos_by_id: dict[str, models.Todo], now: datetime.datetime | None = None) -> str:
     """Every live, not-done todo with a due date becomes one event. A repeating
-    todo is one event: its next occurrence only exists once it is completed."""
+    todo is one event: its next occurrence only exists once it is completed.
+    `calendar` and `calendar_event` items are left out so the feed cannot subscribe to itself."""
     stamp = (now or models.utc_now()).strftime("%Y%m%dT%H%M%SZ")
     lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//now//todos//EN", "CALSCALE:GREGORIAN",
              "METHOD:PUBLISH", "X-WR-CALNAME:now", "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
              "X-PUBLISHED-TTL:PT1H"]
     open_dated = sorted((t for t in todos_by_id.values()
-                         if t.due_date and not t.done and not t.deleted and types.can(t, "notifies")),
+                         if t.due_date and not t.done and not t.deleted and types.can(t, "notifies")
+                         and t.type not in _NOT_EXPORTED),
                         key=lambda t: (t.due_date, str(t.todo_id)))
     for t in open_dated:
         parent = todos_by_id.get(str(t.parent_id)) if t.parent_id else None

@@ -36,14 +36,16 @@ def test_all_day_and_timed_events():
     assert out.count("BEGIN:VEVENT") == 2 and out.count("TRANSP:TRANSPARENT") == 2
 
 
-def test_synced_event_uses_its_real_end():
-    timed = models.Todo(title="Planning", type="calendar_event", due_date=datetime.datetime(2026, 9, 25, 14),
+def test_feed_omits_calendars_and_synced_events():
+    """Exporting them back out loops: a calendar subscribed to this feed re-imports them."""
+    todo = mk("Pay rent", datetime.datetime(2026, 9, 25))
+    cal = models.Todo(title="Work", type="calendar", due_date=datetime.datetime(2026, 9, 25))
+    event = models.Todo(title="Planning", type="calendar_event", due_date=datetime.datetime(2026, 9, 25, 14),
                         end_date=datetime.datetime(2026, 9, 25, 15, 15))
-    trip = models.Todo(title="Trip", type="calendar_event", due_date=datetime.datetime(2026, 9, 26),
-                       end_date=datetime.datetime(2026, 9, 29))
-    out = feed(timed, trip)
-    assert "DTSTART:20260925T140000\r\nDTEND:20260925T151500" in out
-    assert "DTSTART;VALUE=DATE:20260926\r\nDTEND;VALUE=DATE:20260929" in out
+    out = feed(todo, cal, event)
+    assert "SUMMARY:Pay rent" in out
+    assert "SUMMARY:Work" not in out and "SUMMARY:Planning" not in out
+    assert out.count("BEGIN:VEVENT") == 1
 
 
 def test_month_end_all_day_rolls_over():

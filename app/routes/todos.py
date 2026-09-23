@@ -114,7 +114,8 @@ def get_trash(limit: int = Query(50, ge=1, le=TRASH_PAGE_MAX), offset: int = Que
     of its own). `q` filters by title, colour and links. `has_more` says whether a next page
     (offset + len(items)) exists."""
     entries, has_more = db.get_trash(limit, offset, q)
-    return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with, "trashed_at": jsonable_encoder(trashed_at)}
+    return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with,
+                       "trashed_at": models.as_utc_instant(trashed_at)}
                       for todo, deleted_with, trashed_at in entries],
             "has_more": has_more, "next_offset": offset + len(entries)}
 

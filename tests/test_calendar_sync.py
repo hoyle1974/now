@@ -236,6 +236,28 @@ def test_apply_calendar_sync_stores_and_updates_details(db_setup):
     assert db.apply_calendar_sync(str(cal.todo_id), [later]) == {"created": 0, "updated": 0, "deleted": 0}
 
 
+def test_calendar_events_are_indexed_by_date(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    later = calendar_sync.ParsedEvent("later@x", "Later", dt.datetime(2026, 3, 2, 9), None)
+    sooner = calendar_sync.ParsedEvent("sooner@x", "Sooner", dt.datetime(2026, 2, 1, 15), None)
+    mid = calendar_sync.ParsedEvent("mid@x", "Mid", dt.datetime(2026, 2, 1, 9), None)
+    db.apply_calendar_sync(str(cal.todo_id), [later, sooner, mid])
+
+    children = db.get_calendar_event_children(str(cal.todo_id))
+    assert [children[uid].order_idx for uid in ("mid@x", "sooner@x", "later@x")] == [0, 1, 2]
+
+    # A date change slides that event into place. The others keep their version:
+    # order is not content.
+    moved = calendar_sync.ParsedEvent("later@x", "Later", dt.datetime(2026, 1, 20, 9), None)
+    before = {uid: children[uid].version for uid in ("mid@x", "sooner@x")}
+    db.apply_calendar_sync(str(cal.todo_id), [moved, sooner, mid])
+    children = db.get_calendar_event_children(str(cal.todo_id))
+    assert [children[uid].order_idx for uid in ("later@x", "mid@x", "sooner@x")] == [0, 1, 2]
+    assert children["mid@x"].version == before["mid@x"]
+    assert children["sooner@x"].version == before["sooner@x"]
+
+
 def test_apply_calendar_sync_unchanged_event_is_not_written(db_setup):
     """A uid match with identical fields gets no write at all — not even a no-op patch —
     so its version/rev stay untouched and nothing looks changed to the client."""

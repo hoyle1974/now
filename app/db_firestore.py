@@ -801,24 +801,43 @@ def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = Non
         existing = get_calendar_event_children(calendar_id)
         by_todo_id = {str(todo.todo_id): todo for todo in existing.values()}
         to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
+        deleted = set(to_delete)
+        updates = {todo_id: event for todo_id, event in to_update}
 
-        # order_idx is assigned up front (like split_into_children) rather than left for
-        # create_todo's own "read the current max, then write" default: two or more
-        # creates in this one transaction would otherwise have the second create's read
-        # land after the first create's write, which Firestore transactions forbid.
-        next_order = _next_order_idx(calendar_id)
+        # order_idx is the list index. Events are read-only, so the sync owns it and
+        # keeps children in due-date order. Assigned here, before any write: a later
+        # read of the current max is illegal inside this transaction.
+        survivors: list[models.Todo] = []
+        for todo in existing.values():
+            if str(todo.todo_id) in deleted:
+                continue
+            event = updates.get(str(todo.todo_id))
+            if event is not None:
+                for field, value in event.todo_fields().items():
+                    setattr(todo, field, value)
+            survivors.append(todo)
+        created: list[models.Todo] = []
         for event in to_create:
             child = models.Todo(type="calendar_event", parent_id=models.TodoId(uuid.UUID(calendar_id)),
-                                external_uid=event.external_uid, order_idx=next_order,
-                                **event.todo_fields())
-            create_todo(child)
-            next_order += 1
+                                external_uid=event.external_uid, **event.todo_fields())
+            created.append(child)
+            survivors.append(child)
+        previous = {str(t.todo_id): t.order_idx for t in existing.values()}
+        survivors.sort(key=lambda t: (t.due_date or datetime.datetime.max, t.title or "", t.external_uid or ""))
+        for index, todo in enumerate(survivors):
+            todo.order_idx = index
 
-        for todo_id, event in to_update:
-            todo = by_todo_id[todo_id]
-            for field, value in event.todo_fields().items():
-                setattr(todo, field, value)
-            update_todo(todo)
+        for child in created:
+            create_todo(child)
+        for todo_id in updates:
+            update_todo(by_todo_id[todo_id])
+        # A sibling that only slid to a new date slot is not a content change.
+        for todo in survivors:
+            tid = str(todo.todo_id)
+            if tid in updates or todo in created:
+                continue
+            if previous.get(tid) != todo.order_idx:
+                update_todo(todo, bump_version=False)
 
         # Gone from the feed = gone for good: a synced event holds nothing the user wrote,
         # so it is hard-deleted rather than sent to the trash.
