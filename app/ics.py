@@ -35,12 +35,15 @@ def _event(todo: models.Todo, parent_title: str | None, stamp: str) -> list[str]
     due = todo.due_date
     assert due is not None  # callers only pass dated todos
     lines = ["BEGIN:VEVENT", f"UID:{todo.todo_id}@now", f"DTSTAMP:{stamp}", f"SEQUENCE:{todo.version}"]
+    # A synced calendar_event knows its real end; everything else gets a default length.
+    end = todo.end_date if todo.end_date and todo.end_date > due else None
     if due.time() == _MIDNIGHT:  # all-day (see docs/okf/features/due-time.md)
+        last = end.date() if end and end.date() > due.date() else due.date() + datetime.timedelta(days=1)
         lines.append(f"DTSTART;VALUE=DATE:{due:%Y%m%d}")
-        lines.append(f"DTEND;VALUE=DATE:{due.date() + datetime.timedelta(days=1):%Y%m%d}")
+        lines.append(f"DTEND;VALUE=DATE:{last:%Y%m%d}")
     else:  # floating time: the user's wall clock, whatever timezone the calendar is in
         lines.append(f"DTSTART:{due:%Y%m%dT%H%M%S}")
-        lines.append(f"DTEND:{due + datetime.timedelta(minutes=TIMED_MINUTES):%Y%m%dT%H%M%S}")
+        lines.append(f"DTEND:{end or due + datetime.timedelta(minutes=TIMED_MINUTES):%Y%m%dT%H%M%S}")
     lines.append(f"SUMMARY:{escape_text(todo.title)}")
     if parent_title:
         lines.append(f"DESCRIPTION:{escape_text('Subtask of: ' + parent_title)}")

@@ -99,7 +99,12 @@
       "fields": [
         "title",
         "due_date",
-        "location"
+        "location",
+        "end_date",
+        "repeat_summary",
+        "conference_url",
+        "attendees",
+        "notes"
       ],
       "hasCheckbox": false,
       "appearsInNextUp": true,

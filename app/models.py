@@ -66,6 +66,18 @@ class Attachment(BaseModel):
     content_type: str
     size: int
 
+AttendeeStatus = Literal["accepted", "declined", "tentative", "needs-action"]
+# Caps for what a calendar sync copies in, so one huge invite can't push a document past 1 MiB.
+MAX_NOTES_LEN = 10_000
+MAX_ATTENDEES = 200
+
+class Attendee(BaseModel):
+    """One guest on a synced calendar event (ICS ATTENDEE), as the feed reported them."""
+    name: str | None = Field(None)
+    email: str | None = Field(None)
+    status: AttendeeStatus = Field("needs-action")
+    organizer: bool = Field(False)
+
 class TodoCreate(BaseModel):
     title: str = Field(max_length=MAX_TITLE_LEN)
     color: Color | None = Field(None)  # the client picks one so it can show it at once; omitted = server picks
@@ -157,6 +169,12 @@ class Todo(BaseModel):
     attachments: list[Attachment] = Field([])  # only changed via the attachment endpoints
     calendar_url: str | None = Field(None)  # calendar type: the source ICS feed URL
     location: str | None = Field(None)      # calendar_event type: from the source ICS event
+    # calendar_event type, all copied from the source ICS event by the sync (never user-edited):
+    end_date: datetime.datetime | None = Field(None)  # floating wall-clock like due_date; all-day = exclusive midnight
+    notes: str | None = Field(None)            # DESCRIPTION, as plain text
+    repeat_summary: str | None = Field(None)   # the series' RRULE in words ("Weekly on Mon"); None = one-off
+    conference_url: str | None = Field(None)   # video-call link
+    attendees: list[Attendee] = Field([])
     external_uid: str | None = Field(None)  # calendar_event type: stable id from the source feed, for sync matching
     last_synced_at: datetime.datetime | None = Field(None)  # calendar type: server-managed
     last_sync_error: str | None = Field(None)  # calendar type: server-managed

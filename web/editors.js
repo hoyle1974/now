@@ -151,8 +151,36 @@ function renderViewer(todo, counts, trashed = null) {
   };
   fact("Type", Types.get(todo).label);
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
-  if (Types.hasField(todo, "due_date")) fact("Due", todo.due_date ? Due.format(todo.due_date) : "No due date");
+  if (Types.hasField(todo, "due_date")) {
+    fact(todo.end_date ? "When" : "Due", todo.due_date ? Due.formatSpan(todo.due_date, todo.end_date) : "No due date");
+  }
+  if (Types.hasField(todo, "repeat_summary") && todo.repeat_summary) fact("Repeats", todo.repeat_summary);
   if (Types.hasField(todo, "location") && todo.location) fact("Location", todo.location);
+  if (Types.hasField(todo, "conference_url") && todo.conference_url && Fields.isSafeUrl(todo.conference_url) && !trashed) {
+    add(facts, "dt", "sheet-label", "Video call");
+    const dd = add(facts, "dd", "view-value", "");
+    const a = add(dd, "a", "detail-item detail-link", "Join call");
+    a.href = todo.conference_url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+  }
+  if (Types.hasField(todo, "attendees") && todo.attendees && todo.attendees.length) {
+    add(facts, "dt", "sheet-label", "Guests");
+    const dd = add(facts, "dd", "view-value", "");
+    add(dd, "p", "guest-summary", Fields.guestSummary(todo.attendees));
+    const list = add(dd, "ul", "guest-list", "");
+    for (const guest of Fields.sortedGuests(todo.attendees)) {
+      const li = add(list, "li", guest.status === "declined" ? "guest guest--declined" : "guest", "");
+      const who = add(li, "span", "guest-name", guest.name || guest.email || "Unknown");
+      if (guest.name && guest.email) who.title = guest.email;
+      add(li, "span", "guest-status",
+        guest.organizer ? `Organizer · ${Fields.guestStatusLabel(guest)}` : Fields.guestStatusLabel(guest));
+    }
+  }
+  if (Types.hasField(todo, "notes") && todo.notes) {
+    add(facts, "dt", "sheet-label", "Notes");
+    add(facts, "dd", "view-value view-notes", todo.notes);
+  }
   if (todo.repeat && Types.hasField(todo, "repeat")) fact("Repeats", Due.formatRepeat(todo.repeat));
   if (counts && counts.total && Types.can(todo, "showsProgress")) fact("Subtasks", `${counts.done} of ${counts.total} done`);
   if (!trashed && Fields.isBlocked(todo, model.todosById)) fact("Blocked", "Waiting on an unfinished todo");

@@ -154,6 +154,14 @@ function renderMeta(todo, hasChildren, counts) {
     label.textContent = Due.formatRepeat(todo.repeat);
     rep.append(icon("repeat"), label);
     meta.appendChild(rep);
+  } else if (todo.repeat_summary && Types.hasField(todo, "repeat_summary")) {
+    // A synced event's series: the same chip, with the feed's rule in words.
+    const rep = document.createElement("span");
+    rep.className = "todo-chip";
+    const label = document.createElement("span");
+    label.textContent = todo.repeat_summary;
+    rep.append(icon("repeat"), label);
+    meta.appendChild(rep);
   }
 
   if (todo.due_date && Types.hasField(todo, "due_date")) {

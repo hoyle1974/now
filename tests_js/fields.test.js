@@ -119,3 +119,18 @@ test("a container's dormant blocked_by does not make it blocked", () => {
   assert.equal(Fields.isBlocked({ type: "list", blocked_by: ["p"] }, byId), false);
   assert.equal(Fields.isBlocked({ type: "todo", blocked_by: ["p"] }, byId), true);
 });
+
+test("guests: organizer first, then by response; summary skips empty statuses", () => {
+  const guests = [
+    { name: "Sam", status: "declined" },
+    { name: "Kim", status: "needs-action" },
+    { name: "Ada", status: "accepted" },
+    { name: "Dana", status: "accepted", organizer: true },
+    { name: "Lee", status: "tentative" },
+    { name: "Odd", status: "delegated" },
+  ];
+  assert.deepEqual(Fields.sortedGuests(guests).map((g) => g.name), ["Dana", "Ada", "Lee", "Kim", "Odd", "Sam"]);
+  assert.equal(Fields.guestSummary(guests), "2 going · 1 maybe · 2 no reply · 1 not going");
+  assert.equal(Fields.guestSummary([]), "");
+  assert.equal(Fields.guestStatusLabel({ status: "tentative" }), "Maybe");
+});

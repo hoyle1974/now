@@ -124,5 +124,25 @@
     return { title, due_date: dueDate || null, repeat: dueDate ? repeat : null, ...fields };
   }
 
-  return { patchPayload, COLORS, effectiveColor, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
+  // ---- calendar event guests (sync-only, see docs/okf/features/calendar-sync.md) ----
+  const GUEST_STATUS = { accepted: "Going", tentative: "Maybe", "needs-action": "No reply", declined: "Not going" };
+  const GUEST_ORDER = ["accepted", "tentative", "needs-action", "declined"];
+  const statusOf = (g) => (GUEST_STATUS[g.status] ? g.status : "needs-action");
+
+  // Organizer first, then going, maybe, no reply, not going; the feed's order within each.
+  function sortedGuests(attendees) {
+    const rank = (g) => (g.organizer ? -1 : GUEST_ORDER.indexOf(statusOf(g)));
+    return (attendees || []).map((g, i) => ({ g, i }))
+      .sort((a, b) => rank(a.g) - rank(b.g) || a.i - b.i).map(({ g }) => g);
+  }
+
+  // "3 going · 1 maybe · 2 no reply"; statuses nobody has are left out.
+  function guestSummary(attendees) {
+    return GUEST_ORDER.map((s) => [s, (attendees || []).filter((g) => statusOf(g) === s).length])
+      .filter(([, n]) => n).map(([s, n]) => `${n} ${GUEST_STATUS[s].toLowerCase()}`).join(" · ");
+  }
+
+  const guestStatusLabel = (g) => GUEST_STATUS[statusOf(g)];
+
+  return { sortedGuests, guestSummary, guestStatusLabel, patchPayload, COLORS, effectiveColor, MAX_LINKS, isBlocked, resolveRefs, isSafeUrl, cleanLinks, relativeIds, pickerCandidates, sameIds, changedFields };
 });

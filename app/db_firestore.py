@@ -800,16 +800,16 @@ def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = Non
         # land after the first create's write, which Firestore transactions forbid.
         next_order = _next_order_idx(calendar_id)
         for event in to_create:
-            child = models.Todo(title=event.title, type="calendar_event",
-                                parent_id=models.TodoId(uuid.UUID(calendar_id)),
-                                due_date=event.due_date, external_uid=event.external_uid,
-                                location=event.location, order_idx=next_order)
+            child = models.Todo(type="calendar_event", parent_id=models.TodoId(uuid.UUID(calendar_id)),
+                                external_uid=event.external_uid, order_idx=next_order,
+                                **event.todo_fields())
             create_todo(child)
             next_order += 1
 
         for todo_id, event in to_update:
             todo = by_todo_id[todo_id]
-            todo.title, todo.due_date, todo.location = event.title, event.due_date, event.location
+            for field, value in event.todo_fields().items():
+                setattr(todo, field, value)
             update_todo(todo)
 
         for todo_id in to_delete:
