@@ -755,6 +755,18 @@ test("patch applies and sends color/links/blocked_by/references; null clears col
   assert.equal(req.headers["If-Match"], "3");
 });
 
+test("patch applies and sends calendar_url; null clears it", () => {
+  const model = Sync.createModel();
+  const a = todo("a", { type: "calendar", calendar_url: "https://old.example/f.ics" });
+  Object.assign(model, treeOf(a));
+  const payload = { calendar_url: "https://calendar.example/basic.ics" };
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload });
+  assert.equal(a.calendar_url, payload.calendar_url);
+  assert.deepEqual(Sync.buildRequest({ kind: "patch", target_id: "a", txn_id: "t", payload }, 3).body, payload);
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload: { calendar_url: null } });
+  assert.equal(a.calendar_url, null);
+});
+
 test("color patches coalesce with other field edits", async () => {
   const h = harness({ tree: treeOf(todo("a"), todo("b")), script: [] });
   h.engine.enqueue({ kind: "patch", target_id: "b", payload: { title: "y" } });

@@ -54,7 +54,7 @@ def test_registry_has_calendar_types_and_new_flags():
     assert types.can_type("calendar", "appearsInNextUp") is False
     # No attachments (images) on calendar items: the user doesn't need to add
     # images to a calendar feed.
-    assert types.caps("calendar")["fields"] == ["title", "calendar_url", "color", "links", "references"]
+    assert types.caps("calendar")["fields"] == ["title", "calendar_url", "color"]
     assert not types.has_field_type("calendar", "attachments")
 
 

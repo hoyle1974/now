@@ -68,7 +68,7 @@
   "calendar": {
     "label": "Calendar",
     "icon": "calendar",
-    "fields": ["title", "calendar_url", "color", "links", "references"],
+    "fields": ["title", "calendar_url", "color"],
     "hasCheckbox": false,
     "appearsInNextUp": false,
     "triggersAutodone": false,

@@ -80,9 +80,7 @@
       "fields": [
         "title",
         "calendar_url",
-        "color",
-        "links",
-        "references"
+        "color"
       ],
       "hasCheckbox": false,
       "appearsInNextUp": false,
