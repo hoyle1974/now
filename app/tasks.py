@@ -133,15 +133,18 @@ CALENDAR_STALE_AFTER = datetime.timedelta(hours=6)
 SYNC_CALENDAR_PATH = "/internal/sync-calendar"
 
 
-def _sync_task_name(queue: str, calendar_id: str, now_utc: datetime.datetime) -> str:
+def _sync_task_name(queue: str, calendar_id: str, now_utc: datetime.datetime, manual: bool = False) -> str:
     # Bucketed by hour so two page loads in the same hour dedupe to one task
     # (Cloud Tasks refuses a duplicate name; AlreadyExists is swallowed below).
-    bucket = now_utc.strftime("%Y%m%dT%H")
-    return f"{queue}/tasks/calsync-{calendar_id}-{bucket}"
+    # A manual "Sync now" gets its own per-minute bucket, so it isn't swallowed
+    # by a page-load task from earlier in the same hour.
+    if manual:
+        return f"{queue}/tasks/calsync-{calendar_id}-{now_utc.strftime('%Y%m%dT%H%M')}-manual"
+    return f"{queue}/tasks/calsync-{calendar_id}-{now_utc.strftime('%Y%m%dT%H')}"
 
 
 def create_calendar_sync_task(calendar_id: str, client_session_id: str | None = None,
-                              now_utc: datetime.datetime | None = None) -> bool:
+                              now_utc: datetime.datetime | None = None, manual: bool = False) -> bool:
     """Enqueue the sync Cloud Task for one calendar, to run right away.
     Reuses the reminder queue/OIDC plumbing (no new env vars). False when
     reminders aren't configured here; an existing task for this hour is fine."""
@@ -157,7 +160,7 @@ def create_calendar_sync_task(calendar_id: str, client_session_id: str | None = 
     if _client is None:
         _client = tasks_v2.CloudTasksClient()
     task = tasks_v2.Task(
-        name=_sync_task_name(queue, calendar_id, now_utc),
+        name=_sync_task_name(queue, calendar_id, now_utc, manual),
         http_request=tasks_v2.HttpRequest(
             url=url + SYNC_CALENDAR_PATH + f"/{calendar_id}", http_method=tasks_v2.HttpMethod.POST,
             headers={"Content-Type": "application/json"},
@@ -171,16 +174,24 @@ def create_calendar_sync_task(calendar_id: str, client_session_id: str | None = 
 
 def enqueue_calendar_sync(calendar_id: str, last_synced_at: datetime.datetime | None,
                           now_utc: datetime.datetime, threshold: datetime.timedelta = CALENDAR_STALE_AFTER,
-                          client_session_id: str | None = None,
+                          client_session_id: str | None = None, manual: bool = False,
                           create: Callable[[str, str | None], bool] | None = None) -> bool:
     """The one staleness check every trigger (list load, manual button, digest) shares.
     True when a sync was enqueued (or would have been, for the manual button which
-    always calls this with last_synced_at forced stale)."""
-    stale = last_synced_at is None or now_utc - last_synced_at >= threshold
-    if not stale:
-        return False
+    always calls this with last_synced_at forced stale). Never raises: the digest
+    and the tree-load nudge call it and must not fail because of a calendar."""
     try:
-        return (create or create_calendar_sync_task)(calendar_id, client_session_id)
+        if last_synced_at is not None and last_synced_at.tzinfo is None:
+            # Firestore round-trips it without tzinfo (mark_calendar_synced stores naive UTC).
+            last_synced_at = last_synced_at.replace(tzinfo=_UTC)
+        stale = last_synced_at is None or now_utc - last_synced_at >= threshold
+        if not stale:
+            return False
+        if create:
+            return create(calendar_id, client_session_id)
+        if manual:
+            return create_calendar_sync_task(calendar_id, client_session_id, manual=True)
+        return create_calendar_sync_task(calendar_id, client_session_id)
     except Exception:
         log.exception("calendar sync not enqueued for %s", calendar_id)
         return False

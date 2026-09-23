@@ -269,3 +269,21 @@ def test_enqueue_calendar_sync_threads_client_session_id():
                                 client_session_id="s1",
                                 create=lambda cid, csid: calls.append((cid, csid)) or True)
     assert calls == [("cal-1", "s1")]
+
+
+def test_enqueue_calendar_sync_accepts_naive_last_synced_at():
+    # Firestore hands last_synced_at back without tzinfo (UTC by convention).
+    calls = []
+    now = at("2026-02-01T12:00:00+00:00")
+    fresh = tasks.enqueue_calendar_sync("cal-1", dt.datetime(2026, 2, 1, 11), now,
+                                        create=lambda cid, csid=None: calls.append(cid) or True)
+    stale = tasks.enqueue_calendar_sync("cal-1", dt.datetime(2026, 2, 1, 5), now,
+                                        create=lambda cid, csid=None: calls.append(cid) or True)
+    assert (fresh, stale) == (False, True)
+    assert calls == ["cal-1"]
+
+
+def test_sync_task_name_manual_is_per_minute():
+    t = at("2026-02-01T12:34:56+00:00")
+    assert tasks._sync_task_name("q", "c", t).endswith("calsync-c-20260201T12")
+    assert tasks._sync_task_name("q", "c", t, manual=True).endswith("calsync-c-20260201T1234-manual")
