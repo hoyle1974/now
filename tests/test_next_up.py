@@ -16,8 +16,9 @@ def d(day: int) -> datetime.datetime:
 _ALL: dict[str, models.Todo] = {}
 
 
-def mk(title, due=None, done=False, order=None, kids=(), blocked_by=(), deleted=False):
-    t = models.Todo(title=title, due_date=due, done=done, order_idx=order,
+def mk(title, due=None, done=False, order=None, kids=(), blocked_by=(), deleted=False,
+       type="todo"):
+    t = models.Todo(title=title, due_date=due, done=done, order_idx=order, type=type,
                     blocked_by=[b.todo_id for b in blocked_by], deleted=deleted)
     t.child_ids = [k.todo_id for k in kids]
     for k in kids:
@@ -184,3 +185,63 @@ def test_fills_to_limit_with_next_most_urgent():
     todos = [mk("due", d(20)), mk("a", d(22)), mk("b", d(23)), mk("undated")]
     titles = [i["title"] for i in rank(*todos, limit=3, today=datetime.date(2026, 9, 20))]
     assert titles == ["due", "a", "b"]
+
+
+# ---- calendar events: they don't consume the limit --------------------------
+
+_TODAY = datetime.date(2026, 9, 20)
+
+
+def event(title, due):
+    return mk(title, due, type="calendar_event")
+
+
+def test_events_due_today_are_added_on_top_of_a_full_todo_list():
+    todos = [mk(f"t{i}", d(21)) for i in range(10)]
+    stand_up, lunch = event("stand-up", at(20, 9)), event("lunch", at(20, 12))
+    out = rank(*todos, stand_up, lunch, limit=10, today=_TODAY)
+    assert titles(out) == ["stand-up", "lunch", *[f"t{i}" for i in range(10)]]
+
+
+def test_overdue_events_are_added_even_when_todos_already_pass_the_limit():
+    todos = [mk(f"due{i}", d(10)) for i in range(12)]
+    yesterday = event("yesterday", d(19))
+    out = rank(*todos, yesterday, limit=10, today=_TODAY)
+    assert titles(out) == ["due0", "due1", "due2", "due3", "due4", "due5", "due6",
+                           "due7", "due8", "due9", "due10", "due11", "yesterday"]
+
+
+def test_future_events_fill_only_the_slots_left_under_the_limit():
+    todos = [mk("a", d(21)), mk("b", d(22)), mk("c", d(23))]
+    events = [event(f"e{i}", d(24 + i)) for i in range(5)]
+    assert titles(rank(*todos, *events, limit=5, today=_TODAY)) == ["a", "b", "c", "e0", "e1"]
+
+
+def test_future_events_stop_once_today_events_already_reach_the_limit():
+    todos = [mk(f"t{i}", d(21)) for i in range(8)]
+    today_events = [event(f"now{i}", at(20, 9 + i)) for i in range(3)]
+    later = [event(f"later{i}", d(25 + i)) for i in range(4)]
+    out = rank(*todos, *today_events, *later, limit=10, today=_TODAY)
+    assert titles(out) == ["now0", "now1", "now2", *[f"t{i}" for i in range(8)]]
+
+
+def test_without_today_events_only_fill_leftover_slots():
+    todos = [mk(f"t{i}", d(21)) for i in range(10)]
+    meet = event("meet", d(20))
+    assert titles(rank(*todos, meet, limit=10)) == [f"t{i}" for i in range(10)]
+    short = [mk("a", d(21)), mk("b", d(22))]
+    fillers = [event(f"e{i}", d(23 + i)) for i in range(4)]
+    assert titles(rank(*short, *fillers, limit=4)) == ["a", "b", "e0", "e1"]
+
+
+def test_an_event_keeps_its_place_by_due_date_among_the_todos():
+    undated, later, meet = mk("undated"), mk("later", d(25)), event("meet", at(20, 9))
+    assert titles(rank(undated, later, meet, today=_TODAY)) == ["meet", "later", "undated"]
+
+
+def test_inserting_an_event_does_not_reorder_a_blocker():
+    blocker = mk("blocker")
+    blocked = mk("blocked", d(10), blocked_by=[blocker])
+    meet = event("meet", at(10, 9))
+    assert titles(rank(blocked, blocker, meet, today=datetime.date(2026, 9, 10))) == [
+        "meet", "blocker", "blocked"]

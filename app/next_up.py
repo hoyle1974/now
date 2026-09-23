@@ -18,6 +18,13 @@ The list is `limit` long, but never cuts off a todo whose effective due date is
 `today` or earlier (when `today` is given): all of those are shown, and if they
 number fewer than `limit` the next most urgent fill it up.
 
+Calendar events do not consume that limit. The `limit` slots are filled from
+everything else first. Events due today or earlier (when `today` is given) are
+then always added, even past `limit`. If the combined list is still shorter
+than `limit`, the nearest later events fill the remaining slots. The merged
+list keeps the non-event order (including blockers pulled up) and slots each
+event in by the same due-date key.
+
 Blocking: a todo waits on the open todos in its blocked_by (and its ancestors').
 After ranking, each blocker is pulled up to sit just above what it blocks, so
 the blocked todo is never demoted for it. A blocker with open subtasks brings
@@ -139,15 +146,10 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
 
     for cand in candidates:
         place(cand)
-    candidates = ordered
-
-    if today is not None:
-        due_now = [i for i, c in enumerate(candidates) if c[0].date() <= today]
-        if due_now:
-            limit = max(limit, due_now[-1] + 1)
+    candidates = _with_calendar_events(ordered, limit, today)
 
     items = []
-    for rank, (_, _, _, todo, titles, effective, source) in enumerate(candidates[:limit], start=1):
+    for rank, (_, _, _, todo, titles, effective, source) in enumerate(candidates, start=1):
         items.append({
             "rank": rank,
             "todo_id": str(todo.todo_id),
@@ -160,3 +162,49 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
             "blocked_by": [b.title for b in open_blockers(todo)],
         })
     return items
+
+
+def _sort_key(cand: tuple):
+    return (cand[0], cand[1], cand[2])
+
+
+def _with_calendar_events(ordered: list[tuple], limit: int,
+                          today: datetime.date | None) -> list[tuple]:
+    """Fill `limit` from non-events, then add events without letting them crowd todos out.
+
+    A type check, not a registry flag: the exemption is "this is a synced event",
+    which no other `appearsInNextUp` type shares.
+    """
+    events = [c for c in ordered if c[3].type == "calendar_event"]
+    rest = [c for c in ordered if c[3].type != "calendar_event"]
+
+    work_limit = limit
+    if today is not None:
+        due_now = [i for i, c in enumerate(rest) if c[0].date() <= today]
+        if due_now:
+            work_limit = max(limit, due_now[-1] + 1)
+    chosen = rest[:work_limit]
+
+    if today is not None:
+        due_events = [c for c in events if c[0].date() <= today]
+        later_events = [c for c in events if c[0].date() > today]
+    else:
+        due_events = []
+        later_events = list(events)
+    later_events.sort(key=_sort_key)
+
+    selected = list(due_events)
+    room = limit - len(chosen) - len(selected)
+    if room > 0:
+        selected.extend(later_events[:room])
+    selected.sort(key=_sort_key)
+
+    merged: list[tuple] = []
+    ei = 0
+    for cand in chosen:
+        while ei < len(selected) and _sort_key(selected[ei]) < _sort_key(cand):
+            merged.append(selected[ei])
+            ei += 1
+        merged.append(cand)
+    merged.extend(selected[ei:])
+    return merged

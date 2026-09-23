@@ -3,7 +3,7 @@ type: Architecture
 title: Client/server split
 description: Which features put their logic in the browser vs the backend, and why — plus the rule for deciding new ones.
 tags: [architecture, frontend, backend]
-timestamp: 2026-09-22T23:30:00Z
+timestamp: 2026-09-23T06:35:00Z
 ---
 The backend is often just CRUD + optimistic concurrency over the [Todo](../data/todo.md) model; a lot of real behaviour is decided entirely client-side, over data the server stores unchanged. This page names which features fall on which side and why, so the split is a decision on record, not an accident of who wrote it first.
 
@@ -31,7 +31,7 @@ The server has no route, model field or algorithm backing these — it just stor
 
 These stay server-side on purpose, usually because they need atomicity, cross-device consistency, or to run when no client is open — moving them to the client would break the feature, not just relocate it.
 
-- **Next up ranking** ([next up](../features/next-up.md)) — `app/next_up.py` (effective due date, blocking, list-position tiebreaks) runs server-side so the ranking is identical across every device; `web/next-up-ui.js` only renders what it returns.
+- **Next up ranking** ([next up](../features/next-up.md)) — `app/next_up.py` (effective due date, blocking, list-position tiebreaks, and the calendar-event limit exemption) runs server-side so the ranking is identical across every device; `web/next-up-ui.js` only renders what it returns.
 - **Repeat/recurrence** ([repeating todos](../features/repeating-todos.md)) — `app/recurrence.py`'s next-occurrence math runs inside the same atomic transaction that creates the next todo (`repeat_todo`); doing this client-side risks duplicate or missing occurrences.
 - **Push digest and heads-ups** ([push reminders](../features/push-reminders.md)) — `app/push.py`/`app/tasks.py` must run server-side; they fire on a schedule whether or not a client is open.
 - **Calendar feed** ([calendar feed](../features/calendar-feed.md)) — `app/ics.py` is consumed by external calendar apps, not the web UI; there is no client to move it to.

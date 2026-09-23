@@ -135,7 +135,8 @@ Design: `docs/superpowers/specs/2026-09-18-optimistic-sync-design.md`.
 The second tab lists the top 10 things to work on. `GET /todos/next`
 (`app/next_up.py`) ranks open todos that have no open subtasks by: the earlier of
 their own due date and their nearest due ancestor's, then their own due date, then
-list order. The client only draws the answer. Tapping a row jumps to the list with
+list order. Calendar events do not count toward the 10; ones due today are always
+shown. The client only draws the answer. Tapping a row jumps to the list with
 that todo scrolled under the finger.
 
 ## Tests
