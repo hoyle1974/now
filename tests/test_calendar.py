@@ -36,6 +36,16 @@ def test_all_day_and_timed_events():
     assert out.count("BEGIN:VEVENT") == 2 and out.count("TRANSP:TRANSPARENT") == 2
 
 
+def test_synced_event_uses_its_real_end():
+    timed = models.Todo(title="Planning", type="calendar_event", due_date=datetime.datetime(2026, 9, 25, 14),
+                        end_date=datetime.datetime(2026, 9, 25, 15, 15))
+    trip = models.Todo(title="Trip", type="calendar_event", due_date=datetime.datetime(2026, 9, 26),
+                       end_date=datetime.datetime(2026, 9, 29))
+    out = feed(timed, trip)
+    assert "DTSTART:20260925T140000\r\nDTEND:20260925T151500" in out
+    assert "DTSTART;VALUE=DATE:20260926\r\nDTEND;VALUE=DATE:20260929" in out
+
+
 def test_month_end_all_day_rolls_over():
     assert "DTEND;VALUE=DATE:20261001" in feed(mk("x", datetime.datetime(2026, 9, 30)))
 

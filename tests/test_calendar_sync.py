@@ -43,29 +43,94 @@ def test_parse_clips_to_window():
     assert {e.external_uid for e in events} == {"event-1@example.com"}  # event-2 is Feb 3, outside
 
 
-def test_parse_expands_recurrence_into_occurrences():
+def test_parse_recurring_series_is_only_its_next_occurrence():
+    # A weekly series is one item (its bare UID), not one per occurrence in the window.
     events = calendar_sync.parse_ics(read("recurring.ics"), dt.date(2026, 1, 1), dt.date(2026, 4, 1))
-    assert len(events) == 8
-    uids = {e.external_uid for e in events}
-    assert len(uids) == 8  # each occurrence gets a distinct uid
-    assert all(e.title == "Team sync" for e in events)
-    assert sorted(e.due_date for e in events)[0] == dt.datetime(2026, 2, 2, 10, 0, 0)
+    assert len(events) == 1
+    [e] = events
+    assert e.external_uid == "weekly-meeting@example.com"
+    assert e.due_date == dt.datetime(2026, 2, 2, 10, 0, 0)
+    assert e.end_date == dt.datetime(2026, 2, 2, 10, 30, 0)
+    assert e.repeat_summary == "Weekly"
 
 
-def test_parse_recurring_uid_is_stable_across_different_windows():
-    # Regression: the external_uid for a given occurrence must not depend on how many
-    # occurrences of that series happen to fall inside THIS call's window. Window A sees
-    # two occurrences of the weekly series (Feb 2 and Feb 9); window B, sliding past Feb 2,
-    # sees only the Feb 9 occurrence alone. The Feb 9 occurrence must get the same
-    # external_uid in both calls, or a later sync would see it as deleted+recreated.
-    window_a = calendar_sync.parse_ics(read("recurring.ics"), dt.date(2026, 2, 2), dt.date(2026, 2, 10))
-    window_b = calendar_sync.parse_ics(read("recurring.ics"), dt.date(2026, 2, 9), dt.date(2026, 2, 10))
-    assert len(window_a) == 2
-    assert len(window_b) == 1
-    feb_9 = dt.datetime(2026, 2, 9, 10, 0, 0)
-    uid_in_a = next(e.external_uid for e in window_a if e.due_date == feb_9)
-    uid_in_b = next(e.external_uid for e in window_b if e.due_date == feb_9)
-    assert uid_in_a == uid_in_b
+def test_parse_series_moves_forward_once_an_occurrence_ends():
+    # The same UID, stepped to the next occurrence: a later sync patches the item in place.
+    during = calendar_sync.parse_ics(read("recurring.ics"), dt.date(2026, 2, 2), dt.date(2026, 4, 1),
+                                     now=dt.datetime(2026, 2, 2, 10, 15))
+    after = calendar_sync.parse_ics(read("recurring.ics"), dt.date(2026, 2, 2), dt.date(2026, 4, 1),
+                                    now=dt.datetime(2026, 2, 2, 10, 30))
+    assert [e.due_date for e in during] == [dt.datetime(2026, 2, 2, 10, 0)]  # still on: keep it
+    assert [e.due_date for e in after] == [dt.datetime(2026, 2, 9, 10, 0)]
+    assert during[0].external_uid == after[0].external_uid == "weekly-meeting@example.com"
+
+
+def test_parse_series_honours_exdate_and_moved_instance():
+    def next_standup(now):
+        events = calendar_sync.parse_ics(read("series.ics"), now.date(), now.date() + dt.timedelta(days=60),
+                                         now=now, series_window_end=now.date() + dt.timedelta(days=366))
+        return next(e for e in events if e.external_uid == "standup@example.com")
+
+    assert next_standup(dt.datetime(2026, 2, 3, 12, 0)).due_date == dt.datetime(2026, 2, 5, 11, 30)  # Wed skipped
+    moved = next_standup(dt.datetime(2026, 2, 5, 10, 0))
+    assert (moved.title, moved.due_date) == ("Standup (moved)", dt.datetime(2026, 2, 5, 11, 30))
+    assert moved.repeat_summary == "Every weekday"
+    assert next_standup(dt.datetime(2026, 2, 5, 12, 0)).due_date == dt.datetime(2026, 2, 6, 9, 30)
+
+
+def test_parse_series_looks_past_the_one_off_window():
+    # A yearly event months away still shows its next occurrence; one-offs keep the short window.
+    now = dt.datetime(2026, 3, 1, 8, 0)
+    events = calendar_sync.parse_ics(read("series.ics"), now.date(), now.date() + dt.timedelta(days=60),
+                                     now=now, series_window_end=now.date() + dt.timedelta(days=366))
+    birthday = next(e for e in events if e.external_uid == "birthday@example.com")
+    assert birthday.due_date == dt.datetime(2026, 7, 20)
+    assert birthday.repeat_summary == "Yearly"
+
+
+def test_parse_all_day_series_occurrence_lasts_the_day():
+    now = dt.datetime(2026, 7, 20, 18, 0)
+    events = calendar_sync.parse_ics(read("series.ics"), now.date(), now.date() + dt.timedelta(days=60),
+                                     now=now, series_window_end=now.date() + dt.timedelta(days=366))
+    birthday = next(e for e in events if e.external_uid == "birthday@example.com")
+    assert birthday.due_date == dt.datetime(2026, 7, 20)  # still today, not next year
+
+
+def test_parse_event_details():
+    events = {e.external_uid: e for e in calendar_sync.parse_ics(
+        read("details.ics"), dt.date(2026, 2, 1), dt.date(2026, 3, 1))}
+    assert "cancelled@example.com" not in events
+    planning = events["planning@example.com"]
+    assert planning.end_date == dt.datetime(2026, 2, 5, 15, 0)
+    assert planning.location is None  # no LOCATION: the description is not used in its place
+    assert planning.notes == "Agenda:\n1. Budget\n2. Q&A"  # HTML and Google's dial-in block removed
+    assert planning.conference_url == "https://meet.google.com/abc-defg-hij"
+    assert planning.repeat_summary is None
+    assert [(a.name, a.email, a.status, a.organizer) for a in planning.attendees] == [
+        ("Dana Lee", "dana@example.com", "accepted", True),
+        (None, "sam@example.com", "declined", False),  # CN that only repeats the email is dropped
+        (None, "kim@example.com", "tentative", False),
+        ("Pat", "pat@example.com", "needs-action", False),
+    ]  # rooms and resources left out
+    vendor = events["zoom@example.com"]
+    assert vendor.end_date == dt.datetime(2026, 2, 6, 9, 45)  # from DURATION
+    assert vendor.conference_url == "https://acme.zoom.us/j/123456?pwd=xyz"
+    assert vendor.attendees == ()
+
+
+@pytest.mark.parametrize("rule, words", [
+    ("FREQ=DAILY", "Daily"),
+    ("FREQ=WEEKLY;INTERVAL=2", "Every 2 weeks"),
+    ("FREQ=WEEKLY;BYDAY=MO,WE", "Weekly on Mon, Wed"),
+    ("FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR", "Every weekday"),
+    ("FREQ=MONTHLY;BYDAY=2TU", "Monthly on the 2nd Tue"),
+    ("FREQ=MONTHLY;BYDAY=-1FR", "Monthly on the last Fri"),
+    ("FREQ=YEARLY", "Yearly"),
+    ("FREQ=HOURLY", "Repeats"),
+])
+def test_describe_rrule(rule, words):
+    import icalendar
+    assert calendar_sync.describe_rrule(icalendar.vRecur.from_ical(rule)) == words
 
 
 def test_parse_all_day_event_is_midnight():
@@ -143,6 +208,34 @@ def test_apply_calendar_sync_creates_updates_deletes(db_setup):
     assert children["kept@x"].version == 2  # bumped once by the in-place patch, not reset by a recreate
 
 
+def test_apply_calendar_sync_stores_and_updates_details(db_setup):
+    cal = models.Todo(title="Work", type="calendar")
+    db.create_todo(cal)
+    guest = models.Attendee(name="Dana", email="dana@example.com", status="accepted", organizer=True)
+    event = calendar_sync.ParsedEvent(
+        "series@x", "Standup", dt.datetime(2026, 2, 2, 9, 30), end_date=dt.datetime(2026, 2, 2, 9, 45),
+        notes="Be brief", repeat_summary="Every weekday", conference_url="https://meet.google.com/x",
+        attendees=(guest,))
+    db.apply_calendar_sync(str(cal.todo_id), [event])
+    stored = db.get_calendar_event_children(str(cal.todo_id))["series@x"]
+    assert (stored.end_date, stored.notes, stored.repeat_summary, stored.conference_url) == (
+        dt.datetime(2026, 2, 2, 9, 45), "Be brief", "Every weekday", "https://meet.google.com/x")
+    assert stored.attendees == [guest]
+
+    # The series' next occurrence (and a changed RSVP) patches the same item.
+    declined = guest.model_copy(update={"status": "declined"})
+    later = calendar_sync.ParsedEvent(
+        "series@x", "Standup", dt.datetime(2026, 2, 3, 9, 30), end_date=dt.datetime(2026, 2, 3, 9, 45),
+        notes="Be brief", repeat_summary="Every weekday", conference_url="https://meet.google.com/x",
+        attendees=(declined,))
+    assert db.apply_calendar_sync(str(cal.todo_id), [later]) == {"created": 0, "updated": 1, "deleted": 0}
+    moved = db.get_calendar_event_children(str(cal.todo_id))["series@x"]
+    assert moved.todo_id == stored.todo_id
+    assert moved.due_date == dt.datetime(2026, 2, 3, 9, 30)
+    assert moved.attendees[0].status == "declined"
+    assert db.apply_calendar_sync(str(cal.todo_id), [later]) == {"created": 0, "updated": 0, "deleted": 0}
+
+
 def test_apply_calendar_sync_unchanged_event_is_not_written(db_setup):
     """A uid match with identical fields gets no write at all — not even a no-op patch —
     so its version/rev stay untouched and nothing looks changed to the client."""
@@ -195,6 +288,18 @@ def test_run_calendar_sync_success(db_setup, monkeypatch):
     refreshed = db.get_todo(cal.todo_id)
     assert refreshed.last_sync_error is None
     assert refreshed.last_synced_at is not None
+
+
+def test_run_calendar_sync_uses_home_timezone_date(db_setup, monkeypatch):
+    # 02:00 UTC on Feb 2 is still the evening of Feb 1 in Los Angeles: Feb 1's evening event
+    # must stay (the window starts on the home date, not the UTC one).
+    from app import tasks as tasks_mod
+    monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 2, 2, 2, 0))
+    monkeypatch.setattr(tasks_mod, "home_tz", lambda devices: "America/Los_Angeles")
+    cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    assert "event-1@example.com" in db.get_calendar_event_children(str(cal.todo_id))  # Feb 1, 15:00
 
 
 def test_run_calendar_sync_no_url_noops(db_setup):

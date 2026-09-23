@@ -83,7 +83,7 @@
   "calendar_event": {
     "label": "Event",
     "icon": "calendar",
-    "fields": ["title", "due_date", "location"],
+    "fields": ["title", "due_date", "location", "end_date", "repeat_summary", "conference_url", "attendees", "notes"],
     "hasCheckbox": false,
     "appearsInNextUp": true,
     "triggersAutodone": false,

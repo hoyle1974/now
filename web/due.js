@@ -99,5 +99,22 @@
     return `${day} ${new Date(iso).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
   }
 
-  return { hasTime, timePart, combine, isOverdue, formatRepeat, today, tomorrow, daysUntil, formatDay, format };
+  // A synced event's start and end: "Today 2:00 PM – 3:00 PM", "Fri 9:00 PM – Sat 1:00 AM",
+  // or for an all-day event its days ("Fri – Sun"; the stored end is the exclusive next midnight).
+  function formatSpan(start, end, now = new Date()) {
+    if (!end || !(new Date(end) > new Date(start))) return format(start, now);
+    if (!hasTime(start) && !hasTime(end)) {
+      const last = new Date(end);
+      last.setDate(last.getDate() - 1);
+      const lastIso = `${dayString(last)}T00:00:00`;
+      if (startOfDay(lastIso).getTime() <= startOfDay(start).getTime()) return formatDay(start, now);
+      return `${formatDay(start, now)} – ${formatDay(lastIso, now)}`;
+    }
+    if (startOfDay(start).getTime() === startOfDay(end).getTime()) {
+      return `${format(start, now)} – ${new Date(end).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`;
+    }
+    return `${format(start, now)} – ${format(end, now)}`;
+  }
+
+  return { hasTime, timePart, combine, isOverdue, formatRepeat, today, tomorrow, daysUntil, formatDay, format, formatSpan };
 });

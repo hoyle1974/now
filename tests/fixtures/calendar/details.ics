@@ -1,0 +1,36 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//test//test//EN
+BEGIN:VEVENT
+UID:planning@example.com
+DTSTAMP:20260101T000000Z
+DTSTART:20260205T140000
+DTEND:20260205T150000
+SUMMARY:Planning
+DESCRIPTION:Agenda:<br>1. Budget<br>2. Q&amp\;A\n\n-::~:~::~:~:~:~:~:~::-\nJoin with Google Meet: https://meet.google.com/abc-defg-hij\n-::~:~::~:~:~:~:~:~::-
+X-GOOGLE-CONFERENCE:https://meet.google.com/abc-defg-hij
+ORGANIZER;CN=Dana Lee:mailto:dana@example.com
+ATTENDEE;CN=Dana Lee;PARTSTAT=ACCEPTED;ROLE=REQ-PARTICIPANT:mailto:dana@example.com
+ATTENDEE;CN=sam@example.com;PARTSTAT=DECLINED:mailto:sam@example.com
+ATTENDEE;PARTSTAT=TENTATIVE:mailto:kim@example.com
+ATTENDEE;CN=Pat;PARTSTAT=DELEGATED:mailto:pat@example.com
+ATTENDEE;CUTYPE=RESOURCE;CN=Room 4B;PARTSTAT=ACCEPTED:mailto:room4b@example.com
+ATTENDEE;CN=Big room;PARTSTAT=ACCEPTED:mailto:c_123@resource.calendar.google.com
+END:VEVENT
+BEGIN:VEVENT
+UID:zoom@example.com
+DTSTAMP:20260101T000000Z
+DTSTART:20260206T090000
+DURATION:PT45M
+SUMMARY:Vendor call
+DESCRIPTION:Dial in at https://acme.zoom.us/j/123456?pwd=xyz for the call
+END:VEVENT
+BEGIN:VEVENT
+UID:cancelled@example.com
+DTSTAMP:20260101T000000Z
+DTSTART:20260207T090000
+DTEND:20260207T100000
+STATUS:CANCELLED
+SUMMARY:Called off
+END:VEVENT
+END:VCALENDAR

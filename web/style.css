@@ -741,6 +741,38 @@ body.menu-room:has(#error:not([hidden])) {
   font-size: 17px;
 }
 
+.view-notes {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.guest-summary {
+  margin: 0 0 6px;
+  font-size: 15px;
+  color: var(--label-2);
+}
+
+.guest-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guest {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--separator);
+  font-size: 16px;
+}
+
+.guest:last-child { border-bottom: 0; }
+.guest-name { min-width: 0; overflow-wrap: anywhere; }
+.guest-status { flex: none; font-size: 14px; color: var(--label-2); }
+.guest--declined .guest-name { color: var(--label-3); }
+
 .sheet-full .todo-detail {
   margin: 0;
   padding: 8px 16px 12px;

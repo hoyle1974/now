@@ -81,3 +81,12 @@ test("format adds the time only for a timed due, and not for far-overdue ones", 
   assert.match(Due.format("2026-09-21T16:30:00", NOW), /^Today .*4:30|^Today .*16:30/);
   assert.equal(Due.format("2026-09-15T16:30:00", NOW), "6 days overdue");
 });
+
+test("formatSpan: same-day timed range, all-day spans, and no end", () => {
+  const now = new Date(2026, 8, 21, 8, 0);
+  const clock = (h, m) => new Date(2026, 8, 21, h, m).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  assert.equal(Due.formatSpan("2026-09-21T14:00:00", "2026-09-21T15:30:00", now), `Today ${clock(14, 0)} – ${clock(15, 30)}`);
+  assert.equal(Due.formatSpan("2026-09-21T14:00:00", null, now), Due.format("2026-09-21T14:00:00", now));
+  assert.equal(Due.formatSpan("2026-09-21T00:00:00", "2026-09-22T00:00:00", now), "Today"); // one all-day day
+  assert.equal(Due.formatSpan("2026-09-21T00:00:00", "2026-09-23T00:00:00", now), "Today – Tomorrow");
+});

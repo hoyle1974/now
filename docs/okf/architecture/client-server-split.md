@@ -3,7 +3,7 @@ type: Architecture
 title: Client/server split
 description: Which features put their logic in the browser vs the backend, and why — plus the rule for deciding new ones.
 tags: [architecture, frontend, backend]
-timestamp: 2026-09-22T01:00:00Z
+timestamp: 2026-09-22T23:30:00Z
 ---
 The backend is often just CRUD + optimistic concurrency over the [Todo](../data/todo.md) model; a lot of real behaviour is decided entirely client-side, over data the server stores unchanged. This page names which features fall on which side and why, so the split is a decision on record, not an accident of who wrote it first.
 
@@ -36,7 +36,7 @@ These stay server-side on purpose, usually because they need atomicity, cross-de
 - **Push digest and heads-ups** ([push reminders](../features/push-reminders.md)) — `app/push.py`/`app/tasks.py` must run server-side; they fire on a schedule whether or not a client is open.
 - **Calendar feed** ([calendar feed](../features/calendar-feed.md)) — `app/ics.py` is consumed by external calendar apps, not the web UI; there is no client to move it to.
 - **Reorder/move persistence** — the final write and ordering guarantee for a reparent/move stays in `app/routes/todos.py` + `db.reorder_todo`, even though the drag targeting above is client-side.
-- **Calendar item sync** ([calendar sync](../features/calendar-sync.md)) — fetching/parsing an external ICS feed and reconciling it into `calendar_event` children (`app/calendar_sync.py`, `db.apply_calendar_sync`) must run server-side: it needs to run with no client open (the daily digest nudges it), be identical across every device signed into the same calendar, and hold the atomic create/update/delete transaction Firestore requires. The client only triggers it (loading the tree, "Sync now") and renders the result.
+- **Calendar item sync** ([calendar sync](../features/calendar-sync.md)) — fetching/parsing an external ICS feed and reconciling it into `calendar_event` children (`app/calendar_sync.py`, `db.apply_calendar_sync`) must run server-side: it needs to run with no client open (the daily digest nudges it), be identical across every device signed into the same calendar, and hold the atomic create/update/delete transaction Firestore requires. The client only triggers it (loading the tree, "Sync now") and renders the result. Choosing a series' next occurrence and extracting end time, notes, repeat summary, video link and attendees also happen in the sync (2026-09-22): the result must be the same on every device and be ready with no client open (digest, heads-ups, outbound feed); the client only formats them (`Due.formatSpan`, `Fields.guestSummary`).
 
 ## Rule for new features: discuss the split when it isn't obvious
 
