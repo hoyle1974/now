@@ -73,7 +73,7 @@ class TodoCreate(BaseModel):
     type: ItemType | None = Field(None)  # omitted = todo
 
 class TodoUpdate(BaseModel):
-    # Omitted = leave alone. Explicit null clears ONLY due_date, repeat and color
+    # Omitted = leave alone. Explicit null clears ONLY due_date, repeat, color and calendar_url
     # (update_todo checks model_fields_set); on every other field null == omitted.
     title: str | None = Field(None, max_length=MAX_TITLE_LEN)
     done: bool | None = Field(None)

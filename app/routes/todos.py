@@ -183,6 +183,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
             todo.color = body.color
         if body.type is not None:
             todo.type = body.type  # only the label changes; due_date, repeat and done stay as they are
+        if "calendar_url" in body.model_fields_set:
+            todo.calendar_url = body.calendar_url
         if body.links is not None:
             todo.links = body.links
         for name in ("blocked_by", "references"):
@@ -287,7 +289,7 @@ def sync_now(todo_id: uuid.UUID, background: BackgroundTasks, body: models.SyncN
         raise HTTPException(400, "only a calendar item can be synced")
     csid = body.client_session_id if body else None
     background.add_task(tasks.enqueue_calendar_sync, str(todo.todo_id), None,
-                        datetime.datetime.now(datetime.UTC), client_session_id=csid)
+                        datetime.datetime.now(datetime.UTC), client_session_id=csid, manual=True)
     return Response(status_code=202)
 
 @router.patch("/todos/{todo_id}/move/{direction}", response_model=None)

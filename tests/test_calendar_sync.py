@@ -227,10 +227,11 @@ def test_sync_now_enqueues_for_calendar_type(db_setup, monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task",
+                        lambda cid, csid=None, manual=False: calls.append((cid, manual)) or True)
     resp = client.post(f"/todos/{cal.todo_id}/sync", headers={"Authorization": "Bearer test"})
     assert resp.status_code == 202
-    assert calls == [str(cal.todo_id)]
+    assert calls == [(str(cal.todo_id), True)]  # manual: not deduped by the hourly page-load bucket
 
 
 def test_sync_now_rejects_non_calendar(db_setup):
@@ -307,8 +308,39 @@ def test_sync_now_threads_client_session_id(db_setup, monkeypatch):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     calls = []
-    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append((cid, csid)) or True)
+    monkeypatch.setattr(tasks, "create_calendar_sync_task",
+                        lambda cid, csid=None, manual=False: calls.append((cid, csid)) or True)
     resp = client.post(f"/todos/{cal.todo_id}/sync", json={"client_session_id": "session-xyz"},
                        headers={"Authorization": "Bearer test"})
     assert resp.status_code == 202
     assert calls == [(str(cal.todo_id), "session-xyz")]
+
+
+def test_patch_saves_and_clears_calendar_url(db_setup):
+    # Regression: PATCH validated calendar_url but never stored it, so every sync
+    # no-op'd with "no calendar_url" in prod while all the model-level tests passed.
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    h = {"Authorization": "Bearer test"}
+    resp = client.patch(f"/todos/{cal.todo_id}", json={"calendar_url": "https://example.com/f.ics"}, headers=h)
+    assert resp.status_code == 200
+    assert db.get_todo(cal.todo_id).calendar_url == "https://example.com/f.ics"
+
+    client.patch(f"/todos/{cal.todo_id}", json={"title": "Family 2"}, headers=h)
+    assert db.get_todo(cal.todo_id).calendar_url == "https://example.com/f.ics"  # omitted = kept
+
+    client.patch(f"/todos/{cal.todo_id}", json={"calendar_url": None}, headers=h)
+    assert db.get_todo(cal.todo_id).calendar_url is None  # explicit null clears
+
+
+def test_get_tree_skips_freshly_synced_calendar(db_setup, monkeypatch):
+    # Regression: last_synced_at round-trips through Firestore as a naive datetime;
+    # comparing it with the aware "now" raised TypeError in the staleness check.
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    db.mark_calendar_synced(str(cal.todo_id), error=None)
+    calls = []
+    monkeypatch.setattr(tasks, "create_calendar_sync_task", lambda cid, csid=None: calls.append(cid) or True)
+    resp = client.get("/todos/tree", headers={"Authorization": "Bearer test"})
+    assert resp.status_code == 200
+    assert calls == []  # fresh -> not nudged
