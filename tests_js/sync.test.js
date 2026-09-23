@@ -100,6 +100,23 @@ test("applyOp delete removes subtree and undelete restores it in place", () => {
   assert.equal(model.todosById.has("c1"), true);
 });
 
+test("deleting a calendar drops its synced events; undo restores it empty", () => {
+  const model = Sync.createModel();
+  const list = todo("l", { type: "list", child_ids: ["cal", "t"] });
+  const cal = todo("cal", { type: "calendar", parent_id: "l", child_ids: ["e1", "e2"], last_synced_at: "2026-01-01T00:00:00" });
+  const e1 = todo("e1", { type: "calendar_event", parent_id: "cal" });
+  const e2 = todo("e2", { type: "calendar_event", parent_id: "cal" });
+  const t = todo("t", { parent_id: "l" });
+  Object.assign(model, treeOf(list, cal, e1, e2, t));
+  Sync.applyOp(model, { kind: "delete", target_id: "l", payload: {} });
+  Sync.applyOp(model, { kind: "undelete", target_id: "l", payload: {} });
+  assert.deepEqual(list.child_ids, ["cal", "t"]); // ordinary items come back
+  assert.deepEqual(cal.child_ids, []);
+  assert.equal(cal.last_synced_at, null);
+  assert.equal(model.todosById.has("e1"), false);
+  assert.equal(model.todosById.has("t"), true);
+});
+
 test("applyOp split adds children with consecutive order_idx", () => {
   const model = Sync.createModel();
   const p = todo("p", { child_ids: ["c0"] });

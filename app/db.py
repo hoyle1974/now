@@ -3,9 +3,11 @@
 from app.db_firestore import (
     MoveError,
     ReparentError,
+    apply_calendar_purge,
     apply_calendar_sync,
     archive_expired,
     blocked_by_would_cycle,
+    calendar_purge_plan,
     clear_completed,
     create_todo,
     delete_push_device,
@@ -27,6 +29,7 @@ from app.db_firestore import (
     mark_calendar_synced,
     maybe_archive_expired,
     prune_txn_log,
+    purge_stale_calendar_events,
     put_push_marker,
     reorder_todo,
     reparent_todo,
@@ -42,12 +45,12 @@ from app.db_firestore import (
 )
 
 __all__ = [
-    "MoveError", "ReparentError", "apply_calendar_sync", "archive_expired",
-    "blocked_by_would_cycle", "clear_completed", "create_todo", "delete_push_device",
+    "MoveError", "ReparentError", "apply_calendar_purge", "apply_calendar_sync", "archive_expired",
+    "blocked_by_would_cycle", "calendar_purge_plan", "clear_completed", "create_todo", "delete_push_device",
     "get_calendar_event_children", "get_conn", "get_deleted_todo", "get_due_todos",
     "get_links_graph_docs", "get_push_marker", "get_rev", "get_rev_info", "get_root_todos", "get_todo",
     "get_trash", "get_tree", "init", "is_ancestor", "list_push_devices",
-    "mark_calendar_synced", "maybe_archive_expired", "prune_txn_log",
+    "mark_calendar_synced", "maybe_archive_expired", "prune_txn_log", "purge_stale_calendar_events",
     "put_push_marker", "reorder_todo", "reparent_todo", "run_atomic",
     "spawn_next_occurrence", "split_into_children", "sweep_orphan_blobs", "teardown",
     "undelete_todo", "update_todo", "upsert_push_device", "user_ref",
