@@ -112,6 +112,14 @@ def _update(ref, data: dict):
         _wrote.get()[0] = True
         tx.update(ref, data)
 
+def _delete(ref):
+    tx = _tx.get()
+    if tx is None:
+        ref.delete()
+    else:
+        _wrote.get()[0] = True
+        tx.delete(ref)
+
 
 def init():
     """Initialize Firestore connection"""
@@ -812,15 +820,82 @@ def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = Non
                 setattr(todo, field, value)
             update_todo(todo)
 
+        # Gone from the feed = gone for good: a synced event holds nothing the user wrote,
+        # so it is hard-deleted rather than sent to the trash.
         for todo_id in to_delete:
-            todo = by_todo_id[todo_id]
-            todo.deleted = True
-            update_todo(todo)
+            _delete(_todos().document(todo_id))
 
         return 200, {"created": len(to_create), "updated": len(to_update), "deleted": len(to_delete)}
 
     _, body, _, _ = run_atomic(None, action, triggered_by=triggered_by)
     return body
+
+
+def calendar_purge_plan(todo: models.Todo) -> tuple[list[str], list[str]]:
+    """Reads only (call before any write in the transaction): the calendars at or under
+    `todo`, and every calendar_event document under them, deleted or not. Deleting a
+    calendar, or anything holding one, hard-deletes those events (see apply_calendar_purge)."""
+    todo_id = str(todo.todo_id)
+    if todo.type == "calendar":
+        calendars = [todo_id]
+    elif not types.can(todo, "allowsUserChildren"):
+        return [], []  # a calendar_event (or other leaf) holds no calendar
+    else:
+        found = [d.to_dict()["todo_id"] for d in _get(_todos().where("type", "==", "calendar"))]
+        calendars = [c for c in found if is_ancestor(todo_id, c)]
+    events = [d["todo_id"] for c in calendars for d in _child_docs(c, include_deleted=True)
+              if d.get("type") == "calendar_event"]
+    return events, calendars
+
+
+def apply_calendar_purge(plan: tuple[list[str], list[str]], deleting: models.Todo) -> None:
+    """Writes for calendar_purge_plan: hard-delete the events, and forget each calendar's
+    last sync so restoring it from the trash syncs it again on the next load. `deleting`
+    is written by the caller (its last_synced_at must be cleared on the model instead)."""
+    events, calendars = plan
+    for event_id in events:
+        _delete(_todos().document(event_id))
+    for cal_id in calendars:
+        if cal_id == str(deleting.todo_id):
+            deleting.last_synced_at = None
+        else:
+            _update(_todos().document(cal_id), {"last_synced_at": None})
+
+
+def purge_stale_calendar_events() -> int:
+    """Hard-delete calendar_event documents nobody can see: flagged deleted (older syncs
+    soft-deleted), or under a calendar that is gone, deleted or inside something deleted;
+    and any in the archive. A backstop for data from before hard deletes and for paths
+    that trash a calendar without apply_calendar_purge (e.g. Clear completed). Plain
+    writes, no revision bump: none of these documents is in the live tree."""
+    cache: dict[str, dict | None] = {}
+
+    def doc(todo_id: str) -> dict | None:
+        if todo_id not in cache:
+            snap = _todos().document(todo_id).get()
+            cache[todo_id] = snap.to_dict() if snap.exists else None
+        return cache[todo_id]
+
+    def live(todo_id: str | None) -> bool:
+        seen: set[str] = set()
+        while todo_id and todo_id not in seen:
+            seen.add(todo_id)
+            data = doc(todo_id)
+            if data is None or data.get("deleted"):
+                return False
+            todo_id = data.get("parent_id")
+        return True
+
+    removed = 0
+    for snap in _todos().where("type", "==", "calendar_event").stream():
+        data = snap.to_dict()
+        if data.get("deleted") or not live(data.get("parent_id")):
+            snap.reference.delete()
+            removed += 1
+    for snap in _sub(ARCHIVE_COLLECTION).where("type", "==", "calendar_event").stream():
+        snap.reference.delete()
+        removed += 1
+    return removed
 
 
 def mark_calendar_synced(calendar_id: str, error: str | None) -> None:
@@ -1011,6 +1086,7 @@ def maybe_archive_expired() -> int:
         if not _claim_archive_run(started):
             return 0
         try:
+            purge_stale_calendar_events()
             moved = archive_expired(_now_utc())
             sweep_orphan_blobs()
         except Exception:

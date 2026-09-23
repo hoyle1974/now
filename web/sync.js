@@ -209,8 +209,16 @@
         if (!node) return false;
         const nodes = subtreeNodes(model, id);
         const index = detach(model, node);
-        model.trash.set(id, { nodes, parent_id: node.parent_id, index });
         nodes.forEach((n) => model.todosById.delete(n.todo_id));
+        // Mirror the server: a trashed calendar's synced events are hard-deleted, not kept
+        // for undo, so an undo brings the calendar back empty until its next sync.
+        const kept = nodes.filter((n) => n.type !== "calendar_event");
+        for (const n of kept) {
+          if (n.type !== "calendar") continue;
+          n.child_ids = n.child_ids.filter((c) => kept.some((k) => k.todo_id === c));
+          n.last_synced_at = null;
+        }
+        model.trash.set(id, { nodes: kept, parent_id: node.parent_id, index });
         return true;
       },
       request: (op) => ({ method: "DELETE", path: `/todos/${op.target_id}` }),

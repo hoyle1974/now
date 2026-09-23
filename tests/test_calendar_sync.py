@@ -257,9 +257,85 @@ def test_apply_calendar_sync_deletes_missing(db_setup):
     cal = models.Todo(title="Family", type="calendar")
     db.create_todo(cal)
     db.apply_calendar_sync(str(cal.todo_id), [calendar_sync.ParsedEvent("gone@x", "Bye", dt.datetime(2026, 2, 1, 9), None)])
+    gone_id = db.get_calendar_event_children(str(cal.todo_id))["gone@x"].todo_id
     result = db.apply_calendar_sync(str(cal.todo_id), [])
     assert result == {"created": 0, "updated": 0, "deleted": 1}
     assert db.get_calendar_event_children(str(cal.todo_id)) == {}
+    assert db.get_deleted_todo(gone_id) is None  # hard-deleted: not in the trash either
+    assert db.get_trash()[0] == []
+
+
+def _calendar_with_events(parent=None, n=2):
+    cal = models.Todo(title="Work", type="calendar", calendar_url="https://example.com/w.ics",
+                      parent_id=None if parent is None else parent.todo_id)
+    db.create_todo(cal)
+    db.apply_calendar_sync(str(cal.todo_id), [
+        calendar_sync.ParsedEvent(f"e{i}@x", f"Event {i}", dt.datetime(2026, 2, 1 + i, 9)) for i in range(n)])
+    db.mark_calendar_synced(str(cal.todo_id), error=None)
+    event_ids = [t.todo_id for t in db.get_calendar_event_children(str(cal.todo_id)).values()]
+    return cal, event_ids
+
+
+def test_deleting_calendar_trashes_it_and_hard_deletes_its_events(db_setup):
+    cal, event_ids = _calendar_with_events()
+    assert client.delete(f"/todos/{cal.todo_id}").status_code == 204
+    trashed = db.get_deleted_todo(cal.todo_id)
+    assert trashed.deleted
+    assert trashed.last_synced_at is None  # so a restore syncs again on the next load
+    assert all(db.get_deleted_todo(i) is None for i in event_ids)
+    assert [t.todo_id for t, _, _ in db.get_trash()[0]] == [cal.todo_id]
+
+    assert client.patch(f"/todos/{cal.todo_id}/undelete").status_code == 200
+    restored = db.get_todo(cal.todo_id)
+    assert restored is not None and restored.child_ids == []
+    assert restored.calendar_url == "https://example.com/w.ics"
+
+
+def test_deleting_a_list_hard_deletes_events_of_a_calendar_inside_it(db_setup):
+    work = models.Todo(title="Job", type="list")
+    db.create_todo(work)
+    other = models.Todo(title="plain", parent_id=work.todo_id)
+    db.create_todo(other)
+    cal, event_ids = _calendar_with_events(parent=work)
+    outside, outside_events = _calendar_with_events()
+    assert client.delete(f"/todos/{work.todo_id}").status_code == 204
+    assert all(db.get_deleted_todo(i) is None for i in event_ids)
+    assert db.get_deleted_todo(cal.todo_id).last_synced_at is None
+    assert db.get_deleted_todo(other.todo_id) is not None  # ordinary items still go to the trash
+    assert all(db.get_todo(i) is not None for i in outside_events)  # another calendar is untouched
+    assert db.get_todo(outside.todo_id).last_synced_at is not None
+
+
+def test_patch_deleted_true_also_purges_events(db_setup):
+    cal, event_ids = _calendar_with_events()
+    resp = client.patch(f"/todos/{cal.todo_id}", json={"deleted": True}, headers={"If-Match": "1"})
+    assert resp.status_code == 200, resp.text
+    assert all(db.get_deleted_todo(i) is None for i in event_ids)
+
+
+def test_deleting_a_plain_todo_still_soft_deletes(db_setup):
+    t = models.Todo(title="plain")
+    db.create_todo(t)
+    assert client.delete(f"/todos/{t.todo_id}").status_code == 204
+    assert db.get_deleted_todo(t.todo_id).deleted
+
+
+def test_purge_stale_calendar_events(db_setup):
+    live_cal, live_events = _calendar_with_events()
+    flagged = db.get_todo(live_events[0])
+    flagged.deleted = True  # how syncs before hard deletes removed events
+    db.update_todo(flagged)
+    old_cal, old_events = _calendar_with_events()
+    trashed = db.get_todo(old_cal.todo_id)
+    trashed.deleted = True  # trashed without a purge (before this change, or Clear completed)
+    db.update_todo(trashed)
+
+    assert db.purge_stale_calendar_events() == 3
+    assert db.get_deleted_todo(live_events[0]) is None
+    assert db.get_todo(live_events[1]) is not None
+    assert all(db.get_deleted_todo(i) is None for i in old_events)
+    assert db.get_deleted_todo(old_cal.todo_id).deleted  # the calendar itself stays in the trash
+    assert db.purge_stale_calendar_events() == 0
 
 
 def test_mark_calendar_synced(db_setup):
@@ -449,3 +525,15 @@ def test_get_tree_skips_freshly_synced_calendar(db_setup, monkeypatch):
     resp = client.get("/todos/tree", headers={"Authorization": "Bearer test"})
     assert resp.status_code == 200
     assert calls == []  # fresh -> not nudged
+
+
+def test_purge_stale_calendar_events_clears_archived_events(db_setup):
+    cal, event_ids = _calendar_with_events()
+    trashed = db.get_todo(cal.todo_id)
+    trashed.deleted = True
+    db.update_todo(trashed)
+    assert db.archive_expired(days=0) == 3  # the calendar and its two events
+    archive = db.user_ref().collection("todos_archive")
+    assert db.purge_stale_calendar_events() == 2
+    left = [d.to_dict()["type"] for d in archive.stream()]
+    assert left == ["calendar"]

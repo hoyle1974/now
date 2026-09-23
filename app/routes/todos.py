@@ -165,6 +165,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
 
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, view_only)
+        # Reads before any write (Firestore transactions), like _check_ids below.
+        purge = db.calendar_purge_plan(todo) if body.deleted and not todo.deleted else None
         if body.title is not None:
             todo.title = body.title
         if body.done is not None:
@@ -192,6 +194,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
             if ids is not None:
                 _check_ids(todo, name, ids)
                 setattr(todo, name, ids)
+        if purge:
+            db.apply_calendar_purge(purge, todo)
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
@@ -237,10 +241,14 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
 @router.delete("/todos/{todo_id}", status_code=204, response_model=None)
 def delete_todo(todo_id: uuid.UUID,
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
-    # Soft delete - mark as deleted instead of removing
+    # Soft delete - mark as deleted instead of removing. A calendar's synced events
+    # (also those of a calendar inside the deleted item) are hard-deleted instead:
+    # the feed brings them back if the calendar is restored.
     def action(todo: models.Todo) -> None:
         _check_editable(todo, False)
+        purge = db.calendar_purge_plan(todo)
         todo.deleted = True
+        db.apply_calendar_purge(purge, todo)
         db.update_todo(todo)
         return None
 
