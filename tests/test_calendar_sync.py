@@ -258,6 +258,25 @@ def test_calendar_events_are_indexed_by_date(db_setup):
     assert children["sooner@x"].version == before["sooner@x"]
 
 
+def test_sync_does_not_clear_a_user_set_priority(db_setup):
+    cal = models.Todo(title="Work", type="calendar")
+    db.create_todo(cal)
+    event = calendar_sync.ParsedEvent("meet@x", "Planning", dt.datetime(2026, 2, 2, 9))
+    db.apply_calendar_sync(str(cal.todo_id), [event])
+    stored = db.get_calendar_event_children(str(cal.todo_id))["meet@x"]
+    assert stored.priority == "normal"
+    resp = client.patch(f"/todos/{stored.todo_id}", json={"priority": "low"},
+                        headers={"If-Match": str(stored.version)})
+    assert resp.status_code == 200 and resp.json()["priority"] == "low"
+
+    moved = calendar_sync.ParsedEvent("meet@x", "Planning", dt.datetime(2026, 2, 3, 9))
+    assert db.apply_calendar_sync(str(cal.todo_id), [moved])["updated"] == 1
+    after = db.get_calendar_event_children(str(cal.todo_id))["meet@x"]
+    assert after.todo_id == stored.todo_id
+    assert after.priority == "low"
+    assert after.due_date == dt.datetime(2026, 2, 3, 9)
+
+
 def test_apply_calendar_sync_unchanged_event_is_not_written(db_setup):
     """A uid match with identical fields gets no write at all — not even a no-op patch —
     so its version/rev stay untouched and nothing looks changed to the client."""

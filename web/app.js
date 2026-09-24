@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "100";
+const APP_VERSION = "101";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -331,6 +331,12 @@ function setCollapsed(todoId, collapsed) {
   const todo = model.todosById.get(todoId);
   if (!todo || Boolean(todo.collapsed) === collapsed) return;
   engine.enqueue({ kind: "patch", target_id: todoId, payload: { collapsed } });
+}
+
+function setPriority(todoId, priority) {
+  const todo = model.todosById.get(todoId);
+  if (!todo || (todo.priority || "normal") === priority) return;
+  engine.enqueue({ kind: "patch", target_id: todoId, payload: { priority } });
 }
 
 async function deleteTodo(todoId) {

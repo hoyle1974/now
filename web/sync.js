@@ -17,7 +17,7 @@
   // while the server's 30-day replay log is about to forget it.
   const SUSPECT_AGE_MS = 25 * 24 * 3600 * 1000;
   const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat",
-    "color", "links", "blocked_by", "references", "type", "calendar_url"];
+    "color", "links", "blocked_by", "references", "type", "calendar_url", "priority"];
 
   // Fields holding lists of todo ids, which can hold a temporary id.
   const LINK_FIELDS = ["blocked_by", "references"];
@@ -59,7 +59,7 @@
       todo_id: id, title, done: false, create_date: new Date().toISOString(),
       due_date: normalizeDue(dueDate), order_idx: orderIdx, parent_id: parentId,
       child_ids: [], deleted: false, collapsed: false, repeat: null, spawned_id: null, version: 0,
-      color: null, type, links: [], blocked_by: [], references: [],
+      color: null, type, links: [], blocked_by: [], references: [], priority: "normal",
     };
   }
 

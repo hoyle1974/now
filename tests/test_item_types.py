@@ -367,6 +367,35 @@ def test_patch_still_allowed_on_editable_calendar_item(db_setup):
     assert resp.status_code == 200
 
 
+def test_missing_or_unknown_priority_reads_as_normal():
+    doc = {"todo_id": "11111111-1111-1111-1111-111111111111", "title": "x",
+           "create_date": "2026-09-23T00:00:00"}
+    assert doc_to_todo(doc).priority == "normal"
+    assert doc_to_todo({**doc, "priority": "nope"}).priority == "normal"
+    stored = todo_to_doc(models.Todo(title="x", priority="high"))
+    assert stored["priority"] == "high"
+
+
+def test_priority_patch_on_calendar_event_bumps_version(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    event = models.Todo(title="Standup", type="calendar_event", parent_id=cal.todo_id, external_uid="x@y")
+    db.create_todo(event)
+    headers = {"Authorization": "Bearer test", "If-Match": "1"}
+    resp = client.patch(f"/todos/{event.todo_id}", json={"priority": "low"}, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["priority"] == "low" and body["version"] == 2
+    stale = client.patch(f"/todos/{event.todo_id}", json={"priority": "high"}, headers=headers)
+    assert stale.status_code == 409
+    assert client.patch(f"/todos/{event.todo_id}", json={"title": "Hacked"},
+                        headers={"Authorization": "Bearer test", "If-Match": "2"}).status_code == 400
+    assert client.patch(f"/todos/{event.todo_id}", json={"priority": "high", "title": "Hacked"},
+                        headers={"Authorization": "Bearer test", "If-Match": "2"}).status_code == 400
+    assert client.patch(f"/todos/{event.todo_id}", json={"priority": "urgent"},
+                        headers={"Authorization": "Bearer test", "If-Match": "2"}).status_code == 422
+
+
 def test_collapsed_only_patch_still_allowed_on_uneditable_type(db_setup):
     """Collapse is view state (per sync-model.md), not content — it must NOT be
     blocked by the editable guard, or the client can't fold/unfold a calendar_event

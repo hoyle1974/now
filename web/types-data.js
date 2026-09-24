@@ -19,7 +19,8 @@
         "links",
         "blocked_by",
         "references",
-        "attachments"
+        "attachments",
+        "priority"
       ],
       "hasCheckbox": true,
       "appearsInNextUp": true,
@@ -99,6 +100,7 @@
       "fields": [
         "title",
         "due_date",
+        "priority",
         "location",
         "end_date",
         "repeat_summary",

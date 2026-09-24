@@ -7,7 +7,7 @@ const ItemForm = (() => {
   // Every editable field a type may list, in the order the sheet shows them. A field named in
   // types.json that is missing here has no input yet (tests/item-form.test.js checks this).
   // The calendar_event fields from location on are sync-only: no input, shown by the viewer.
-  const FIELD_GROUPS = ["due_date", "calendar_url", "repeat", "color", "links", "blocked_by", "references", "attachments",
+  const FIELD_GROUPS = ["due_date", "priority", "calendar_url", "repeat", "color", "links", "blocked_by", "references", "attachments",
     "location", "end_date", "repeat_summary", "conference_url", "attendees", "notes"];
   // A new item only asks for what is needed to file it; the rest is one Edit away.
   const CREATE_FIELDS = ["due_date"];
@@ -34,9 +34,18 @@ const ItemForm = (() => {
     });
     const repeatControls = editing ? renderRepeatControls(picker.dateInput, todo.repeat) : null;
     const extra = editing ? FieldsUI.renderEditFields(todo) : { groups: {}, changes: () => ({ fields: {} }) };
+    const priority = document.createElement("select");
+    for (const [value, label] of [["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      priority.append(option);
+    }
+    if (editing) priority.value = todo.priority || "normal";
 
     const nodes = {
       due_date: [DOM.label("Due date", picker.dateInput), picker.chips, picker.timeField],
+      ...(editing ? { priority: [DOM.label("Priority", priority), priority] } : {}),
       ...(editing ? { repeat: [DOM.label("Repeat every", repeatControls.unit), repeatControls.row] } : {}),
       ...extra.groups,
       // Images upload as soon as they are added (online only), independent of Save.
@@ -72,6 +81,9 @@ const ItemForm = (() => {
       }
       // Fields the type doesn't have are left exactly as stored.
       const fields = Object.fromEntries(Object.entries(result.fields).filter(([f]) => Types.hasField(chosen, f)));
+      if (Types.hasField(chosen, "priority") && priority.value !== (todo.priority || "normal")) {
+        fields.priority = priority.value;
+      }
       if (chosen.type !== Types.nameOf(todo)) fields.type = chosen.type;
       reportedFailure(saveEdit(todo.todo_id, title,
         dated ? picker.value() : undefined,

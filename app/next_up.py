@@ -25,6 +25,15 @@ than `limit`, the nearest later events fill the remaining slots. The merged
 list keeps the non-event order (including blockers pulled up) and slots each
 event in by the same due-date key.
 
+Priority (`high` / `normal` / `low`, default `normal`) is applied after that
+ranking. Every high item is included and placed first, even when it is not due
+yet, and it does not push a normal item due today off the list. Normal items
+keep the rules above. Low items are left out of that pass; if the combined
+high + normal list is still shorter than `limit`, the soonest lows fill the
+remaining slots. A low item due today is not forced in. A blocker stays
+directly above what it blocks when they share a priority; when they differ, it
+sits with the highest-priority item it blocks.
+
 Blocking: a todo waits on the open todos in its blocked_by (and its ancestors').
 After ranking, each blocker is pulled up to sit just above what it blocks, so
 the blocked todo is never demoted for it. A blocker with open subtasks brings
@@ -146,7 +155,7 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
 
     for cand in candidates:
         place(cand)
-    candidates = _with_calendar_events(ordered, limit, today)
+    candidates = _select(ordered, limit, today, open_blockers, under)
 
     items = []
     for rank, (_, _, _, todo, titles, effective, source) in enumerate(candidates, start=1):
@@ -166,6 +175,52 @@ def rank_next_up(roots: list[models.Todo], by_id: dict[str, models.Todo],
 
 def _sort_key(cand: tuple):
     return (cand[0], cand[1], cand[2])
+
+
+def _priority_of(cand: tuple) -> str:
+    value = getattr(cand[3], "priority", "normal")
+    return value if value in ("high", "normal", "low") else "normal"
+
+
+def _select(ordered: list[tuple], limit: int, today: datetime.date | None,
+            open_blockers, under) -> list[tuple]:
+    """High is always included and sits first. Normal keeps the calendar-event
+    rules. Low fills only the slots still short of `limit`."""
+    def travels_with(cand: tuple, anchors: list[tuple]) -> bool:
+        if any(cand is anchor for anchor in anchors):
+            return True
+        blockers = [b for anchor in anchors for b in open_blockers(anchor[3])]
+        return any(under(cand[3], blocker) for blocker in blockers)
+
+    highs = [c for c in ordered if _priority_of(c) == "high"]
+    high_group = [c for c in ordered if travels_with(c, highs)] if highs else []
+    high_ids = {id(c) for c in high_group}
+    normal = [c for c in ordered if id(c) not in high_ids and _priority_of(c) != "low"]
+    low = [c for c in ordered if id(c) not in high_ids and _priority_of(c) == "low"]
+
+    chosen = _with_calendar_events(normal, limit, today)
+    pulled = [c for c in low if any(travels_with(c, [item]) for item in chosen)]
+    pulled_ids = {id(c) for c in pulled}
+    low = [c for c in low if id(c) not in pulled_ids]
+    if pulled:
+        before: dict[int, list] = {}
+        for other in pulled:
+            for item in chosen:
+                if travels_with(other, [item]):
+                    before.setdefault(id(item), []).append(other)
+                    break
+        rebuilt: list[tuple] = []
+        for item in chosen:
+            rebuilt.extend(before.get(id(item), []))
+            rebuilt.append(item)
+        chosen = rebuilt
+
+    picked = high_group + chosen
+    room = limit - len(picked)
+    if room > 0:
+        low.sort(key=_sort_key)
+        picked.extend(low[:room])
+    return picked
 
 
 def _with_calendar_events(ordered: list[tuple], limit: int,

@@ -17,9 +17,9 @@ _ALL: dict[str, models.Todo] = {}
 
 
 def mk(title, due=None, done=False, order=None, kids=(), blocked_by=(), deleted=False,
-       type="todo"):
+       type="todo", priority="normal"):
     t = models.Todo(title=title, due_date=due, done=done, order_idx=order, type=type,
-                    blocked_by=[b.todo_id for b in blocked_by], deleted=deleted)
+                    priority=priority, blocked_by=[b.todo_id for b in blocked_by], deleted=deleted)
     t.child_ids = [k.todo_id for k in kids]
     for k in kids:
         k.parent_id = t.todo_id
@@ -245,3 +245,56 @@ def test_inserting_an_event_does_not_reorder_a_blocker():
     meet = event("meet", at(10, 9))
     assert titles(rank(blocked, blocker, meet, today=datetime.date(2026, 9, 10))) == [
         "meet", "blocker", "blocked"]
+
+
+# ---- priority: high first, then normal, low only fills what's left ----------
+
+def test_high_priority_ranks_ahead_of_an_earlier_normal():
+    later, sooner = mk("later", priority="high"), mk("sooner", d(10))
+    assert titles(rank(sooner, later)) == ["later", "sooner"]
+
+
+def test_high_items_sort_by_due_date_among_themselves():
+    later, sooner = mk("later", d(20), priority="high"), mk("sooner", d(10), priority="high")
+    assert titles(rank(later, sooner)) == ["sooner", "later"]
+
+
+def test_high_does_not_displace_a_normal_due_today():
+    high = mk("high", d(25), priority="high")
+    dues = [mk(f"due{i}", d(10)) for i in range(2)]
+    assert titles(rank(high, *dues, limit=2, today=datetime.date(2026, 9, 20))) == [
+        "high", "due0", "due1"]
+
+
+def test_low_is_left_out_while_normals_fill_the_limit():
+    normal = [mk(f"n{i}", d(21 + i)) for i in range(3)]
+    low = mk("low", d(1), priority="low")
+    assert titles(rank(low, *normal, limit=3, today=_TODAY)) == ["n0", "n1", "n2"]
+
+
+def test_low_fills_leftover_slots_soonest_first():
+    normal = mk("normal", d(21))
+    lows = [mk("l2", d(24), priority="low"), mk("l0", d(22), priority="low"),
+            mk("l1", d(23), priority="low")]
+    assert titles(rank(normal, *lows, limit=3, today=_TODAY)) == ["normal", "l0", "l1"]
+
+
+def test_a_high_event_not_due_yet_is_still_included():
+    todos = [mk(f"t{i}", d(21)) for i in range(10)]
+    later = mk("later", d(28), type="calendar_event", priority="high")
+    assert titles(rank(*todos, later, limit=10, today=_TODAY)) == [
+        "later", *[f"t{i}" for i in range(10)]]
+
+
+def test_a_low_event_due_today_does_not_force_itself_in():
+    todos = [mk(f"t{i}", d(21)) for i in range(10)]
+    meet = mk("today", at(20, 9), type="calendar_event", priority="low")
+    assert titles(rank(*todos, meet, limit=10, today=_TODAY)) == [f"t{i}" for i in range(10)]
+
+
+def test_a_low_blocker_of_a_shown_item_is_still_pulled_up():
+    blocker = mk("blocker", priority="low")
+    blocked = mk("blocked", d(1), blocked_by=[blocker])
+    fillers = [mk(f"f{i}", d(2 + i)) for i in range(12)]
+    out = rank(blocked, *fillers, blocker, limit=3)
+    assert titles(out)[:2] == ["blocker", "blocked"]

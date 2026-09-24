@@ -191,6 +191,26 @@ function renderViewer(todo, counts, trashed = null) {
   }
   body.appendChild(facts);
 
+  // A synced event has no edit sheet. Priority is the one field the user owns.
+  if (!trashed && Types.hasField(todo, "priority") && !Types.can(todo, "editable")) {
+    const select = document.createElement("select");
+    for (const [value, label] of [["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.append(option);
+    }
+    select.value = todo.priority || "normal";
+    select.addEventListener("change", () => setPriority(todo.todo_id, select.value));
+    const block = document.createElement("div");
+    block.className = "field-group";
+    const label = document.createElement("p");
+    label.className = "sheet-label";
+    label.textContent = "Priority";
+    block.append(label, select);
+    body.appendChild(block);
+  }
+
   if (todo.type === "calendar" && !trashed) {
     const sync = document.createElement("div");
     sync.className = "calendar-sync-status";

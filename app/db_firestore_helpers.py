@@ -25,6 +25,7 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         color=doc_dict.get("color"),
         # Documents from before types have none; an unknown value must never break a read.
         type=doc_dict["type"] if doc_dict.get("type") in types.NAMES else types.DEFAULT,
+        priority=doc_dict["priority"] if doc_dict.get("priority") in ("high", "normal", "low") else "normal",
         links=[models.Link(**link) for link in doc_dict.get("links") or []],
         blocked_by=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("blocked_by") or []],
         references=[models.TodoId(uuid.UUID(i)) for i in doc_dict.get("references") or []],
@@ -61,6 +62,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "version": todo.version,
         "color": todo.color,
         "type": todo.type,
+        "priority": todo.priority,
         "links": [{"url": link.url, "label": link.label} for link in todo.links],
         "blocked_by": [str(i) for i in todo.blocked_by],
         "references": [str(i) for i in todo.references],

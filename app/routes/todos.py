@@ -22,12 +22,13 @@ def _check_accepts_children(parent_id) -> None:
     if parent is not None and not types.can(parent, "allowsUserChildren"):
         raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
 
-def _check_editable(todo: models.Todo, view_only: bool) -> None:
+def _check_editable(todo: models.Todo, allowed: bool) -> None:
     """Content edits and deletes are blocked for a type marked read-only in the
     registry (editable: false — e.g. calendar_event, server-managed by sync).
-    Collapse (view_only) is exempt: it's UI state, not content, and must stay
-    foldable even on a read-only row."""
-    if view_only:
+    Collapse is exempt (UI state). A priority-only change is exempt too: the
+    user owns that field and the feed never copies it. `allowed` is true for
+    those patches."""
+    if allowed:
         return
     if not types.can(todo, "editable"):
         raise HTTPException(400, f"{types.caps(todo.type)['label']} is not editable")
@@ -83,7 +84,9 @@ def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_
                 today: datetime.date | None = None) -> dict:
     """The todos to work on next, best first (see app/next_up.py for the rules).
     With `today` (the client's local date) every todo due then or earlier is included.
-    Calendar events do not consume `limit`; events due then or earlier are added on top."""
+    Calendar events do not consume `limit`; events due then or earlier are added on top.
+    High-priority items are included ahead of that list; low-priority items only fill
+    slots still short of `limit`."""
     rev = db.get_rev()
     roots, todosById = _load_tree(rev, background)
     return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit, today))}
@@ -161,12 +164,15 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
                 x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # Collapsing is view state: last write wins, so it skips the If-Match
     # check and doesn't bump the version (no conflicts with content edits).
+    # Priority is content the user owns even on a read-only event, so it is
+    # allowed there but still takes If-Match and bumps the version.
     view_only = body.model_fields_set == {"collapsed"}
+    readonly_ok = bool(body.model_fields_set) and body.model_fields_set <= {"collapsed", "priority"}
     if view_only:
         if_match = None
 
     def action(todo: models.Todo) -> dict:
-        _check_editable(todo, view_only)
+        _check_editable(todo, readonly_ok)
         # Reads before any write (Firestore transactions), like _check_ids below.
         purge = db.calendar_purge_plan(todo) if body.deleted and not todo.deleted else None
         if body.title is not None:
@@ -180,6 +186,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
             todo.deleted = body.deleted
         if body.collapsed is not None:
             todo.collapsed = body.collapsed
+        if body.priority is not None:
+            todo.priority = body.priority
         if "repeat" in body.model_fields_set:
             # An explicit null clears the rule; omitting the field leaves it alone.
             todo.repeat = body.repeat

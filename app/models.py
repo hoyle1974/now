@@ -37,6 +37,7 @@ class Repeat(BaseModel):
     every: int = Field(1, ge=1, le=999)
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
 COLORS = get_args(Color)
+Priority = Literal["high", "normal", "low"]
 ItemType = Literal["todo", "list", "project", "calendar", "calendar_event"]  # keep in step with app/types.json
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
@@ -110,6 +111,7 @@ class TodoUpdate(BaseModel):
     links: list[Link] | None = Field(None)     # replaces the whole list
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
     references: list[TodoId] | None = Field(None)  # replaces the whole list
+    priority: Priority | None = Field(None)  # high | normal | low; omitted leaves it alone
 
     @field_validator("links")
     @classmethod
@@ -174,6 +176,7 @@ class Todo(BaseModel):
     version: int = Field(1)
     color: Color | None = Field(None)
     type: ItemType = Field("todo")
+    priority: Priority = Field("normal")  # user-owned; a calendar sync never copies or clears it
     links: list[Link] = Field([])
     blocked_by: list[TodoId] = Field([])
     references: list[TodoId] = Field([])

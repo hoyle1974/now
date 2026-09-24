@@ -784,6 +784,18 @@ test("patch applies and sends calendar_url; null clears it", () => {
   assert.equal(a.calendar_url, null);
 });
 
+test("a priority patch applies and is versioned", () => {
+  const model = Sync.createModel();
+  const a = todo("a", { priority: "normal" });
+  Object.assign(model, treeOf(a));
+  const payload = { priority: "low" };
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload });
+  assert.equal(a.priority, "low");
+  const req = Sync.buildRequest({ kind: "patch", target_id: "a", txn_id: "t", payload }, 4);
+  assert.deepEqual(req.body, payload);
+  assert.equal(req.headers["If-Match"], "4");
+});
+
 test("color patches coalesce with other field edits", async () => {
   const h = harness({ tree: treeOf(todo("a"), todo("b")), script: [] });
   h.engine.enqueue({ kind: "patch", target_id: "b", payload: { title: "y" } });
