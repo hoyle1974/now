@@ -28,7 +28,7 @@ def db_setup():
 # ---- registry ---------------------------------------------------------------
 
 def test_registry_has_the_three_types_and_flags():
-    assert set(types.NAMES) == {"todo", "list", "project", "calendar", "calendar_event"}
+    assert set(types.NAMES) == {"todo", "list", "project", "note", "calendar", "calendar_event"}
     flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies", "allowsUserChildren", "editable"}
     for name in types.NAMES:
         assert flags <= set(types.caps(name))
@@ -433,3 +433,51 @@ def test_move_rejected_for_uneditable_item(db_setup):
                         headers={"Authorization": "Bearer test"})
     assert resp.status_code == 400
     assert "not editable" in resp.json()["detail"]
+
+
+def test_note_is_a_text_item_that_can_hold_children():
+    assert "note" in types.NAMES
+    assert types.caps("note")["fields"] == ["title", "content", "color", "links", "attachments"]
+    assert types.caps("note")["defaultChildType"] == "note"
+    for flag in ("hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge",
+                 "showsProgress", "notifies"):
+        assert types.can_type("note", flag) is False
+    assert types.can_type("note", "allowsUserChildren") is True
+    assert types.can_type("note", "editable") is True
+
+
+def test_note_content_is_stored_capped_and_kept_when_the_type_changes(db_setup):
+    parent = client.post("/todos", json={"title": "p", "type": "list"}).json()
+    made = client.post(f"/todos/{parent['todo_id']}/split", json={
+        "descriptions": ["Meeting"], "type": "note", "content": "Hello **world**",
+    })
+    assert made.status_code == 200
+    child_id = made.json()["affected"][1]["todo_id"]
+    got = client.get(f"/todos/{child_id}").json()
+    assert got["type"] == "note"
+    assert got["content"] == "Hello **world**"
+
+    several = client.post(f"/todos/{parent['todo_id']}/split", json={
+        "descriptions": ["one", "two"], "type": "note", "content": "should not copy",
+    })
+    assert several.status_code == 200
+    by_id = client.get("/todos/tree").json()["todosById"]
+    kids = [by_id[i] for i in by_id if by_id[i].get("title") in ("one", "two")]
+    assert kids and all(k["content"] in (None, "") for k in kids)
+
+    patched = client.patch(f"/todos/{child_id}", json={"content": "updated"},
+                           headers={"If-Match": str(got["version"])})
+    assert patched.status_code == 200 and patched.json()["content"] == "updated"
+    cleared = client.patch(f"/todos/{child_id}", json={"content": ""},
+                           headers={"If-Match": str(patched.json()["version"])})
+    assert cleared.status_code == 200 and cleared.json()["content"] in (None, "")
+    too_long = client.patch(f"/todos/{child_id}", json={"content": "x" * 100_001},
+                            headers={"If-Match": str(cleared.json()["version"])})
+    assert too_long.status_code == 422
+    kept = client.patch(f"/todos/{child_id}", json={"content": "still here", "type": "list"},
+                        headers={"If-Match": str(cleared.json()["version"])})
+    assert kept.status_code == 200
+    assert kept.json()["type"] == "list" and kept.json()["content"] == "still here"
+    old = todo_to_doc(models.Todo(title="old"))
+    old.pop("content", None)
+    assert doc_to_todo(old).content is None

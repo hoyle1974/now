@@ -17,7 +17,7 @@
   // while the server's 30-day replay log is about to forget it.
   const SUSPECT_AGE_MS = 25 * 24 * 3600 * 1000;
   const PATCH_FIELDS = ["title", "done", "due_date", "collapsed", "repeat",
-    "color", "links", "blocked_by", "references", "type", "calendar_url", "priority"];
+    "color", "links", "blocked_by", "references", "type", "calendar_url", "priority", "content"];
 
   // Fields holding lists of todo ids, which can hold a temporary id.
   const LINK_FIELDS = ["blocked_by", "references"];
@@ -281,6 +281,7 @@
         payload.descriptions.forEach((title, i) => {
           if (model.todosById.has(tmpIds[i])) return;
           const child = newNode(tmpIds[i], title, payload.due_date, id, next++, payload.type);
+          if (payload.descriptions.length === 1 && payload.content) child.content = payload.content;
           model.todosById.set(child.todo_id, child);
           parent.child_ids.push(child.todo_id);
         });
@@ -290,6 +291,7 @@
         const body = { descriptions: p.descriptions };
         if (p.due_date) body.due_date = p.due_date;
         if (p.type) body.type = p.type;
+        if (p.descriptions.length === 1 && p.content) body.content = p.content;
         return { method: "POST", path: `/todos/${id}/split`, body };
       },
       ack(op, body, { model, remapId }) {

@@ -143,6 +143,17 @@ function renderViewer(todo, counts, trashed = null) {
   body.className = "sheet-body";
   add(body, "h2", "sheet-title" + (todo.done && Types.can(todo, "hasCheckbox") ? " is-done" : ""), todo.title);
 
+  if (Types.hasField(todo, "content") && todo.content && typeof Markdown !== "undefined") {
+    const note = document.createElement("div");
+    note.className = "view-markdown";
+    note.innerHTML = Markdown.render(todo.content);
+    for (const a of note.querySelectorAll("a")) {
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    }
+    body.appendChild(note);
+  }
+
   const facts = document.createElement("dl");
   facts.className = "view-facts";
   const fact = (name, value) => {

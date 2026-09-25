@@ -772,6 +772,35 @@ test("patch applies and sends color/links/blocked_by/references; null clears col
   assert.equal(req.headers["If-Match"], "3");
 });
 
+test("patch applies and sends note content; empty string clears it", () => {
+  const model = Sync.createModel();
+  const a = todo("a", { type: "note", content: "old" });
+  Object.assign(model, treeOf(a));
+  const payload = { content: "Hello **world**" };
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload });
+  assert.equal(a.content, payload.content);
+  assert.deepEqual(Sync.buildRequest({ kind: "patch", target_id: "a", txn_id: "t", payload }, 3).body, payload);
+  Sync.applyOp(model, { kind: "patch", target_id: "a", payload: { content: "" } });
+  assert.equal(a.content, "");
+});
+
+test("a single split copies content onto the new note", () => {
+  const model = Sync.createModel();
+  const parent = todo("p", { type: "list", child_ids: [] });
+  Object.assign(model, treeOf(parent));
+  Sync.applyOp(model, {
+    kind: "split", target_id: "p",
+    payload: { descriptions: ["Meeting"], type: "note", content: "Hello", child_tmp_ids: ["tmp:1"] },
+  });
+  assert.equal(model.todosById.get("tmp:1").content, "Hello");
+  const req = Sync.buildRequest({
+    kind: "split", target_id: "p", txn_id: "t",
+    payload: { descriptions: ["Meeting"], type: "note", content: "Hello" },
+  }, 1);
+  assert.equal(req.body.content, "Hello");
+  assert.equal(req.body.type, "note");
+});
+
 test("patch applies and sends calendar_url; null clears it", () => {
   const model = Sync.createModel();
   const a = todo("a", { type: "calendar", calendar_url: "https://old.example/f.ics" });

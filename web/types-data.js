@@ -75,6 +75,27 @@
       "description": "A group that shows how many of its todos are done.",
       "defaultChildType": "todo"
     },
+    "note": {
+      "label": "Note",
+      "icon": "note",
+      "fields": [
+        "title",
+        "content",
+        "color",
+        "links",
+        "attachments"
+      ],
+      "hasCheckbox": false,
+      "appearsInNextUp": false,
+      "triggersAutodone": false,
+      "countsInBadge": false,
+      "showsProgress": false,
+      "notifies": false,
+      "allowsUserChildren": true,
+      "editable": true,
+      "description": "A title and a long note, written in Markdown.",
+      "defaultChildType": "note"
+    },
     "calendar": {
       "label": "Calendar",
       "icon": "calendar",

@@ -1,6 +1,6 @@
 // Client-side search over the todo tree already in memory. Case-insensitive,
 // diacritic-insensitive, every word must match (AND) somewhere in the title,
-// link urls/labels or color name. No DOM access, so it runs under `node --test`.
+// link urls/labels, color name or note content. No DOM access, so it runs under `node --test`.
 (function (root, factory) {
   if (typeof module === "object" && module.exports) {
     module.exports = factory();
@@ -19,7 +19,7 @@
   }
 
   function extraText(todo) {
-    const parts = [todo.color];
+    const parts = [todo.color, todo.content];
     for (const l of Array.isArray(todo.links) ? todo.links : []) {
       if (l) parts.push(l.url, l.label);
     }

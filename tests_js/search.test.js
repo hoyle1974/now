@@ -26,6 +26,12 @@ test("blank query returns nothing", () => {
   assert.deepEqual(Search.search(byId(todo("a", "x")), "   "), []);
 });
 
+test("matches note content", () => {
+  const m = byId(todo("a", "Meeting", { content: "Bring the **budget** spreadsheet" }));
+  assert.deepEqual(Search.search(m, "budget").map((r) => r.todo.todo_id), ["a"]);
+  assert.equal(Search.search(m, "budget")[0].titleHit, false);
+});
+
 test("matches link url and label, and color, tolerating missing fields", () => {
   const m = byId(
     todo("a", "Read", { links: [{ url: "https://example.com/paper", label: "Spec" }] }),

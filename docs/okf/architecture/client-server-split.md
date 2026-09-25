@@ -3,7 +3,7 @@ type: Architecture
 title: Client/server split
 description: Which features put their logic in the browser vs the backend, and why — plus the rule for deciding new ones.
 tags: [architecture, frontend, backend]
-timestamp: 2026-09-23T21:00:00Z
+timestamp: 2026-09-25T00:40:00Z
 ---
 The backend is often just CRUD + optimistic concurrency over the [Todo](../data/todo.md) model; a lot of real behaviour is decided entirely client-side, over data the server stores unchanged. This page names which features fall on which side and why, so the split is a decision on record, not an accident of who wrote it first.
 
@@ -19,7 +19,8 @@ The server has no route, model field or algorithm backing these — it just stor
 
 - **Auto-done** ([auto-done](../features/auto-done.md)) — `web/autodone.js` decides which ancestors become done; the server just receives ordinary `PATCH` calls per todo, one at a time.
 - **Due-date semantics** ([due time](../features/due-time.md)) — `web/due.js` computes overdue/all-day-vs-timed/today-tomorrow labels from an opaque ISO string; the server never interprets it.
-- **Search** — `web/search.js`/`search-ui.js` filters the already-fetched tree in memory (title, links, color, trash); there is no search endpoint.
+- **Search** — `web/search.js`/`search-ui.js` filters the already-fetched tree in memory (title, links, color, note body, trash); there is no search endpoint.
+- **Note Markdown** — the server stores `content` as an ordinary capped string ([item types](../features/item-types.md)). Rendering and the editor are client-side (`web/markdown.js`, `web/markdown-editor.js`, vendored markdown-it and EasyMDE). The same text must read the same on every device, which a stored string already gives; there is no server-side render.
 - **Copy-with-subtasks outline** — `web/outline.js` formats already-fetched tree data into text; no server round-trip at all.
 - **Type field rules** ([fields](../features/fields.md)) — the server serves the static type registry once (`types.json` → `web/types-data.js`); which fields show/apply per type is a client-side rule engine (`web/fields.js`/`fields-ui.js`).
 - **Offline sync/outbox** ([sync model](../features/sync-model.md)) — `web/sync.js`, `idb-store.js`, `freshness.js`, `remote-diff.js` implement the queue, retry and "what changed" detection entirely client-side, on top of plain CRUD + `if_match` concurrency. The server has no concept of an outbox.

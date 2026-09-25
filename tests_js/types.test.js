@@ -66,8 +66,12 @@ test("every type keeps the fields the UI promises (images, links, color) so the 
   // If this fails, a refactor dropped a capability: see docs/okf/features/ui-inventory.md.
   // calendar and calendar_event are excluded: they are read-only/minimal types by design, not a regression.
   for (const name of Types.names.filter(n => !["calendar", "calendar_event"].includes(n))) {
-    for (const field of ["title", "attachments", "links", "color", "references"]) {
+    for (const field of ["title", "attachments", "links", "color"]) {
       assert.ok(Types.hasField({ type: name }, field), `${name} lost "${field}"`);
+    }
+    // A note has no references and no blocked-by; every other editable type still does.
+    if (name !== "note") {
+      assert.ok(Types.hasField({ type: name }, "references"), `${name} lost "references"`);
     }
   }
 });

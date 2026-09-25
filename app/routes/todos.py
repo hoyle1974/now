@@ -199,6 +199,8 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
             todo.calendar_url = body.calendar_url
         if body.links is not None:
             todo.links = body.links
+        if "content" in body.model_fields_set:
+            todo.content = (body.content or "").strip() or None
         for name in ("blocked_by", "references"):
             ids = getattr(body, name)
             if ids is not None:
@@ -281,12 +283,18 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
                x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     # A type without a due date never gets one, so nothing is scheduled for it either.
     due_date = body.due_date if types.has_field_type(body.type, "due_date") else None
+    # One note can be born with its body. Add several stays titles only.
+    text = (body.content or "").strip()
+    content = text if (
+        text and len(body.descriptions) == 1 and types.has_field_type(body.type, "content")
+    ) else None
 
     def action(todo: models.Todo) -> dict:
         _check_accepts_children(todo_id)
         # affected is the parent first, then the new children in description
         # order, so the client can map its temporary child ids to real ones by position.
-        parent, affected = db.split_into_children(todo, body.descriptions, due_date, body.type or types.DEFAULT)
+        parent, affected = db.split_into_children(
+            todo, body.descriptions, due_date, body.type or types.DEFAULT, content)
         return {**jsonable_encoder(parent), "affected": affected_refs(affected)}
 
     result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))

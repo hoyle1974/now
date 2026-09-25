@@ -38,7 +38,7 @@ class Repeat(BaseModel):
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
 COLORS = get_args(Color)
 Priority = Literal["high", "normal", "low"]
-ItemType = Literal["todo", "list", "project", "calendar", "calendar_event"]  # keep in step with app/types.json
+ItemType = Literal["todo", "list", "project", "note", "calendar", "calendar_event"]  # keep in step with app/types.json
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
 MAX_LABEL_LEN = 200
@@ -47,6 +47,8 @@ MAX_REFS = 50
 # a 422 rather than let the write fail as a 500.
 MAX_TITLE_LEN = 2000
 MAX_SPLIT_ITEMS = 100
+# A note body. Well under Firestore's 1 MiB document cap, attachments metadata included.
+MAX_CONTENT_LEN = 100_000
 
 class Link(BaseModel):
     url: str
@@ -112,6 +114,7 @@ class TodoUpdate(BaseModel):
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
     references: list[TodoId] | None = Field(None)  # replaces the whole list
     priority: Priority | None = Field(None)  # high | normal | low; omitted leaves it alone
+    content: str | None = Field(None, max_length=MAX_CONTENT_LEN)  # note body; "" or null clears
 
     @field_validator("links")
     @classmethod
@@ -155,6 +158,8 @@ class TodoSplit(BaseModel):
     descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
     due_date: datetime.datetime | None = Field(None)
     type: ItemType | None = Field(None)  # applies to every child created; omitted = todo
+    # Applied only when one child is created and that type has a content field.
+    content: str | None = Field(None, max_length=MAX_CONTENT_LEN)
 
 class Todo(BaseModel):
     todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )
@@ -178,6 +183,7 @@ class Todo(BaseModel):
     type: ItemType = Field("todo")
     priority: Priority = Field("normal")  # user-owned; a calendar sync never copies or clears it
     links: list[Link] = Field([])
+    content: str | None = Field(None)  # note body; kept when the type changes, same as a dormant due date
     blocked_by: list[TodoId] = Field([])
     references: list[TodoId] = Field([])
     attachments: list[Attachment] = Field([])  # only changed via the attachment endpoints

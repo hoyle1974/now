@@ -7,10 +7,11 @@ const ItemForm = (() => {
   // Every editable field a type may list, in the order the sheet shows them. A field named in
   // types.json that is missing here has no input yet (tests/item-form.test.js checks this).
   // The calendar_event fields from location on are sync-only: no input, shown by the viewer.
-  const FIELD_GROUPS = ["due_date", "priority", "calendar_url", "repeat", "color", "links", "blocked_by", "references", "attachments",
+  const FIELD_GROUPS = ["content", "due_date", "priority", "calendar_url", "repeat", "color", "links", "blocked_by", "references", "attachments",
     "location", "end_date", "repeat_summary", "conference_url", "attendees", "notes"];
   // A new item only asks for what is needed to file it; the rest is one Edit away.
-  const CREATE_FIELDS = ["due_date"];
+  // A note's body is the point of creating one, so it is asked for up front.
+  const CREATE_FIELDS = ["due_date", "content"];
 
   // The type a new item under `parent` starts as: its newest sibling's, else the default.
   function defaultTypeFor(parent) {
@@ -34,6 +35,14 @@ const ItemForm = (() => {
     });
     const repeatControls = editing ? renderRepeatControls(picker.dateInput, todo.repeat) : null;
     const extra = editing ? FieldsUI.renderEditFields(todo) : { groups: {}, changes: () => ({ fields: {} }) };
+    const contentBox = document.createElement("textarea");
+    contentBox.className = "note-content";
+    contentBox.rows = 16;
+    contentBox.placeholder = "Write…";
+    if (editing && todo.content) contentBox.value = todo.content;
+    let contentEditor = null;
+    const contentValue = () => (contentEditor ? contentEditor.value() : contentBox.value).replace(/\s+$/, "");
+
     const priority = document.createElement("select");
     for (const [value, label] of [["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
       const option = document.createElement("option");
@@ -43,7 +52,9 @@ const ItemForm = (() => {
     }
     if (editing) priority.value = todo.priority || "normal";
 
+    const contentLabel = DOM.el("p", "sheet-label", "Note");
     const nodes = {
+      content: [contentLabel, contentBox],
       due_date: [DOM.label("Due date", picker.dateInput), picker.chips, picker.timeField],
       ...(editing ? { priority: [DOM.label("Priority", priority), priority] } : {}),
       ...(editing ? { repeat: [DOM.label("Repeat every", repeatControls.unit), repeatControls.row] } : {}),
@@ -61,6 +72,10 @@ const ItemForm = (() => {
     });
     const showFields = (type) => {
       for (const g of groups) g.hidden = !Types.hasField({ type }, g.dataset.field);
+      // CodeMirror measures itself; a note field that was hidden comes out at height 0.
+      if (Types.hasField({ type }, "content") && contentEditor) {
+        requestAnimationFrame(() => contentEditor.refresh());
+      }
     };
     const typePicker = TypeUI.create({ value: initialType, onChange: showFields });
     showFields(initialType);
@@ -71,7 +86,8 @@ const ItemForm = (() => {
       const chosen = { type: typePicker.get() };
       const dated = Types.hasField(chosen, "due_date");
       if (!editing) {
-        reportedFailure(saveSplit(parent.todo_id, [title], dated ? picker.value() : null, chosen.type));
+        const body = Types.hasField(chosen, "content") ? contentValue() : "";
+        reportedFailure(saveSplit(parent.todo_id, [title], dated ? picker.value() : null, chosen.type, body));
         return;
       }
       const result = extra.changes();
@@ -83,6 +99,9 @@ const ItemForm = (() => {
       const fields = Object.fromEntries(Object.entries(result.fields).filter(([f]) => Types.hasField(chosen, f)));
       if (Types.hasField(chosen, "priority") && priority.value !== (todo.priority || "normal")) {
         fields.priority = priority.value;
+      }
+      if (Types.hasField(chosen, "content") && contentValue() !== (todo.content || "")) {
+        fields.content = contentValue();
       }
       if (chosen.type !== Types.nameOf(todo)) fields.type = chosen.type;
       reportedFailure(saveEdit(todo.todo_id, title,
@@ -105,6 +124,9 @@ const ItemForm = (() => {
       typePicker.node, ...groups);
     const screen = renderSheet(body, renderEditorActions(submit, editing ? "Save" : "Add"));
     screen.classList.add("sheet-full");
+    requestAnimationFrame(() => {
+      if (typeof MarkdownEditor !== "undefined") contentEditor = MarkdownEditor.attach(contentBox);
+    });
     return screen;
   }
 

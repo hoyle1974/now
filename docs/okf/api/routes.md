@@ -4,7 +4,7 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-23T21:00:00Z
+timestamp: 2026-09-25T00:40:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -20,7 +20,7 @@ timestamp: 2026-09-23T21:00:00Z
 | `PATCH /todos/{id}/reparent` | `{parent_id, index}` move ([ordering](../features/ordering-nesting.md)). |
 | `PATCH /todos/{id}/move/{direction}` | Swap with a neighbour. 400 at the top/bottom or with no siblings, 404 if missing; any other failure is a 5xx (the client retries those, it drops 4xx). |
 | `POST /todos/{id}/repeat` | Spawn next occurrence ([repeating](../features/repeating-todos.md)). |
-| `POST /todos/{id}/split` | Add several children; optional `type` for all of them. |
+| `POST /todos/{id}/split` | Add several children; optional `type` for all of them. Optional `content` is stored only when exactly one child is created and that type has a `content` field. |
 | `POST /todos/{id}/sync` `{client_session_id?}` | "Sync now" for a `calendar` item: enqueues a sync Cloud Task immediately, ignoring staleness (202). 404 if missing, 400 if not a `calendar`; the optional `client_session_id` threads through to the eventual rev bump's `triggered_by` ([calendar sync](../features/calendar-sync.md)). |
 | `POST /todos/{id}/attachments` (multipart `file`), `GET`/`DELETE /todos/{id}/attachments/{aid}` | Images on a todo; upload/delete return the updated todo; a `Content-Length` over 10 MB + 1 MB is refused with 413 before the body is read ([attachments](../features/attachments.md)). |
 | `GET /calendar/<token>.ics` | [Calendar feed](../features/calendar-feed.md): read-only ICS; the secret path token is the auth (no sign-in header), only this route. |
@@ -35,4 +35,4 @@ Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` an
 
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
 
-`PATCH /todos/{id}` also accepts `type` (any registry type — `todo`/`list`/`project`/`calendar`/`calendar_event`, else 422); it changes only the type ([item types](../features/item-types.md)). It accepts `priority` (`high` / `normal` / `low`, else 422). On a read-only `calendar_event` that is the one content field a patch may set; it still takes `If-Match` and bumps the version. A `collapsed`-only patch still skips both.
+`PATCH /todos/{id}` also accepts `type` (any registry type — `todo`/`list`/`project`/`note`/`calendar`/`calendar_event`, else 422); it changes only the type ([item types](../features/item-types.md)). It accepts `content` (a note body, ≤100,000 characters; `""` or `null` clears, omitted leaves it). It accepts `priority` (`high` / `normal` / `low`, else 422). On a read-only `calendar_event` that is the one content field a patch may set; it still takes `If-Match` and bumps the version. A `collapsed`-only patch still skips both.

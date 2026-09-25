@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "101";
+const APP_VERSION = "102";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -373,12 +373,13 @@ async function saveEdit(todoId, title, dueDate, repeat = null, fields = {}) {
     payload: Fields.patchPayload({ title, dueDate, repeat, fields }) });
 }
 
-async function saveSplit(todoId, descriptions, dueDate = null, type = null) {
+async function saveSplit(todoId, descriptions, dueDate = null, type = null, content = "") {
   setActivePanel(null);
   const payload = { descriptions };
   if (dueDate) {
     payload.due_date = dueDate;
   }
+  if (descriptions.length === 1 && content) payload.content = content;
   // Add several uses the same default as Add item; a chosen type is sent as is.
   payload.type = type || ItemForm.defaultTypeFor(model.todosById.get(todoId));
   engine.enqueue({ kind: "split", target_id: todoId, payload });

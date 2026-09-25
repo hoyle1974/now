@@ -853,6 +853,28 @@ body.menu-room:has(#error:not([hidden])) {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+.field-group[data-field="content"] .EasyMDEContainer {
+  margin: 0 0 12px;
+}
+.field-group[data-field="content"] .CodeMirror,
+.field-group[data-field="content"] .note-content {
+  min-height: 50vh;
+  font-size: 17px;
+}
+.view-markdown {
+  margin: 4px 4px 16px;
+  font-size: 17px;
+  line-height: 1.45;
+}
+.view-markdown > :first-child { margin-top: 0; }
+.view-markdown pre {
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--card);
+}
+.view-markdown img { max-width: 100%; }
+
 .sheet-actions {
   display: flex;
   justify-content: flex-end;
