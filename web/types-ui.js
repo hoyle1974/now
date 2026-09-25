@@ -1,9 +1,10 @@
 // The one type control, built from the registry: a chip row while there are few types,
-// a list with descriptions when there are many. Used by the edit/new-item sheets, the
-// row menu's Type panel and the composer, so adding a type to app/types.json adds it
+// a dropdown when there are many. Pass layout "list" for the described list (the row
+// menu's Type panel, where each type's description fits). Used by the edit and new-item
+// sheets, that panel and the composer, so adding a type to app/types.json adds it
 // everywhere. Depends on Types (types.js) and icon() (ui-helpers.js) at call time.
 const TypeUI = (() => {
-  const ROW_MAX = 4; // up to this many types show as a chip row; more become a list
+  const ROW_MAX = 4; // up to this many types show as a chip row; more become a dropdown
 
   // "a Project", "an Event"
   function withArticle(label) {
@@ -20,11 +21,43 @@ const TypeUI = (() => {
     return node;
   }
 
-  // opts: value (type name), onChange(name), layout ("row" | "list", default by count).
+  // A closed dropdown. The select itself is the value snapshotSheet/restoreSheet carries.
+  function createSelect(value, onChange) {
+    const node = document.createElement("div");
+    node.className = "type-select";
+    const select = document.createElement("select");
+    select.setAttribute("aria-label", "Type");
+    for (const name of Types.names) {
+      const option = document.createElement("option");
+      option.value = name;
+      option.textContent = labelOf(name);
+      select.append(option);
+    }
+    select.value = Types.nameOf({ type: value });
+    let shown = select.value;
+    const emit = () => {
+      if (select.value === shown) return;
+      shown = select.value;
+      if (onChange) onChange(select.value);
+    };
+    // input covers restoreSheet; change covers browsers that skip input on a select.
+    select.addEventListener("input", emit);
+    select.addEventListener("change", emit);
+    node.append(select);
+    return {
+      node,
+      get: () => select.value,
+      // Silent: opening the picker must not count as a choice.
+      set: (name) => { select.value = name; shown = name; },
+    };
+  }
+
+  // opts: value (type name), onChange(name), layout ("row" | "list" | "select", default by count).
   // The chosen type also lives in a hidden input inside the node, so an open sheet keeps it
   // across the re-render that snapshotSheet/restoreSheet (tree-view.js) carries fields over.
   function create({ value, onChange, layout } = {}) {
-    const mode = layout || (Types.names.length <= ROW_MAX ? "row" : "list");
+    const mode = layout || (Types.names.length <= ROW_MAX ? "row" : "select");
+    if (mode === "select") return createSelect(value, onChange);
     const node = document.createElement("div");
     node.className = mode === "row" ? "chip-row type-picker" : "type-list";
     node.setAttribute("role", "radiogroup");

@@ -1,20 +1,36 @@
-"""Pure ICS parsing and diffing for the calendar item type: no DB, no network
-(app/tasks.py fetches; this module only turns bytes into ParsedEvents and
-ParsedEvents-vs-existing-Todos into a create/update/delete plan)."""
+"""Pure ICS parsing, diffing and fetch for the calendar item type: no DB
+(`app/calendar_jobs.py` orchestrates fetch → parse → write)."""
 from __future__ import annotations
 
 import datetime
 import html
+import ipaddress
+import logging
 import re
-import uuid
+import socket
 from dataclasses import dataclass
+from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
 
-from app import db, models
+from app import models
+
+
+log = logging.getLogger(__name__)
+
+DOWNLOAD_ERROR = "Could not download calendar"
+MAX_SYNC_ERROR_LEN = 500
+MAX_REDIRECTS = 3
+
+
+def _download_error(detail: str) -> CalendarSyncError:
+    """A fetch failure the viewer can show: the stable prefix plus why."""
+    detail = " ".join(str(detail).split())
+    msg = f"{DOWNLOAD_ERROR}: {detail}" if detail else DOWNLOAD_ERROR
+    return CalendarSyncError(msg[:MAX_SYNC_ERROR_LEN])
 
 
 class CalendarSyncError(Exception):
-    """The feed could not be parsed."""
+    """The feed could not be fetched or parsed."""
 
 
 @dataclass(frozen=True)
@@ -246,38 +262,71 @@ WINDOW_DAYS = 60          # one-off events this far ahead
 SERIES_WINDOW_DAYS = 366  # how far to look for a series' next occurrence (a yearly one included)
 
 
-def _http_fetch(url: str) -> str:
-    import requests
-    resp = requests.get(url, timeout=10)
-    resp.raise_for_status()
-    return resp.text
+def _blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        return _blocked_ip(ip.ipv4_mapped)
+    return (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+            or ip.is_multicast or ip.is_unspecified)
 
 
-def run_calendar_sync(calendar_id: str, fetch=None, client_session_id: str | None = None) -> dict:
-    """Fetch, parse, diff and write. Never raises: failure is recorded on the
-    calendar item (last_sync_error) rather than propagated, so a Cloud Task
-    delivery always acks and is never retried into a storm."""
-    fetch = fetch or _http_fetch
-    cal = db.get_todo(models.TodoId(uuid.UUID(calendar_id)))
-    if cal is None:
-        return {"synced": False, "reason": "calendar not found"}
-    if not cal.calendar_url:
-        return {"synced": False, "reason": "no calendar_url"}
-
-    from app import push, tasks
-    zone = push._zone(tasks.home_tz(db.list_push_devices()) or "UTC")
-    # "Now" and "today" on the home wall clock, like every due_date; the UTC date would
-    # start the window a day early each evening west of Greenwich.
-    now = models.utc_now().replace(tzinfo=datetime.UTC).astimezone(zone).replace(tzinfo=None)
-    today = now.date()
+def _require_public_url(url: str) -> None:
+    """Refuse a URL whose host is the metadata server or any non-public address."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme not in ("http", "https") or not host:
+        log.warning("calendar fetch rejected non-http url")
+        raise _download_error("not an http(s) URL")
+    if host == "metadata.google.internal" or host.endswith(".metadata.google.internal"):
+        log.warning("calendar fetch rejected metadata host")
+        raise _download_error("metadata host")
     try:
-        raw = fetch(cal.calendar_url)
-        events = parse_ics(raw, today, today + datetime.timedelta(days=WINDOW_DAYS), zone, now=now,
-                           series_window_end=today + datetime.timedelta(days=SERIES_WINDOW_DAYS))
-    except Exception as e:
-        db.mark_calendar_synced(calendar_id, error=str(e))
-        return {"synced": False, "error": str(e)}
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            addresses = [ipaddress.ip_address(info[4][0].split("%", 1)[0])
+                         for info in socket.getaddrinfo(host, None)]
+        except socket.gaierror as e:
+            log.warning("calendar fetch dns failed: %s", e)
+            raise _download_error(f"DNS failed ({e})") from e
+    if not addresses or any(_blocked_ip(ip) for ip in addresses):
+        log.warning("calendar fetch rejected non-public host %s", host)
+        raise _download_error("host is not a public address")
 
-    result = db.apply_calendar_sync(calendar_id, events, triggered_by=client_session_id)
-    db.mark_calendar_synced(calendar_id, error=None)
-    return {"synced": True, **result}
+
+def _http_fetch(url: str) -> str:
+    """Download an ICS feed. Redirects are followed one hop at a time, and every hop
+    is checked again. The body is not size-capped: a Google secret address returns the
+    whole history, and a 2 MB cap rejected a real feed (Cloud Run: exceeded 2097152 bytes)."""
+    import requests
+    current = url
+    for hop in range(MAX_REDIRECTS + 1):
+        _require_public_url(current)
+        try:
+            resp = requests.get(current, timeout=10, allow_redirects=False, stream=True)
+        except CalendarSyncError:
+            raise
+        except Exception as e:
+            log.warning("calendar fetch failed: %s", e)
+            raise _download_error(e) from e
+        try:
+            if resp.is_redirect or resp.status_code in (301, 302, 303, 307, 308):
+                location = resp.headers.get("Location")
+                if hop == MAX_REDIRECTS or not location:
+                    log.warning("calendar fetch stopped after redirect from %s", current)
+                    raise _download_error("too many redirects")
+                current = urljoin(current, location)
+                continue
+            if resp.status_code >= 400:
+                raise _download_error(f"HTTP {resp.status_code}")
+            body = bytearray()
+            for chunk in resp.iter_content(chunk_size=65536):
+                body += chunk
+            return bytes(body).decode(resp.encoding or "utf-8", errors="replace")
+        except CalendarSyncError:
+            raise
+        except Exception as e:
+            log.warning("calendar fetch failed: %s", e)
+            raise _download_error(e) from e
+        finally:
+            resp.close()
+    raise _download_error("too many redirects")

@@ -131,7 +131,7 @@ def test_link_route(client, monkeypatch):
 
 def test_calendar_link_is_hidden_from_non_owners(client, monkeypatch):
     monkeypatch.setattr(auth, "CALENDAR_TOKEN", TOKEN)
-    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    monkeypatch.setenv("ALLOWED_EMAILS", "me@example.com;kid@example.com")
     act_as(app, "me@example.com")
     assert client.get("/calendar/link").json()["enabled"] is True
     act_as(app, "kid@example.com")

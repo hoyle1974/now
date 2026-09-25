@@ -266,7 +266,7 @@ def test_budget_route_returns_counts(monkeypatch):
 
 
 def test_digest_runs_for_every_user_and_never_crosses(monkeypatch):
-    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    monkeypatch.setenv("ALLOWED_EMAILS", "me@example.com;kid@example.com")
     sent = []
     for email in ("me@example.com", "kid@example.com"):
         with tenant.as_user(email):
@@ -283,7 +283,7 @@ def test_digest_runs_for_every_user_and_never_crosses(monkeypatch):
 
 
 def test_heads_up_binds_the_user_named_in_the_task(monkeypatch):
-    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    monkeypatch.setenv("ALLOWED_EMAILS", "me@example.com;kid@example.com")
     from app.routes import notifications
     seen = []
     monkeypatch.setattr(push, "run_heads_up", lambda todo_id, due, now, send=None: seen.append(tenant.current()) or {"sent": 0})

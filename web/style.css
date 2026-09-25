@@ -714,8 +714,13 @@ body.menu-room:has(#error:not([hidden])) {
 .calendar-sync-status {
   margin-top: 1rem;
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   gap: 0.75rem;
+}
+.calendar-sync-status .sheet-subtitle {
+  flex: 1 1 12rem;
+  margin: 0;
 }
 
 .sheet-full .sheet-actions {
@@ -2119,6 +2124,19 @@ li.search-hit { cursor: default; }
 
 .type-picker .chip.is-active {
   background: var(--accent);
+}
+
+.type-select select {
+  display: block;
+  width: 100%;
+}
+
+/* In the composer the native picker is opened from the type button. */
+.composer-type-select {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
 }
 
 .type-list {

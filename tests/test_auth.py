@@ -48,7 +48,7 @@ def test_bad_token_is_401(monkeypatch):
 
 
 def test_unset_allowed_email_denies_everyone_and_fails_startup(monkeypatch):
-    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ())
+    monkeypatch.setenv("ALLOWED_EMAILS", "")
     monkeypatch.setattr(auth.fb_auth, "verify_id_token", lambda t: {"email": "", "email_verified": True})
     monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
     with pytest.raises(HTTPException) as e:
@@ -56,3 +56,15 @@ def test_unset_allowed_email_denies_everyone_and_fails_startup(monkeypatch):
     assert e.value.status_code == 403
     with pytest.raises(RuntimeError):
         auth.check_config()
+
+
+def test_allowlist_follows_env_after_import(monkeypatch):
+    monkeypatch.setenv("ALLOWED_EMAILS", "new@example.com")
+    monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
+    monkeypatch.setattr(auth.fb_auth, "verify_id_token",
+                        lambda t: {"email": "new@example.com", "email_verified": True})
+    auth.require_user(_request(authorization="Bearer tok"))
+    monkeypatch.setenv("ALLOWED_EMAILS", "other@example.com")
+    with pytest.raises(HTTPException) as e:
+        auth.require_user(_request(authorization="Bearer tok"))
+    assert e.value.status_code == 403

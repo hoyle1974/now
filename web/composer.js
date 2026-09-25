@@ -48,8 +48,31 @@ function renderComposerType() {
   if (!dated) setComposerChips(false);
 }
 
+// With many types the control is a dropdown. Keep one in the form so the type button
+// can open the native picker instead of a tall list.
+const composerPicker = TypeUI.create({
+  value: composerType(),
+  onChange: (name) => {
+    composerTypeChoice = name;
+    closeTypePop();
+    renderComposerType();
+  },
+});
+const composerSelect = composerPicker.node.querySelector("select");
+if (composerSelect) {
+  composerSelect.classList.add("composer-type-select");
+  addForm.appendChild(composerSelect);
+}
+
 addType.addEventListener("click", () => {
   if (typePop) { closeTypePop(); return; }
+  if (composerSelect) {
+    composerPicker.set(composerType());
+    try {
+      composerSelect.showPicker();
+      return;
+    } catch (e) { /* showPicker refused; fall through to the list */ }
+  }
   const picker = TypeUI.create({
     value: composerType(),
     layout: "list",

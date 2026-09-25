@@ -33,6 +33,8 @@ fi
 
 gcloud run deploy "$SERVICE" "${args[@]}"
 
+say "Deploy complete"
+
 # Old images pile up ~70 MB per deploy (free tier 512 MB): keep only the one now serving.
 scripts/prune-images.sh || echo "warning: image prune failed; the cost check below will say if it matters" >&2
 

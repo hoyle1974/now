@@ -37,7 +37,7 @@ def notify() -> dict:
     reminders. One job serves everyone; the totals keep the old response shape."""
     now = datetime.datetime.now(datetime.UTC)
     total = {"devices": 0, "sent": 0, "scheduled": 0}
-    for email in auth.ALLOWED_EMAILS:
+    for email in auth.allowed_emails():
         try:
             with tenant.as_user(email):
                 out = push.run_notify(now, send=push.send_fcm)
@@ -60,7 +60,7 @@ def notify_todo(body: push.HeadsUp) -> dict:
     """Cloud Tasks delivery for one heads-up (OIDC-verified in require_user). `user` is
     absent on tasks queued before users existed: fall back to the owner rather than crash."""
     user = (body.user or auth.owner()).lower()
-    if user not in auth.ALLOWED_EMAILS:
+    if user not in auth.allowed_emails():
         raise HTTPException(400, "unknown user")
     with tenant.as_user(user):
         return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
@@ -68,9 +68,10 @@ def notify_todo(body: push.HeadsUp) -> dict:
 @router.post("/internal/sync-calendar/{todo_id}")
 def sync_calendar(todo_id: str, body: SyncCalendarBody) -> dict:
     """Cloud Tasks delivery for one calendar sync (OIDC-verified in require_user)."""
-    from app import calendar_sync as _cs  # deferred: only this route needs the ICS parser
+    from app import calendar_jobs
     user = (body.user or auth.owner()).lower()
-    if user not in auth.ALLOWED_EMAILS:
+    if user not in auth.allowed_emails():
         raise HTTPException(400, "unknown user")
     with tenant.as_user(user):
-        return _cs.run_calendar_sync(body.calendar_id or todo_id, client_session_id=body.client_session_id)
+        return calendar_jobs.run_calendar_sync(body.calendar_id or todo_id,
+                                               client_session_id=body.client_session_id)

@@ -1,0 +1,13 @@
+---
+description: graphify-out exists locally; do not treat a skipped search as missing
+alwaysApply: true
+---
+
+# graphify
+
+`graphify-out/` is **present on this machine**. It is gitignored (`graphify-out/` in `.gitignore`) and rebuilt by a local post-commit hook (`graphify hook install` after a fresh clone). The graph is the first place to look for codebase / architecture questions.
+
+- **Do not use Glob, Grep, or other workspace search to decide whether it exists.** Those tools skip gitignored paths and will report a miss. Check with the shell: `test -f graphify-out/graph.json` or `ls graphify-out`.
+- If `graphify-out/graph.json` is there, **query it** (`graphify query "..."`) instead of rebuilding. Do not run a full `/graphify .` unless asked.
+- The hook covers **code** only. After doc or image changes, run `/graphify . --update`.
+- After a fresh clone, `graphify-out/` will be empty until the hook has run or someone builds it.

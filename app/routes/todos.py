@@ -124,11 +124,12 @@ def get_trash(limit: int = Query(50, ge=1, le=TRASH_PAGE_MAX), offset: int = Que
 
 @router.post("/todos/clear-completed", response_model=None)
 def clear_completed(x_txn_id: str | None = Header(None)) -> Response:
-    """Soft-delete every done todo whose whole subtree is done, in one transaction."""
-    def clear() -> tuple[int, dict | None]:
-        return 200, {"cleared": affected_refs(db.clear_completed())}
+    """Soft-delete every done todo whose whole subtree is done.
 
-    return reply(*db.run_atomic(x_txn_id, clear))
+    One transaction when the plan fits in CLEAR_COMPLETED_BATCH writes; several
+    batches above that, so Firestore's 500-write cap is not hit.
+    """
+    return reply(*db.run_clear_completed(x_txn_id))
 
 @router.get("/todos/{todo_id}", response_model=models.Todo)
 def get_todo(todo_id: uuid.UUID) -> models.Todo:

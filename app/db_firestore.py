@@ -393,14 +393,8 @@ def _stream_all():
     tx = _tx.get()
     return _todos().stream() if tx is None else _todos().stream(transaction=tx)
 
-def clear_completed() -> list[tuple[str, int]]:
-    """Soft-delete every done todo whose whole live subtree is done.
-
-    Only the topmost such todo of each subtree is flagged (like a normal
-    delete): its descendants stay unflagged and hidden, so undoing it brings
-    the subtree back intact. Done todos with an unfinished descendant are kept.
-    Returns [(todo_id, new_version)].
-    """
+def _plan_clear_completed() -> list[str]:
+    """Topmost fully-done live subtrees, in the order clear_completed flags them."""
     live: dict[str, dict] = {}
     for doc in _stream_all():
         data = doc.to_dict()
@@ -423,20 +417,80 @@ def clear_completed() -> list[tuple[str, int]]:
                          has_state or any(k[1] for k in kids))
         return memo[tid]
 
-    cleared = []
+    planned: list[str] = []
     pending = list(children.get(None, []))
     while pending:
         tid = pending.pop()
         all_done, has_todo = check(tid)
         if all_done and has_todo:
-            data = live[tid]
-            version = data.get("version", 1) + 1
-            _update(_todos().document(tid),
-                    {"deleted": True, "deleted_at": _now_utc().isoformat(), "version": version})
-            cleared.append((tid, version))
+            planned.append(tid)
         else:
             pending.extend(children.get(tid, []))
+    return planned
+
+
+def _apply_clear_completed(ids: list[str]) -> list[tuple[str, int]]:
+    """Flag these todos deleted. All reads first (Firestore transactions)."""
+    now = _now_utc().isoformat()
+    fresh = {tid: (lambda s: s.to_dict() if s.exists else None)(_get(_todos().document(tid)))
+             for tid in ids}
+    cleared: list[tuple[str, int]] = []
+    for tid in ids:
+        data = fresh.get(tid)
+        if not data or data.get("deleted"):
+            continue
+        version = data.get("version", 1) + 1
+        _update(_todos().document(tid),
+                {"deleted": True, "deleted_at": now, "version": version})
+        cleared.append((tid, version))
     return cleared
+
+
+def clear_completed() -> list[tuple[str, int]]:
+    """Soft-delete every done todo whose whole live subtree is done.
+
+    Only the topmost such todo of each subtree is flagged (like a normal
+    delete): its descendants stay unflagged and hidden, so undoing it brings
+    the subtree back intact. Done todos with an unfinished descendant are kept.
+    Returns [(todo_id, new_version)].
+
+    A plan of CLEAR_COMPLETED_BATCH writes or fewer is one transaction (or the
+    current one, when already inside run_atomic). A larger plan commits in
+    batches of that size, like apply_calendar_sync, so it stays under
+    Firestore's 500-write cap.
+    """
+    ids = _plan_clear_completed()
+    if not ids:
+        return []
+    if _tx.get() is not None:
+        return _apply_clear_completed(ids)
+    cleared: list[tuple[str, int]] = []
+    for start in range(0, len(ids), CLEAR_COMPLETED_BATCH):
+        batch = ids[start:start + CLEAR_COMPLETED_BATCH]
+        _, body, _, _ = run_atomic(
+            None, lambda b=batch: (200, {"pairs": _apply_clear_completed(b)}))
+        cleared.extend((body or {}).get("pairs") or [])
+    return cleared
+
+
+def run_clear_completed(txn_id: str | None) -> tuple[int, dict | None, int, int]:
+    """HTTP entry: same as clear_completed, plus txn_id replay when the plan fits
+    in one batch. A larger plan is several transactions (txn_id is not stored)."""
+    ids = _plan_clear_completed()
+
+    def payload(pairs: list[tuple[str, int]]) -> dict:
+        return {"cleared": [{"todo_id": tid, "version": version} for tid, version in pairs]}
+
+    if len(ids) <= CLEAR_COMPLETED_BATCH:
+        return run_atomic(txn_id, lambda: (200, payload(_apply_clear_completed(ids))))
+    cleared: list[dict] = []
+    prev = get_rev()
+    for start in range(0, len(ids), CLEAR_COMPLETED_BATCH):
+        batch = ids[start:start + CLEAR_COMPLETED_BATCH]
+        _, body, _, _ = run_atomic(
+            None, lambda b=batch: (200, payload(_apply_clear_completed(b))))
+        cleared.extend((body or {}).get("cleared") or [])
+    return 200, {"cleared": cleared}, prev, get_rev()
 
 def _fold(text: str) -> str:
     """Lowercase and strip accents, for matching (same idea as web/search.js `normalize`)."""
@@ -648,7 +702,7 @@ def _doc_to_todo_with_children(data: dict, include_deleted_children: bool = Fals
     return todo
 
 def get_root_todos() -> list[models.Todo]:
-    """Get all root-level todos (parent_id is None), oldest first"""
+    """Get all root-level todos (parent_id is None), in sibling order."""
 
     docs = _get(_todos().where("parent_id", "==", None))
 
@@ -658,8 +712,7 @@ def get_root_todos() -> list[models.Todo]:
         if not doc.to_dict().get("deleted", False)
     ]
 
-    # Roots have no order_idx, and Firestore returns them by random document
-    # id; creation time keeps new todos where the optimistic UI put them.
+    # Roots are ordered like any other sibling list (order_idx, then create time).
     todos.sort(key=_root_sort_key)
 
     return todos
@@ -784,71 +837,101 @@ def get_calendar_event_children(calendar_id: str) -> dict[str, models.Todo]:
     return out
 
 
+# Firestore rejects a transaction past 500 writes. 200 matches the archive sweep and
+# leaves room for the revision document in the same transaction.
+CALENDAR_SYNC_BATCH = 200
+CLEAR_COMPLETED_BATCH = 200
+
+
 def apply_calendar_sync(calendar_id: str, events, triggered_by: str | None = None) -> dict:
     """Reconcile a calendar's children to exactly `events` (calendar_sync.ParsedEvent list),
     matched by external_uid. Each create/update/delete is a normal todo write, so /todos/rev
     bumps and the existing freshness/remote-diff client machinery picks it up.
 
-    Wrapped in one run_atomic so the whole diff (and its rev bump) commits atomically; this
-    runs from a background Cloud Task handler with no client watching for a version conflict,
-    but only this job ever writes a given calendar's calendar_event children, so there's no
-    concurrent user write to race."""
+    A plan of CALENDAR_SYNC_BATCH writes or fewer commits in one transaction. A larger plan
+    commits in batches of that size: creates and content updates, then order-only moves,
+    then deletes. A later batch failing leaves the new events in place. Each batch re-reads
+    the documents it updates, so a priority set between planning and writing is kept."""
     from app import calendar_sync
 
-    def action() -> tuple[int, dict | None]:
-        # All reads (existing children, matched via the diff) happen before any write below:
-        # Firestore transactions forbid a read after a write, and existing already holds the
-        # full Todo for every to_update/to_delete id, so no extra per-id _get is needed.
-        existing = get_calendar_event_children(calendar_id)
-        by_todo_id = {str(todo.todo_id): todo for todo in existing.values()}
-        to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
-        deleted = set(to_delete)
-        updates = {todo_id: event for todo_id, event in to_update}
+    existing = get_calendar_event_children(calendar_id)
+    to_create, to_update, to_delete = calendar_sync.diff_events(events, existing)
+    deleted = set(to_delete)
+    updates = {todo_id: event for todo_id, event in to_update}
 
-        # order_idx is the list index. Events are read-only, so the sync owns it and
-        # keeps children in due-date order. Assigned here, before any write: a later
-        # read of the current max is illegal inside this transaction.
-        survivors: list[models.Todo] = []
-        for todo in existing.values():
-            if str(todo.todo_id) in deleted:
-                continue
-            event = updates.get(str(todo.todo_id))
-            if event is not None:
-                for field, value in event.todo_fields().items():
+    survivors: list[models.Todo] = []
+    for todo in existing.values():
+        if str(todo.todo_id) in deleted:
+            continue
+        event = updates.get(str(todo.todo_id))
+        if event is not None:
+            for field, value in event.todo_fields().items():
+                setattr(todo, field, value)
+        survivors.append(todo)
+    created: list[models.Todo] = []
+    for event in to_create:
+        child = models.Todo(type="calendar_event", parent_id=models.TodoId(uuid.UUID(calendar_id)),
+                            external_uid=event.external_uid, **event.todo_fields())
+        created.append(child)
+        survivors.append(child)
+    previous = {str(t.todo_id): t.order_idx for t in existing.values()}
+    survivors.sort(key=lambda t: (t.due_date or datetime.datetime.max, t.title or "", t.external_uid or ""))
+    for index, todo in enumerate(survivors):
+        todo.order_idx = index
+
+    created_ids = {str(child.todo_id) for child in created}
+    ops: list[tuple] = [("create", child) for child in created]
+    ops += [("update", todo_id, event, next(s.order_idx for s in survivors if str(s.todo_id) == todo_id))
+            for todo_id, event in to_update]
+    ops += [("order", str(todo.todo_id), todo.order_idx) for todo in survivors
+            if str(todo.todo_id) not in updates and str(todo.todo_id) not in created_ids
+            and previous.get(str(todo.todo_id)) != todo.order_idx]
+    ops += [("delete", todo_id) for todo_id in to_delete]
+
+    totals = {"created": 0, "updated": 0, "deleted": 0}
+    if not ops:
+        return totals
+
+    def apply_batch(batch: list[tuple]) -> tuple[int, dict | None]:
+        # Reads before writes. A content or order update reloads the stored todo so fields
+        # the feed does not own (priority) survive.
+        fresh: dict[str, models.Todo] = {}
+        for op in batch:
+            if op[0] in ("update", "order"):
+                snap = _get(_todos().document(op[1]))
+                if snap.exists and not (snap.to_dict() or {}).get("deleted"):
+                    fresh[op[1]] = db_firestore_helpers.doc_to_todo(snap.to_dict())
+        created_n = updated_n = deleted_n = 0
+        for op in batch:
+            if op[0] == "create":
+                create_todo(op[1])
+                created_n += 1
+            elif op[0] == "update":
+                todo = fresh.get(op[1])
+                if todo is None:
+                    continue
+                for field, value in op[2].todo_fields().items():
                     setattr(todo, field, value)
-            survivors.append(todo)
-        created: list[models.Todo] = []
-        for event in to_create:
-            child = models.Todo(type="calendar_event", parent_id=models.TodoId(uuid.UUID(calendar_id)),
-                                external_uid=event.external_uid, **event.todo_fields())
-            created.append(child)
-            survivors.append(child)
-        previous = {str(t.todo_id): t.order_idx for t in existing.values()}
-        survivors.sort(key=lambda t: (t.due_date or datetime.datetime.max, t.title or "", t.external_uid or ""))
-        for index, todo in enumerate(survivors):
-            todo.order_idx = index
-
-        for child in created:
-            create_todo(child)
-        for todo_id in updates:
-            update_todo(by_todo_id[todo_id])
-        # A sibling that only slid to a new date slot is not a content change.
-        for todo in survivors:
-            tid = str(todo.todo_id)
-            if tid in updates or todo in created:
-                continue
-            if previous.get(tid) != todo.order_idx:
+                todo.order_idx = op[3]
+                update_todo(todo)
+                updated_n += 1
+            elif op[0] == "order":
+                todo = fresh.get(op[1])
+                if todo is None or todo.order_idx == op[2]:
+                    continue
+                todo.order_idx = op[2]
                 update_todo(todo, bump_version=False)
+            else:
+                _delete(_todos().document(op[1]))
+                deleted_n += 1
+        return 200, {"created": created_n, "updated": updated_n, "deleted": deleted_n}
 
-        # Gone from the feed = gone for good: a synced event holds nothing the user wrote,
-        # so it is hard-deleted rather than sent to the trash.
-        for todo_id in to_delete:
-            _delete(_todos().document(todo_id))
-
-        return 200, {"created": len(to_create), "updated": len(to_update), "deleted": len(to_delete)}
-
-    _, body, _, _ = run_atomic(None, action, triggered_by=triggered_by)
-    return body
+    for start in range(0, len(ops), CALENDAR_SYNC_BATCH):
+        _, body, _, _ = run_atomic(None, lambda batch=ops[start:start + CALENDAR_SYNC_BATCH]: apply_batch(batch),
+                                   triggered_by=triggered_by)
+        for key in totals:
+            totals[key] += (body or {}).get(key, 0)
+    return totals
 
 
 def calendar_purge_plan(todo: models.Todo) -> tuple[list[str], list[str]]:

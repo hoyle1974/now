@@ -34,6 +34,7 @@ from app.db_firestore import (
     reorder_todo,
     reparent_todo,
     run_atomic,
+    run_clear_completed,
     spawn_next_occurrence,
     split_into_children,
     sweep_orphan_blobs,
@@ -51,7 +52,7 @@ __all__ = [
     "get_links_graph_docs", "get_push_marker", "get_rev", "get_rev_info", "get_root_todos", "get_todo",
     "get_trash", "get_tree", "init", "is_ancestor", "list_push_devices",
     "mark_calendar_synced", "maybe_archive_expired", "prune_txn_log", "purge_stale_calendar_events",
-    "put_push_marker", "reorder_todo", "reparent_todo", "run_atomic",
+    "put_push_marker", "reorder_todo", "reparent_todo", "run_atomic", "run_clear_completed",
     "spawn_next_occurrence", "split_into_children", "sweep_orphan_blobs", "teardown",
     "undelete_todo", "update_todo", "upsert_push_device", "user_ref",
 ]

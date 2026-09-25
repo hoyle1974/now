@@ -153,7 +153,7 @@ scripts/e2e.sh                     # engine vs. the running app + emulator
 ## Clear completed and Trash
 
 - **Clear completed** (button under the list) is one outbox op,
-  `POST /todos/clear-completed`: in a single transaction it soft-deletes every
+  `POST /todos/clear-completed`: it soft-deletes every
   done todo whose whole subtree is done (only the topmost of each subtree is
   flagged, so undoing it restores the subtree). Done todos with unfinished
   descendants are kept. The toast has an Undo that queues an `undelete` per item.

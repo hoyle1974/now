@@ -14,6 +14,13 @@ from tests.helpers import TEST_USER, act_as, wipe_users
 
 client = TestClient(app)
 
+
+def test_health_is_ok_without_deep_check():
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok"}
+
+
 @pytest.fixture
 def db_setup():
     # Fresh Firestore emulator state for every test.
@@ -24,6 +31,13 @@ def db_setup():
     yield 0
     tenant.reset(token)
     db.teardown()
+
+
+def test_health_deep_checks_firestore(db_setup):
+    r = client.get("/health?deep=1")
+    assert r.status_code == 200
+    assert r.json() == {"status": "ok", "firestore": "ok"}
+
 
 @pytest.fixture
 def create_test_data():

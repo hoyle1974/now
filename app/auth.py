@@ -19,9 +19,12 @@ def _parse_emails(raw: str) -> tuple[str, ...]:
     return tuple(dict.fromkeys(e.strip().lower() for e in re.split(r"[;,\s]+", raw) if e.strip()))
 
 
-# The Google accounts allowed in. No default: an empty list denies everyone
-# (require_user) and stops the server at startup (check_config).
-ALLOWED_EMAILS = _parse_emails(os.environ.get("ALLOWED_EMAILS") or os.environ.get("ALLOWED_EMAIL", ""))
+def allowed_emails() -> tuple[str, ...]:
+    """The allowlist, read from the environment at call time.
+
+    An empty list denies everyone (require_user) and stops the server at
+    startup (check_config). Tests change the env, not a module constant."""
+    return _parse_emails(os.environ.get("ALLOWED_EMAILS") or os.environ.get("ALLOWED_EMAIL", ""))
 
 
 def owner() -> str:
@@ -30,13 +33,14 @@ def owner() -> str:
     Raises if ALLOWED_EMAILS is empty: check_config() stops the server before this can happen
     in production, so a caller reaching here with nothing configured is a bug, not a user
     input, and should fail loudly rather than bind requests to an empty-string "owner"."""
-    if not ALLOWED_EMAILS:
+    emails = allowed_emails()
+    if not emails:
         raise RuntimeError("owner() called with no ALLOWED_EMAILS configured")
-    return ALLOWED_EMAILS[0]
+    return emails[0]
 
 
 def check_config() -> None:
-    if not ALLOWED_EMAILS:
+    if not allowed_emails():
         raise RuntimeError("ALLOWED_EMAILS is not set: export the Google accounts that may sign in, "
                            "first one is the owner (deploy: ALLOWED_EMAILS='you@example.com;kid@example.com' ./deploy.sh)")
 
@@ -105,7 +109,7 @@ def require_user(request: Request) -> None:
     except Exception:
         raise HTTPException(401, "Invalid or expired token") from None
     email = (claims.get("email") or "").lower()
-    if not claims.get("email_verified") or email not in ALLOWED_EMAILS:
+    if not claims.get("email_verified") or email not in allowed_emails():
         raise HTTPException(403, "Not allowed")
     request.state.user = email
 

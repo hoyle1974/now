@@ -70,6 +70,19 @@ def test_clear_completed_is_idempotent_and_bumps_rev_once(db_setup):
     assert all(x["version"] == 3 for x in r1.json()["cleared"])
 
 
+def test_clear_completed_batches_above_the_write_cap(db_setup, monkeypatch):
+    from app import db_firestore
+    monkeypatch.setattr(db_firestore, "CLEAR_COMPLETED_BATCH", 2)
+    ids = [_mk(f"t{i}", done=True) for i in range(5)]
+    before = client.get("/todos/rev").json()["rev"]
+    r = client.post("/todos/clear-completed")
+    assert r.status_code == 200
+    assert {x["todo_id"] for x in r.json()["cleared"]} == set(ids)
+    assert _live_ids() == set()
+    # 5 writes in batches of 2: three transactions, three rev bumps.
+    assert client.get("/todos/rev").json()["rev"] == before + 3
+
+
 def test_clear_completed_with_nothing_does_not_bump_rev(db_setup):
     _mk("a")
     before = client.get("/todos/rev").json()["rev"]

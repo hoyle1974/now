@@ -24,7 +24,7 @@ def _req(path="/todos/root", authorization=None, method="GET"):
 
 
 def _two_users(monkeypatch):
-    monkeypatch.setattr(auth, "ALLOWED_EMAILS", ("me@example.com", "kid@example.com"))
+    monkeypatch.setenv("ALLOWED_EMAILS", "me@example.com;kid@example.com")
     monkeypatch.setattr(auth.firebase_admin, "_apps", {"x": 1})
     monkeypatch.setattr(auth.fb_auth, "verify_id_token",
                         lambda t: {"email": f"{t}@example.com", "email_verified": True})

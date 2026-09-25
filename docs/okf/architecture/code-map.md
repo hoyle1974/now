@@ -3,7 +3,7 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-22T05:37:00Z
+timestamp: 2026-09-25T05:20:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
@@ -15,7 +15,8 @@ timestamp: 2026-09-22T05:37:00Z
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).
 - `tasks.py` — Cloud Tasks heads-up scheduling (`fire_time`, `schedule_heads_up`); `push.py` — digest planner, heads-up handler and FCM sender ([push reminders](../features/push-reminders.md)).
 - `ics.py` — iCalendar rendering ([calendar feed](../features/calendar-feed.md)).
-- `auth.py` — Firebase token, calendar-feed token, Scheduler OIDC, `ALLOWED_EMAILS`/`owner()` (multi-email allowlist; the first entry is the owner).
+- `calendar_sync.py` — ICS parse, diff and fetch (no DB); `calendar_jobs.py` — `run_calendar_sync` (fetch → parse → write).
+- `auth.py` — Firebase token, calendar-feed token, Scheduler OIDC, `allowed_emails()`/`owner()` (multi-email allowlist, read from env at call time; the first entry is the owner).
 - `blobstore.py`, `attachments.py` — image bytes (GCS / in-memory) and type sniffing ([attachments](../features/attachments.md)).
 
 **Client (`web/`)** — vanilla JS, no build step. `index.html` loads the scripts as classic scripts sharing one global scope, with `?v=` cache-busting ([sync model](../features/sync-model.md)).

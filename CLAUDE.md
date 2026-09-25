@@ -30,7 +30,11 @@ A lot of this app's logic runs client-side over a server that's otherwise plain 
 
 ## graphify
 
-`graphify-out/` is git-ignored and rebuilt by a local post-commit hook (`graphify hook install` after a fresh clone). The hook covers code only; run `/graphify . --update` after doc or image changes. Consult the graph for codebase questions when it exists.
+`graphify-out/` is **present locally** (gitignored; rebuilt by a local post-commit hook — `graphify hook install` after a fresh clone). Consult it first for codebase questions.
+
+- Workspace search (Glob/Grep) **skips** gitignored paths and will look as if the graph is missing. Check with the shell: `test -f graphify-out/graph.json` or `ls graphify-out`.
+- If `graphify-out/graph.json` exists, query it (`graphify query "..."`). Do not rebuild unless asked.
+- The hook covers code only; run `/graphify . --update` after doc or image changes.
 
 ## OKF commit reminder
 

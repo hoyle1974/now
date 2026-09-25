@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app import db
 
@@ -12,9 +12,18 @@ WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 router = APIRouter()
 
 @router.get("/health")
-def health_check():
-    """Health check endpoint for Cloud Run"""
-    return {"status": "ok"}
+def health_check(deep: bool = False):
+    """Liveness. `?deep=1` also pings Firestore (503 if it cannot)."""
+    if not deep:
+        return {"status": "ok"}
+    try:
+        client = db.get_conn()
+        if client is None:
+            raise RuntimeError("firestore not initialized")
+        client.collection("users").document("_").get()
+        return {"status": "ok", "firestore": "ok"}
+    except Exception:
+        raise HTTPException(503, "firestore unavailable") from None
 
 def _read_app_version() -> str:
     """The version of the web code this container serves: APP_VERSION in

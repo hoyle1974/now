@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, calendar_sync, db, models, tasks, tenant
+from app import auth, calendar_jobs, calendar_sync, db, models, tasks, tenant
 from app.main import app
 from tests.helpers import TEST_USER, act_as, wipe_users
 
@@ -400,7 +400,7 @@ def test_run_calendar_sync_success(db_setup, monkeypatch):
     monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
     cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
     db.create_todo(cal)
-    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    result = calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
     assert result["created"] == 2
     refreshed = db.get_todo(cal.todo_id)
     assert refreshed.last_sync_error is None
@@ -415,14 +415,14 @@ def test_run_calendar_sync_uses_home_timezone_date(db_setup, monkeypatch):
     monkeypatch.setattr(tasks_mod, "home_tz", lambda devices: "America/Los_Angeles")
     cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
     db.create_todo(cal)
-    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
     assert "event-1@example.com" in db.get_calendar_event_children(str(cal.todo_id))  # Feb 1, 15:00
 
 
 def test_run_calendar_sync_no_url_noops(db_setup):
     cal = models.Todo(title="Family", type="calendar")  # calendar_url never set
     db.create_todo(cal)
-    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: (_ for _ in ()).throw(AssertionError("should not fetch")))
+    result = calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=lambda url: (_ for _ in ()).throw(AssertionError("should not fetch")))
     assert result == {"synced": False, "reason": "no calendar_url"}
 
 
@@ -430,13 +430,13 @@ def test_run_calendar_sync_fetch_failure_keeps_existing_events(db_setup, monkeyp
     monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
     cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
     db.create_todo(cal)
-    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
+    calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"))
     before = db.get_calendar_event_children(str(cal.todo_id))
 
     def failing_fetch(url):
         raise OSError("network down")
 
-    result = calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=failing_fetch)
+    result = calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=failing_fetch)
     assert result["synced"] is False
     after = db.get_calendar_event_children(str(cal.todo_id))
     assert set(after) == set(before)  # untouched
@@ -500,7 +500,7 @@ def test_rev_reports_who_triggered_it(db_setup, monkeypatch):
     monkeypatch.setattr(calendar_sync.models, "utc_now", lambda: dt.datetime(2026, 1, 15))
     cal = models.Todo(title="Family", type="calendar", calendar_url="https://example.com/f.ics")
     db.create_todo(cal)
-    calendar_sync.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"),
+    calendar_jobs.run_calendar_sync(str(cal.todo_id), fetch=lambda url: read("simple.ics"),
                                     client_session_id="session-abc")
     info = db.get_rev_info()
     assert info["triggered_by"] == "session-abc"
@@ -566,6 +566,153 @@ def test_get_tree_skips_freshly_synced_calendar(db_setup, monkeypatch):
     resp = client.get("/todos/tree", headers={"Authorization": "Bearer test"})
     assert resp.status_code == 200
     assert calls == []  # fresh -> not nudged
+
+
+def test_require_public_url_rejects_private_and_metadata(monkeypatch):
+    monkeypatch.setattr(calendar_sync.socket, "getaddrinfo",
+                        lambda host, port: [(0, 0, 0, "", ("93.184.216.34", 0))])
+    calendar_sync._require_public_url("https://example.com/cal.ics")  # public name, public address
+    cases = (
+        ("http://127.0.0.1/x", "not a public address"),
+        ("http://10.1.2.3/x", "not a public address"),
+        ("http://169.254.169.254/computeMetadata/v1/", "not a public address"),
+        ("http://metadata.google.internal/computeMetadata/v1/", "metadata host"),
+        ("http://evil.metadata.google.internal/x", "metadata host"),
+        ("file:///etc/passwd", "not an http"),
+    )
+    for url, reason in cases:
+        with pytest.raises(calendar_sync.CalendarSyncError, match=reason):
+            calendar_sync._require_public_url(url)
+
+
+def test_require_public_url_rejects_a_name_that_resolves_private(monkeypatch):
+    monkeypatch.setattr(calendar_sync.socket, "getaddrinfo",
+                        lambda host, port: [(0, 0, 0, "", ("169.254.169.254", 0))])
+    with pytest.raises(calendar_sync.CalendarSyncError, match="not a public address"):
+        calendar_sync._require_public_url("https://evil.example/cal.ics")
+
+
+class _Resp:
+    def __init__(self, status=200, body=b"BEGIN:VCALENDAR", location=None):
+        self.status_code = status
+        self.headers = {"Location": location} if location else {}
+        self.encoding = "utf-8"
+        self._body = body
+
+    @property
+    def is_redirect(self):
+        return self.status_code in (301, 302, 303, 307, 308)
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"status {self.status_code}")
+
+    def iter_content(self, chunk_size=65536):
+        yield self._body
+
+    def close(self):
+        return None
+
+
+def test_http_fetch_checks_each_redirect_and_caps_the_body(monkeypatch):
+    monkeypatch.setattr(calendar_sync.socket, "getaddrinfo",
+                        lambda host, port: [(0, 0, 0, "", ("93.184.216.34", 0))])
+
+    def get(url, timeout, allow_redirects, stream):
+        assert allow_redirects is False
+        if url.endswith("/start"):
+            return _Resp(302, location="http://169.254.169.254/computeMetadata/v1/")
+        return _Resp(200, b"BEGIN:VCALENDAR")
+
+    import requests
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(calendar_sync.CalendarSyncError, match="not a public address"):
+        calendar_sync._http_fetch("https://example.com/start")
+
+
+def test_http_fetch_http_error_includes_status(monkeypatch):
+    monkeypatch.setattr(calendar_sync.socket, "getaddrinfo",
+                        lambda host, port: [(0, 0, 0, "", ("93.184.216.34", 0))])
+
+    def get(url, timeout, allow_redirects, stream):
+        return _Resp(503, b"nope")
+
+    import requests
+    monkeypatch.setattr(requests, "get", get)
+    with pytest.raises(calendar_sync.CalendarSyncError, match="HTTP 503"):
+        calendar_sync._http_fetch("https://example.com/cal.ics")
+
+
+def test_apply_calendar_sync_batches_above_the_write_cap(db_setup, monkeypatch):
+    from app import db_firestore
+    monkeypatch.setattr(db_firestore, "CALENDAR_SYNC_BATCH", 2)
+    cal = models.Todo(title="Busy", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    before = db.get_rev()
+    events = [
+        calendar_sync.ParsedEvent(f"e{i}@x", f"Event {i:02d}", dt.datetime(2026, 3, 1, 9) + dt.timedelta(days=i))
+        for i in range(5)
+    ]
+    assert db.apply_calendar_sync(str(cal.todo_id), events) == {"created": 5, "updated": 0, "deleted": 0}
+    assert db.get_rev() == before + 3  # batches of 2, 2, and 1
+    ordered = sorted(db.get_calendar_event_children(str(cal.todo_id)).values(), key=lambda t: t.order_idx)
+    assert [t.title for t in ordered] == [f"Event {i:02d}" for i in range(5)]
+
+    # Deletes are their own later batches, and a feed under the cap is one transaction.
+    monkeypatch.setattr(db_firestore, "CALENDAR_SYNC_BATCH", 200)
+    before = db.get_rev()
+    assert db.apply_calendar_sync(str(cal.todo_id), events[:1])["deleted"] == 4
+    assert db.get_rev() == before + 1
+    assert len(db.get_calendar_event_children(str(cal.todo_id))) == 1
+
+
+def test_apply_calendar_sync_retries_after_a_partial_batch(db_setup, monkeypatch):
+    from app import db_firestore
+    monkeypatch.setattr(db_firestore, "CALENDAR_SYNC_BATCH", 2)
+    cal = models.Todo(title="Busy", type="calendar", calendar_url="https://example.com/f.ics")
+    db.create_todo(cal)
+    old = [
+        calendar_sync.ParsedEvent(f"old{i}@x", f"Old {i}", dt.datetime(2026, 3, 1, 9) + dt.timedelta(days=i))
+        for i in range(3)
+    ]
+    db.apply_calendar_sync(str(cal.todo_id), old)
+    desired = [
+        calendar_sync.ParsedEvent(f"new{i}@x", f"New {i}", dt.datetime(2026, 4, 1, 9) + dt.timedelta(days=i))
+        for i in range(3)
+    ]
+    real = db_firestore.run_atomic
+    calls = {"n": 0}
+
+    def fail_after_first(txn_id, fn, triggered_by=None):
+        calls["n"] += 1
+        if calls["n"] > 1:
+            raise RuntimeError("simulated crash after first batch")
+        return real(txn_id, fn, triggered_by)
+
+    monkeypatch.setattr(db_firestore, "run_atomic", fail_after_first)
+    with pytest.raises(RuntimeError, match="simulated crash"):
+        db.apply_calendar_sync(str(cal.todo_id), desired)
+    leftover = db.get_calendar_event_children(str(cal.todo_id))
+    assert leftover  # first batch landed; later creates/deletes did not
+
+    monkeypatch.setattr(db_firestore, "run_atomic", real)
+    db.apply_calendar_sync(str(cal.todo_id), desired)
+    assert set(db.get_calendar_event_children(str(cal.todo_id))) == {e.external_uid for e in desired}
+
+
+def test_calendar_sync_module_does_not_import_db():
+    import ast
+    from pathlib import Path
+    tree = ast.parse((Path(__file__).resolve().parents[1] / "app" / "calendar_sync.py").read_text())
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+            imported.update(alias.name for alias in node.names)
+    assert "app.db" not in imported and "db" not in imported
+    assert not any(isinstance(n, ast.FunctionDef) and n.name == "run_calendar_sync" for n in tree.body)
 
 
 def test_purge_stale_calendar_events_clears_archived_events(db_setup):
