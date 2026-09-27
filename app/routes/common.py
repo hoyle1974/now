@@ -106,8 +106,13 @@ def saved(result: tuple, background: BackgroundTasks, todo_of: Callable[[dict], 
     task already there). schedule=False for writes that can't change a reminder."""
     status, body = result[0], result[1]
     if status == 200 and schedule:
-        background.add_task(tasks.schedule_from_body, todo_of(body))
+        # The write may have followed its item to another partition (atomic): schedule there.
+        background.add_task(_schedule_in, tenant.partition(), todo_of(body))
     return reply(*result)
+
+def _schedule_in(partition: str, body: dict | None) -> None:
+    with tenant.as_partition(partition):
+        tasks.schedule_from_body(body)
 
 
 def check_share_root(todo: models.Todo, action: str) -> None:

@@ -290,3 +290,36 @@ def test_mount_moves_are_last_write_wins_and_removable():
     assert _mine(OTHER_USER)[ROOT]["deleted"] is True
     assert client.patch(f"/todos/{ROOT}/undelete").status_code == 200
     assert shares.get(ROOT).state == "active"
+
+
+# ---- final review fixes -----------------------------------------------------------
+
+def test_create_with_x_share_is_refused():
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER, OTHER_USER))
+    act_as(app, OTHER_USER)
+    r = client.post("/todos", json={"title": "stray root"}, headers=H)
+    assert r.status_code == 400
+    with tenant.as_user(TEST_USER), tenant.as_partition(f"shares/{ROOT}"):
+        roots, _ = db.get_tree()
+    assert [str(t.todo_id) for t in roots] == [ROOT]
+
+
+def test_redirected_write_schedules_its_heads_up_in_the_share(monkeypatch):
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    seen = []
+    monkeypatch.setattr("app.tasks.schedule_from_body", lambda body: seen.append(tenant.partition()))
+    act_as(app, TEST_USER)
+    r = client.patch(f"/todos/{CHILD}", json={"due_date": "2026-09-27T10:00:00"})  # old home: no X-Share
+    assert r.status_code == 200 and r.headers["X-Partition"] == f"shares/{ROOT}"
+    assert seen == [f"shares/{ROOT}"]
+
+
+def test_replayed_cross_edge_move_answers_with_the_moved_item():
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER, OTHER_USER))
+    act_as(app, OTHER_USER)
+    cake = _mk("Buy cake")
+    body = {"parent_id": ROOT, "index": 0, "parent_share": ROOT}
+    first = client.patch(f"/todos/{cake}/reparent", json=body)
+    again = client.patch(f"/todos/{cake}/reparent", json=body)  # the first response was lost
+    assert first.status_code == 200 and again.status_code == 200, again.text
+    assert again.json()["todo_id"] == cake and again.headers["X-Partition"] == f"shares/{ROOT}"

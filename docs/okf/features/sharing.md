@@ -37,6 +37,8 @@ Each step is safe to repeat. A run that dies leaves the freeze; when its lease h
 
 **Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
 
+`POST /todos` with `X-Share` is refused (400): a share has exactly one top-level item. A retried cross-edge move whose first answer was lost returns the item where it now is. A write that followed its item to a new partition schedules its heads-up there.
+
 **Clear completed** works on your own list only: shared items are never cleared by it (the server's plan sees only your partition, and the client's `clearableIds` skips shared nodes to match).
 
 **Deviations from the design spec** (decided while building): the migration freeze covers the whole source partition for its few seconds, not only the moving ids; heads-up tasks stay one per todo and fan out to members in the handler; the Sharing control lives in the item's viewer (it applies at once, online only) rather than the Edit sheet.

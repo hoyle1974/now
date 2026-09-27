@@ -44,6 +44,10 @@ def _check_editable(todo: models.Todo, allowed: bool) -> None:
 @router.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
+    if shares.bound() is not None:
+        # A share has exactly one top-level item; add inside it with split instead.
+        raise HTTPException(400, "create inside a share with its parent")
+
     def create() -> tuple[int, dict | None]:
         # A new top-level project gets a random colour so projects are told apart at a glance.
         todo = models.Todo(title=body.title, color=body.color or random.choice(models.COLORS),
@@ -335,6 +339,10 @@ def _reparent_across(todo_id: uuid.UUID, body: models.TodoReparent, here: str, t
     rights on both sides (bind_partition already checked the source's)."""
     todo = db.get_todo(models.TodoId(todo_id))
     if todo is None:
+        # A retry of a move that already happened (its answer was lost): it is there now.
+        if shares.locate(str(todo_id)) == target:
+            shares.bind_partition(target, shares.check_partition_write(target))
+            return reply(200, jsonable_encoder(db.get_todo(models.TodoId(todo_id))))
         raise HTTPException(404, "todo not found")
     if todo.type == "mount" or (shares.bound() is not None and str(todo_id) == shares.bound().id):
         raise HTTPException(409, "crosses share boundary")
