@@ -38,10 +38,13 @@ class _State:
         self.tree_cache: dict[str, tuple] = {}
         # partition -> time.monotonic() of that partition's last archive attempt
         self.archive_checked: dict[str, float] = {}
+        # email -> (own rev, mounted share ids): app/shares.revs, valid while the rev holds
+        self.mount_cache: dict[str, tuple[int, list[str]]] = {}
 
     def reset(self) -> None:
         self.tree_cache = {}
         self.archive_checked = {}
+        self.mount_cache = {}
 
 
 _state = _State()
@@ -251,10 +254,11 @@ def prune_txn_log(hours: int = 24 * 30) -> int:
     is far past any realistic offline stretch and the records are tiny."""
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
     removed = 0
-    for user in get_conn().collection(USERS).list_documents():  # includes users with no user doc, only subcollections
-        for doc in user.collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
-            doc.reference.delete()
-            removed += 1
+    for kind in (USERS, SHARES):  # list_documents includes parents with only subcollections
+        for parent in get_conn().collection(kind).list_documents():
+            for doc in parent.collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
+                doc.reference.delete()
+                removed += 1
     return removed
 
 
@@ -553,7 +557,9 @@ def _trash_entries():
     children: dict[str | None, list[dict]] = {}
     for data in docs:
         children.setdefault(data.get("parent_id"), []).append(data)
-    roots = [db_firestore_helpers.doc_to_todo(d) for d in docs if d.get("deleted", False)]
+    # A removed mount ("Remove from my list") is not trash: it comes back via Shared with me.
+    roots = [db_firestore_helpers.doc_to_todo(d) for d in docs
+             if d.get("deleted", False) and d.get("type") != "mount"]
     roots.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
                               str(t.todo_id)), reverse=True)
     seen = {str(t.todo_id) for t in roots}
@@ -569,6 +575,18 @@ def _trash_entries():
     for root in roots:
         yield root, None, root.deleted_at
         yield from inside(str(root.todo_id), root.title, root.deleted_at)
+
+
+def trash_entries(query: str = "") -> list[tuple]:
+    """Every trash entry of the bound partition (see _trash_entries), filtered like get_trash."""
+    words = _fold(query).split()
+
+    def wanted(entry: tuple) -> bool:
+        todo = entry[0]
+        text = _fold(" ".join([todo.title, todo.color or "", *(f"{link.url} {link.label}" for link in todo.links)]))
+        return all(w in text for w in words)
+
+    return [e for e in _trash_entries() if not words or wanted(e)]
 
 
 def get_trash(limit: int = 50, offset: int = 0, query: str = "") -> tuple[list[tuple], bool]:

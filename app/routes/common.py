@@ -28,11 +28,6 @@ def _parse_if_match(value: str | None) -> int | None:
     except ValueError:
         raise HTTPException(400, "If-Match must be an integer version") from None
 
-def revs(own_rev: int) -> dict[str, int]:
-    """Revision per data partition the caller sees, keyed by partition path. The
-    client refreshes when any value rises or a key comes or goes."""
-    return {tenant.partition(): own_rev}
-
 def reply(status: int, body: dict | None, prev: int | None = None, rev: int | None = None) -> Response:
     # X-Rev-Prev / X-Rev let the client notice writes made elsewhere: if
     # Prev is ahead of what it last saw, another window wrote in between.

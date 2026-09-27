@@ -11,7 +11,7 @@ from fastapi.encoders import jsonable_encoder
 
 from app import auth, db, models, next_up, shares, tasks, tenant, types
 from app import migrate
-from app.routes.common import affected_refs, apply, atomic, check_share_root, reply, revs, saved
+from app.routes.common import affected_refs, apply, atomic, check_share_root, reply, saved
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -62,10 +62,24 @@ def list_todos(background: BackgroundTasks) -> list[models.Todo]:
     return todos
 
 def _housekeeping() -> None:
+    # Housekeeping must never fail a read. Shares the person has in their list get the
+    # same daily sweep (claimed per partition, so one member's visit does it for all),
+    # a stale migration is finished, and ended/unshared shares are cleaned up.
     try:
-        db.maybe_archive_expired()  # housekeeping must never fail a read
+        db.maybe_archive_expired()
     except Exception:
         log.exception("archiving old deleted todos failed")
+    if not auth.sharing_enabled():
+        return
+    try:
+        migrate.resume_if_stale(tenant.partition())
+        for share in shares.visible_mounted(tenant.current()):
+            with tenant.as_partition(share.partition()):
+                migrate.resume_if_stale(share.partition())
+                db.maybe_archive_expired()
+        shares.sweep_daily()
+    except Exception:
+        log.exception("share housekeeping failed")
 
 def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
     """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
@@ -77,6 +91,17 @@ def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: Backgrou
     for t in values:
         if t.type == "calendar":
             background.add_task(tasks.enqueue_calendar_sync, str(t.todo_id), t.last_synced_at, now)
+
+def _member_tree(background: BackgroundTasks) -> tuple[int, dict[str, int], list[models.Todo], dict[str, models.Todo]]:
+    """The caller's own tree with every share they can see spliced in at their mounts:
+    (own rev, revs, roots, todosById)."""
+    me = tenant.current()
+    rev = db.get_rev()
+    roots, todos_by_id = _load_tree(rev, background)
+    seen = shares.splice_tree(me, roots, todos_by_id)
+    all_revs = shares.revs(me, rev)
+    all_revs.update(seen)  # the revs the spliced trees were actually read at
+    return rev, all_revs, roots, todos_by_id
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
@@ -95,24 +120,24 @@ def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_
     Calendar events do not consume `limit`; events due then or earlier are added on top.
     High-priority items are included ahead of that list; low-priority items only fill
     slots still short of `limit`."""
-    rev = db.get_rev()
-    roots, todosById = _load_tree(rev, background)
+    rev, _, roots, todosById = _member_tree(background)
     return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit, today))}
 
 @router.get("/todos/tree", response_model=dict)
 def get_tree(background: BackgroundTasks) -> dict:
     """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
-    # Read the revision first, so it can only be older than the tree we return:
-    # the worst case is one redundant refresh, never a missed change.
-    rev = db.get_rev()
-    roots, todosById = _load_tree(rev, background)
+    # Mounts first (a write), then each revision before its tree: a rev can only be
+    # older than the tree we return, so the worst case is one redundant refresh.
+    new_shares = shares.ensure_mounts(tenant.current())
+    rev, all_revs, roots, todosById = _member_tree(background)
     _nudge_stale_calendars(todosById, background)
 
     return {
         "rev": rev,
-        "revs": revs(rev),
+        "revs": all_revs,
         "roots": roots,
-        "todosById": todosById
+        "todosById": todosById,
+        "new_shares": new_shares,
     }
 
 TRASH_PAGE_MAX = 100  # a hard cap on one page, whatever the client asks for
@@ -125,7 +150,18 @@ def get_trash(limit: int = Query(50, ge=1, le=TRASH_PAGE_MAX), offset: int = Que
     null; `trashed_at` is when it went to the trash (an item inside a parent has no delete date
     of its own). `q` filters by title, colour and links. `has_more` says whether a next page
     (offset + len(items)) exists."""
-    entries, has_more = db.get_trash(limit, offset, q)
+    entries = db.trash_entries(q)
+    for share in shares.trash_sources(tenant.current()):
+        tag = models.ShareTag(id=share.id, mode=share.mode, owner=share.owner)
+        with tenant.as_partition(share.partition()):
+            for entry in db.trash_entries(q):
+                entry[0].share = tag
+                entries.append(entry)
+    # Newest first, undated last (like db._trash_entries); stable, so an item stays right
+    # after the parent it went to the trash with.
+    entries.sort(key=lambda e: (e[2] is not None, e[2].timestamp() if e[2] else 0), reverse=True)
+    page = entries[offset:offset + limit + 1]
+    entries, has_more = page[:limit], len(page) > limit
     return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with,
                        "trashed_at": models.as_utc_instant(trashed_at)}
                       for todo, deleted_with, trashed_at in entries],

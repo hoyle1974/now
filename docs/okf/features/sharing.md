@@ -4,7 +4,7 @@ title: Sharing between users
 description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
 resource: app/shares.py
 tags: [sharing, multi-user, data, sync]
-timestamp: 2026-09-27T05:00:00Z
+timestamp: 2026-09-27T06:00:00Z
 ---
 Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`).
 
@@ -28,3 +28,11 @@ Each step is safe to repeat. A run that dies leaves the freeze; when its lease h
 **Edits sent to an item's old home.** Share, unshare and cross-edge moves keep ids and versions, so an edit a device queued earlier still applies: `common.apply` raises `Moved` when the todo isn't where the request addressed it but `shares.locate` finds it (own list, then mounted shares) or when a content edit hits a mount (its content is the share root), and `common.atomic` checks the caller may write there, rebinds and runs the write once more. The addressed partition's `txn_log` is read first, so a write committed before the move replays its stored answer. An owner's `X-Share` request to an unshared share runs in their own partition, where the items went back. A member whose access ended gets 403 `share revoked`; an item dragged out of the share by someone else is 404 `todo not found` for the rest.
 
 **Moving across the edge.** `PATCH /todos/{id}/reparent` with `parent_share` different from the item's partition runs `migrate_subtree(kind="move")` after checking edit rights on both sides; mounts and a share's root never cross (409 `crosses share boundary`).
+
+**What a member sees** (`GET /todos/tree`, `shares.splice_tree`). The server first gives the caller a mount at the end of their top level for every live share they can see and have none for (`shares.ensure_mounts`; a removed mount counts as having one, so removing sticks), and returns the new ones that aren't theirs as `new_shares: [{id, title, owner}]` for the client to announce. Then each live mount is replaced in place by the share's tree (read at the share's rev, cached per partition): the root takes the mount's `parent_id`/`order_idx`, every node carries `share: {id, mode, owner}`, the root `share_root: true`, and `collapsed` comes from the caller's view state. A mount is left out when sharing is off, the share is unshared, the caller isn't a member or the root is in the trash (restoring it brings the mounts back); a mount whose share no longer exists is deleted. `revs` gains `shares` (`shares_meta/rev`) and `shares/<id>` for each visible mounted share; `/todos/rev` returns the same map (the mount list is cached per own rev).
+
+**Next up** ranks the spliced tree, so a shared item due today shows for every member who has it in their list. **Trash** lists the caller's own trash plus the trash of each mounted share they may edit, entries tagged `share`; a removed mount is not trash.
+
+**Cleanup** (on tree loads, after the response): each visible mounted share gets the daily archive sweep (claimed per partition) and a stale migration is finished; once a day per process `shares.sweep` deletes unshared tombstones older than 30 days (with their `txn_log`) and ends a share whose root is gone (archived). `prune_txn_log` covers share partitions too.
+
+**Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.

@@ -6,8 +6,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
-from app import db
-from app.routes.common import revs
+from app import db, shares, tenant
 
 WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
 router = APIRouter()
@@ -45,5 +44,5 @@ def get_rev() -> dict:
     bumped rev, or null — used to suppress the "changes from another device"
     framing for a client's own manually-triggered calendar sync."""
     info = db.get_rev_info()
-    return {"rev": info["value"], "revs": revs(info["value"]), "version": APP_VERSION,
+    return {"rev": info["value"], "revs": shares.revs(tenant.current(), info["value"]), "version": APP_VERSION,
             "triggered_by": info["triggered_by"]}

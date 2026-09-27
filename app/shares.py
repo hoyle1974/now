@@ -16,7 +16,7 @@ from typing import Literal
 from google.cloud import firestore  # type: ignore[attr-defined]
 from pydantic import BaseModel, Field
 
-from app import auth, db, tenant
+from app import auth, db, models, tenant
 
 SHARES = "shares"
 META = ("shares_meta", "rev")      # bumped on share, unshare, mode change: the "shares" rev key
@@ -183,3 +183,155 @@ def bind_partition(partition: str, share: Share | None) -> None:
     """Rebind for the rest of this request (a request runs in its own context copy)."""
     tenant.set_partition(None if share is None else partition)
     bind(share)
+
+
+# ---- what a member sees -----------------------------------------------------------
+
+def ensure_mounts(email: str) -> list[dict]:
+    """Give the person a mount (at the end of their top level) for every live share they
+    can see and have none for, removed ones included: removing is a choice to keep. Covers
+    new shares and people added to the deployment later. Returns [{id, title, owner}] of
+    the new ones that aren't their own, for the client to announce."""
+    if not auth.sharing_enabled():
+        return []
+    have = {m["todo_id"] for m in mounts(email)}
+    new: list[dict] = []
+    for share in active_shares():
+        if share.id in have or not is_member(share, email):
+            continue
+        with tenant.as_partition(share.partition()):
+            root = db.get_todo(models.TodoId(share.id))
+        if root is None:
+            continue
+        mount = models.Todo(todo_id=models.TodoId(share.id), title="", type="mount")
+        with tenant.as_user(email):
+            db.run_atomic(None, lambda m=mount: (db.create_todo(m), (200, None))[-1])
+        if share.owner != email:
+            new.append({"id": share.id, "title": root.title, "owner": share.owner})
+    return new
+
+
+def _visible(share: Share | None, email: str) -> bool:
+    return share is not None and share.state == "active" and is_member(share, email)
+
+
+def _detach(roots: list[models.Todo], by_id: dict[str, models.Todo], node: models.Todo) -> None:
+    by_id.pop(str(node.todo_id), None)
+    if node.parent_id is None:
+        roots[:] = [r for r in roots if r.todo_id != node.todo_id]
+    else:
+        parent = by_id.get(str(node.parent_id))
+        if parent is not None:
+            parent.child_ids = [c for c in parent.child_ids if c != node.todo_id]
+
+
+def splice_tree(email: str, roots: list[models.Todo], by_id: dict[str, models.Todo]) -> dict[str, int]:
+    """Replace each of the person's mounts, in place, with the share's tree: the root takes
+    the mount's position, every node is tagged `share`, `collapsed` comes from their view
+    state. Mounts they can't see (sharing off, unshared, not a member, root deleted) are
+    left out; a mount whose share no longer exists is deleted. Returns the share revs
+    seen ({"shares/<id>": rev})."""
+    seen: dict[str, int] = {}
+    enabled = auth.sharing_enabled()
+    for mount in [t for t in by_id.values() if t.type == "mount"]:
+        share = get(str(mount.todo_id)) if enabled else None
+        if enabled and share is None:
+            db.user_ref(email).collection("todos").document(str(mount.todo_id)).delete()
+        if not _visible(share, email):
+            _detach(roots, by_id, mount)
+            continue
+        with tenant.as_partition(share.partition()):
+            rev = db.get_rev()
+            _, share_by_id = db.get_tree(rev)
+        root = share_by_id.get(share.id)
+        if root is None:  # the owner deleted it: hidden until restored
+            _detach(roots, by_id, mount)
+            continue
+        seen[share.partition()] = rev
+        tag = models.ShareTag(id=share.id, mode=share.mode, owner=share.owner)
+        collapsed = get_view_state(email, share.id)
+        for node in share_by_id.values():
+            node.share = tag
+            node.collapsed = str(node.todo_id) in collapsed
+        root.share_root = True
+        root.parent_id, root.order_idx = mount.parent_id, mount.order_idx
+        by_id.update(share_by_id)
+        if mount.parent_id is None:
+            roots[:] = [root if r.todo_id == mount.todo_id else r for r in roots]
+    return seen
+
+
+def revs(email: str, own_rev: int) -> dict[str, int]:
+    """{partition: rev} for everything the person sees: their own list, the share list
+    ("shares") and each share they have mounted. The mount list is cached per own rev
+    (adding, removing or moving a mount bumps it)."""
+    out = {f"users/{email}": own_rev}
+    if not auth.sharing_enabled():
+        return out
+    out[SHARES] = meta_rev()
+    from app.db_firestore import _state
+    cached = _state.mount_cache.get(email)
+    if cached is None or cached[0] != own_rev:
+        cached = (own_rev, mounted_share_ids(email))
+        _state.mount_cache[email] = cached
+    for share_id in cached[1]:
+        share = get(share_id)
+        if _visible(share, email):
+            with tenant.as_partition(share.partition()):
+                out[share.partition()] = db.get_rev()
+    return out
+
+
+def trash_sources(email: str) -> list[Share]:
+    """Shares whose trash the person sees: mounted, live, and they may edit."""
+    out = []
+    for share_id in mounted_share_ids(email):
+        share = get(share_id)
+        if _visible(share, email) and can_write(share, email):
+            out.append(share)
+    return out
+
+
+def visible_mounted(email: str) -> list[Share]:
+    return [s for s in (get(i) for i in mounted_share_ids(email)) if _visible(s, email)]
+
+
+# ---- cleanup ----------------------------------------------------------------------
+
+def _drop_partition(share_id: str) -> None:
+    ref = db.get_conn().collection(SHARES).document(share_id)
+    for sub in ref.collections():
+        for doc in sub.stream():
+            doc.reference.delete()
+    ref.delete()
+
+
+_last_sweep: list[float] = []
+
+
+def sweep_daily() -> int:
+    """sweep() at most once a day per process (it streams every share doc)."""
+    import time
+    if _last_sweep and time.monotonic() - _last_sweep[0] < 24 * 3600:
+        return 0
+    _last_sweep[:] = [time.monotonic()]
+    return sweep()
+
+
+def sweep(now: datetime.datetime | None = None) -> int:
+    """Delete unshared tombstones older than TOMBSTONE_DAYS (their txn_log with them) and end
+    shares whose root is gone (archived). Returns how many shares were removed. Mounts that
+    point at a removed share are deleted when their owner next loads the tree."""
+    now = now or _now()
+    removed = 0
+    for snap in db.get_conn().collection(SHARES).stream():
+        data = snap.to_dict() or {}
+        state, updated = data.get("state"), data.get("updated_at")
+        if state == "unshared" and updated and now - updated > datetime.timedelta(days=TOMBSTONE_DAYS):
+            _drop_partition(snap.id)
+            removed += 1
+        elif state == "active" and not snap.reference.collection("todos").document(snap.id).get().exists:
+            _drop_partition(snap.id)
+            bump_meta_rev()
+            removed += 1
+    return removed

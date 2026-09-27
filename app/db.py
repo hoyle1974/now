@@ -41,6 +41,7 @@ from app.db_firestore import (
     spawn_next_occurrence,
     split_into_children,
     sweep_orphan_blobs,
+    trash_entries,
     teardown,
     undelete_todo,
     update_todo,
@@ -56,6 +57,6 @@ __all__ = [
     "get_trash", "get_tree", "init", "is_ancestor", "list_push_devices",
     "mark_calendar_synced", "maybe_archive_expired", "migration_writes", "partition_ref", "prune_txn_log", "purge_stale_calendar_events",
     "put_push_marker", "reorder_todo", "reparent_todo", "run_atomic", "run_clear_completed",
-    "spawn_next_occurrence", "split_into_children", "sweep_orphan_blobs", "teardown",
+    "spawn_next_occurrence", "split_into_children", "sweep_orphan_blobs", "teardown", "trash_entries",
     "undelete_todo", "update_todo", "upsert_push_device", "user_ref",
 ]
