@@ -21,6 +21,7 @@ __pycache__/
 *.log
 *.db
 .scriptable-secret
+.calendar-url
 .zilch.config
 conftest.py
 requirements-dev.txt

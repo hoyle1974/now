@@ -1069,6 +1069,9 @@ def mark_calendar_synced(calendar_id: str, error: str | None) -> None:
         "last_synced_at": _now_utc().replace(tzinfo=None).isoformat(),
         "last_sync_error": error,
     })
+    # No revision bump, so a cached tree would keep the old time and every load would
+    # ask for another sync: drop it.
+    _state.tree_cache.pop(tenant.partition(), None)
 
 
 def get_links_graph_docs(todo_ids: list[str]) -> dict[str, dict | None]:
@@ -1136,6 +1139,8 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
     moving: dict[str, dict] = {}
     for doc in _todos().where("deleted", "==", True).stream():
         data = doc.to_dict()
+        if data.get("type") == "mount":
+            continue  # "Remove from my list" is a choice to keep, not trash
         stamp = data.get("deleted_at")
         if stamp is None:
             doc.reference.update({"deleted_at": now.isoformat()})

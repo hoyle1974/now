@@ -72,7 +72,7 @@ def _validate(kind: Kind, src: str, dst: str, nodes: list[dict], dst_parent: str
     root = nodes[0]
     if kind == "share" and (_is_share(src) or not types.can_type(root.get("type"), "shareable")):
         raise MigrationError("not eligible")
-    if len(nodes) > MAX_NODES:
+    if kind != "unshare" and len(nodes) > MAX_NODES:  # a share must always be able to end
         raise MigrationError("too large")
     if _is_share(dst) and any(not types.can_type(n.get("type"), "shareable") for n in nodes):
         raise MigrationError("crosses share boundary")
@@ -246,7 +246,8 @@ def _switch(record: dict) -> None:
     _bump(src)
     _bump(dst)
     if kind == "share":
-        db.get_conn().collection("shares").document(root_id).update({"state": "active", "updated_at": _now()})
+        # Written whole: a run that died before the share record was first written still ends right.
+        shares.put(shares.Share(id=root_id, owner=record["user"], mode=record["mode"] or "rw", state="active"))
         shares.bump_meta_rev()
     elif kind == "unshare":
         share_id = src.split("/", 1)[1]

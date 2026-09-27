@@ -267,6 +267,9 @@
     },
     split: {
       versioned: true,
+      // Adding children never conflicts with what changed on the parent: take its new
+      // version and send again (two people adding to one shared list hit this).
+      retryOn409: true,
       mayCommitUnacked: true,
       alreadyCommitted(op, todosById, fresh) {
         const parent = todosById.get(op.target_id);
@@ -755,6 +758,10 @@
       authBlocked = false;
       const spec = OPS[op.kind];
       if (spec && spec.ack) spec.ack(op, body, { model, remapId, nodeOf });
+      // Our own edit moved the item's version: a delete queued behind it follows.
+      if (body && body.version != null) {
+        for (const o of ops) if (o !== op && o.target_id === op.target_id && o.base_version != null) o.base_version = body.version;
+      }
     }
 
     async function handle(op, res) {
@@ -791,6 +798,7 @@
           // Local wins: adopt the server's version and any fields we did not edit.
           if (spec.onConflict) spec.onConflict(node, op, body);
           node.version = body.version;
+          if (op.base_version != null) op.base_version = body.version;
           op.txn_id = uuid();
           op.state = "pending";
           persist();
@@ -927,7 +935,7 @@
           op.state = "sending";
           op.sent = true;
           emitStatus();
-          const version = nodeOf(op.target_id)?.version;
+          const version = op.base_version ?? nodeOf(op.target_id)?.version;
           let res;
           const startedAt = Date.now();
           try {
@@ -1018,6 +1026,14 @@
         return false;
       });
       if (ops.length !== before) { epoch += 1; persist(); }
+      // A queued delete's If-Match is the version it was deleted at; the fresh tree would
+      // hand it the server's current one and hide a change made elsewhere meanwhile.
+      for (const op of ops) {
+        if (op.kind === "delete" && op.base_version == null) {
+          const node = nodeOf(op.target_id);
+          if (node && node.version != null) op.base_version = node.version;
+        }
+      }
       model.todosById = todosById;
       model.roots = tree.roots.map((r) => todosById.get(r.todo_id) || r);
       model.trash = new Map();

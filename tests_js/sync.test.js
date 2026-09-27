@@ -316,8 +316,8 @@ test("repeated conflicts give up after 3 with a notice", async () => {
   assert.ok(h.notices.some((n) => n.level === "error"));
 });
 
-test("409 on delete/split/undelete drops the op, refetches once and notifies", async () => {
-  for (const kind of ["delete", "split", "undelete"]) {
+test("409 on delete/undelete drops the op, refetches once and notifies", async () => {
+  for (const kind of ["delete", "undelete"]) {
     const t = todo("a", { version: 1 });
     const h = harness({ tree: treeOf(t), script: [ok(todo("a", { version: 4 }), 409)],
       refetchTree: treeOf(todo("a", { version: 4 })) });
@@ -1380,4 +1380,44 @@ test("clear completed never touches shared items (the server clears only your ow
   model.roots = tree.roots;
   model.todosById = tree.todosById;
   assert.deepEqual(Sync.clearableIds(model), ["mine"]);
+});
+
+
+// ---- Cursor review (2026-09-27) ---------------------------------------------------
+
+test("a split whose parent changed elsewhere is retried, not dropped", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 1 })), script: [
+    ok(todo("a", { version: 4 }), 409),
+    ok({ ...todo("a", { version: 5 }), affected: [{ todo_id: "a", version: 5 }, { todo_id: "n", version: 1 }] }),
+  ] });
+  h.engine.enqueue({ kind: "split", target_id: "a", payload: { descriptions: ["milk"] } });
+  await h.engine.flush();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].headers["If-Match"], "4");
+  assert.equal(h.engine.pending(), 0);
+  assert.equal(h.notices.length, 0);
+});
+
+test("a queued delete keeps its version check across a reload", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 1 })), script: [ok(todo("a", { version: 3 }), 409)],
+    refetchTree: treeOf(todo("a", { version: 3 })) });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  h.engine.rebuild(treeOf(todo("a", { version: 3 })));  // edited on another device meanwhile
+  h.net.online = true;
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["If-Match"], "1");
+});
+
+test("our own acked edit moves a queued delete's version along", async () => {
+  const h = harness({ tree: treeOf(todo("a", { version: 1 })), script: [
+    ok(todo("a", { version: 2 })), ok(null, 204),
+  ] });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { title: "x" } });
+  h.engine.enqueue({ kind: "delete", target_id: "a" });
+  h.engine.rebuild(treeOf(todo("a", { version: 1 })));
+  h.net.online = true;
+  await h.engine.flush();
+  assert.equal(h.calls[1].headers["If-Match"], "2");
 });

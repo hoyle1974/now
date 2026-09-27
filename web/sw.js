@@ -29,10 +29,32 @@ function strategy(url, origin) {
   return url.hostname === SDK_HOST && url.pathname.startsWith("/firebasejs/") ? "versioned" : null;
 }
 
-if (typeof module === "object" && module.exports) module.exports = { strategy };
+// What to cache at install so the first offline launch after a release works: the page
+// and every same-origin versioned asset it names.
+function shellAssets(html) {
+  const out = ["/"];
+  for (const m of html.matchAll(/(?:src|href)="(\/[^"]+\?v=[^"]+)"/g)) if (!out.includes(m[1])) out.push(m[1]);
+  return out;
+}
+
+if (typeof module === "object" && module.exports) module.exports = { strategy, shellAssets };
 
 if (IN_WORKER) {
-  self.addEventListener("install", () => self.skipWaiting());
+  self.addEventListener("install", (event) => {
+    self.skipWaiting();
+    // Fill this release's cache before the old one is dropped (activate). Best effort:
+    // a failed fetch leaves the network-first/cache-first handlers to fill it later.
+    event.waitUntil((async () => {
+      try {
+        const page = await fetch("/", { cache: "no-store" });
+        if (!page.ok) return;
+        const cache = await caches.open(CACHE);
+        await cache.put("/", page.clone());
+        const assets = shellAssets(await page.text()).filter((u) => u !== "/");
+        await Promise.all(assets.map((u) => cache.add(u).catch(() => {})));
+      } catch (_) { /* offline install: nothing to precache */ }
+    })());
+  });
   self.addEventListener("activate", (event) => event.waitUntil((async () => {
     for (const key of await caches.keys()) if (key.startsWith("shell-") && key !== CACHE) await caches.delete(key);
     await self.clients.claim();

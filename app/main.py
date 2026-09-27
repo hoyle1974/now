@@ -86,6 +86,16 @@ async def _no_store_api_reads(request, call_next):
     return response
 
 
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Nobody may frame the app (clickjacking), and nothing is content-sniffed."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    return response
+
+
 class RevalidatingStaticFiles(StaticFiles):
     """Static files with ETags but no Cache-Control let iOS home-screen apps
     heuristically reuse a stale page for days; no-cache forces a revalidation."""

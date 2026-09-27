@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert");
-const { strategy } = require("../web/sw.js");
+const { strategy, shellAssets } = require("../web/sw.js");
 
 const ORIGIN = "https://now.example.app";
 const kind = (path, origin = ORIGIN) => strategy(new URL(path, origin), ORIGIN);
@@ -23,4 +23,11 @@ test("API and other routes are never handled", () => {
   }
   assert.equal(kind("https://evil.example/firebasejs/x.js", "https://evil.example"), null);
   assert.equal(kind("https://www.gstatic.com/other.js", "https://www.gstatic.com"), null);
+});
+
+
+test("the app shell to precache is the page plus every versioned asset it names", () => {
+  const html = '<link rel="stylesheet" href="/style.css?v=107"><script defer src="/app.js?v=107"></script>' +
+    '<script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script><img src="/icons/a.png">';
+  assert.deepEqual(shellAssets(html), ["/", "/style.css?v=107", "/app.js?v=107"]);
 });

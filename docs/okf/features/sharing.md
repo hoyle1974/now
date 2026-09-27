@@ -4,7 +4,7 @@ title: Sharing between users
 description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
 resource: app/shares.py
 tags: [sharing, multi-user, data, sync]
-timestamp: 2026-09-27T14:00:00Z
+timestamp: 2026-09-27T16:00:00Z
 ---
 Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`; `SHARING_ENABLED=1 ./deploy.sh`, [deploy](../ops/deploy.md)). Client side: `web/share-ui.js` (permissions mirror, badges, edge crossing, the viewer's Sharing control), routing in `web/sync.js` ([sync](sync-model.md)), controls listed in the [UI inventory](ui-inventory.md).
 
@@ -35,9 +35,11 @@ Each step is safe to repeat. A run that dies leaves the freeze; when its lease h
 
 **Cleanup** (on tree loads, after the response): each visible mounted share gets the daily archive sweep (claimed per partition) and a stale migration is finished; once a day per process `shares.sweep` deletes unshared tombstones older than 30 days (with their `txn_log`) and ends a share whose root is gone (archived). `prune_txn_log` covers share partitions too.
 
-**Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
+**Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1. A tree load reads `shares_meta/rev` (plus a scan of share records only when it moved), then per mounted share its record and rev twice (splice and revs) and, when that share changed, its tree; housekeeping after the response lists mounts and reads each share record again. The daily notify pass also reads the person's whole own tree (to nudge calendars) and the due items of each mounted share. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
 
 `POST /todos` with `X-Share`, and a cross-edge move to a share's top level, are refused: a share has exactly one top-level item. An image uploaded or read by a device that addressed the item's old home follows it to its new partition (`routes/attachments._follow`). `GET /shares` first gives the caller a place for every share, like a tree load, so Add to my list always works. `ensure_mounts` only scans share records when `shares_meta/rev` moved since that person was last checked. Housekeeping runs each share's steps on its own, so one stuck share can't block the others. `POST /todos` with `X-Share` is refused (400): a share has exactly one top-level item. A retried cross-edge move whose first answer was lost returns the item where it now is. A write that followed its item to a new partition schedules its heads-up there.
+
+**Hardening (Cursor review, 2026-09-27).** Only the owner deletes or restores the root through any route (`DELETE`, or a `PATCH` with `deleted`). Clear completed is refused inside a share (400). A share keeps exactly one top-level item: moving an item to the top inside a share is 409, and the root can't repeat (its next occurrence would be a second top-level item; 400). No unshareable type (a calendar) can be created in or retyped into a share (409). A share's record is written whole when the move finishes, so a run that died before the record existed still ends right. Unsharing ignores the size cap (a share must always be able to end). A heads-up queued before its item moved into a share finds it there. Removed mounts are never archived, so "Remove from my list" sticks.
 
 **Clear completed** works on your own list only: shared items are never cleared by it (the server's plan sees only your partition, and the client's `clearableIds` skips shared nodes to match).
 

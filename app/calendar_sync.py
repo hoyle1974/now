@@ -8,6 +8,7 @@ import ipaddress
 import logging
 import re
 import socket
+import time
 from dataclasses import dataclass
 from urllib.parse import urljoin, urlparse
 from zoneinfo import ZoneInfo
@@ -20,6 +21,10 @@ log = logging.getLogger(__name__)
 DOWNLOAD_ERROR = "Could not download calendar"
 MAX_SYNC_ERROR_LEN = 500
 MAX_REDIRECTS = 3
+# Generous on purpose: a Google secret address returns the whole history, and a 2 MB cap
+# rejected a real feed. These only stop a feed that never ends (memory, CPU time).
+MAX_FEED_BYTES = 50 * 1024 * 1024
+MAX_FETCH_SECONDS = 60
 
 
 def _download_error(detail: str) -> CalendarSyncError:
@@ -296,8 +301,10 @@ def _require_public_url(url: str) -> None:
 def _http_fetch(url: str) -> str:
     """Download an ICS feed. Redirects are followed one hop at a time, and every hop
     is checked again. The body is not size-capped: a Google secret address returns the
-    whole history, and a 2 MB cap rejected a real feed (Cloud Run: exceeded 2097152 bytes)."""
+    whole history, and a 2 MB cap rejected a real feed (Cloud Run: exceeded 2097152 bytes).
+    Only a runaway is stopped: over MAX_FEED_BYTES, or over MAX_FETCH_SECONDS in all."""
     import requests
+    started = time.monotonic()
     current = url
     for hop in range(MAX_REDIRECTS + 1):
         _require_public_url(current)
@@ -321,6 +328,10 @@ def _http_fetch(url: str) -> str:
             body = bytearray()
             for chunk in resp.iter_content(chunk_size=65536):
                 body += chunk
+                if len(body) > MAX_FEED_BYTES:
+                    raise _download_error("calendar feed too large")
+                if time.monotonic() - started > MAX_FETCH_SECONDS:
+                    raise _download_error("calendar feed took too long")
             return bytes(body).decode(resp.encoding or "utf-8", errors="replace")
         except CalendarSyncError:
             raise

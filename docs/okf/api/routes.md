@@ -4,7 +4,7 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-27T05:00:00Z
+timestamp: 2026-09-27T16:00:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -43,3 +43,5 @@ Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` an
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
 
 `PATCH /todos/{id}` also accepts `type` (any registry type — `todo`/`list`/`project`/`note`/`calendar`/`calendar_event`, else 422); it changes only the type ([item types](../features/item-types.md)). It accepts `content` (a note body, ≤100,000 characters; `""` or `null` clears, omitted leaves it). It accepts `priority` (`high` / `normal` / `low`, else 422). On a read-only `calendar_event` that is the one content field a patch may set; it still takes `If-Match` and bumps the version. A `collapsed`-only patch still skips both.
+
+Every response carries `X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and `X-Content-Type-Options: nosniff` (`app/main.py`). No full CSP or Subresource Integrity on the Firebase SDK yet.

@@ -725,3 +725,24 @@ def test_purge_stale_calendar_events_clears_archived_events(db_setup):
     assert db.purge_stale_calendar_events() == 2
     left = [d.to_dict()["type"] for d in archive.stream()]
     assert left == ["calendar"]
+
+
+def test_http_fetch_stops_a_runaway_feed(monkeypatch):
+    import requests
+    monkeypatch.setattr(calendar_sync.socket, "getaddrinfo",
+                        lambda host, port: [(0, 0, 0, "", ("93.184.216.34", 0))])
+    monkeypatch.setattr(calendar_sync, "MAX_FEED_BYTES", 10)
+    monkeypatch.setattr(requests, "get", lambda *a, **k: _Resp(body=b"x" * 11))
+    with pytest.raises(calendar_sync.CalendarSyncError, match="too large"):
+        calendar_sync._http_fetch("https://example.com/cal.ics")
+    clock = iter([0.0, 0.0, 999.0])
+    monkeypatch.setattr(calendar_sync, "MAX_FEED_BYTES", 10**9)
+    monkeypatch.setattr(calendar_sync.time, "monotonic", lambda: next(clock))
+
+    class Slow(_Resp):
+        def iter_content(self, chunk_size=65536):
+            yield b"a"
+            yield b"b"
+    monkeypatch.setattr(requests, "get", lambda *a, **k: Slow())
+    with pytest.raises(calendar_sync.CalendarSyncError, match="took too long"):
+        calendar_sync._http_fetch("https://example.com/cal.ics")

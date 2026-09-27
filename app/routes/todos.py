@@ -188,6 +188,8 @@ def clear_completed(x_txn_id: str | None = Header(None)) -> Response:
     One transaction when the plan fits in CLEAR_COMPLETED_BATCH writes; several
     batches above that, so Firestore's 500-write cap is not hit.
     """
+    if shares.bound() is not None:
+        raise HTTPException(400, "clear completed works on your own list")
     return reply(*db.run_clear_completed(x_txn_id))
 
 @router.get("/todos/{todo_id}", response_model=models.Todo)
@@ -239,6 +241,10 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
 
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, readonly_ok)
+        if body.deleted is not None and body.deleted != todo.deleted:
+            check_share_root(todo, "delete" if body.deleted else "undelete")
+        if body.type is not None and shares.bound() is not None and not types.can_type(body.type, "shareable"):
+            raise HTTPException(409, "crosses share boundary")
         # Reads before any write (Firestore transactions), like _check_ids below.
         purge = db.calendar_purge_plan(todo) if body.deleted and not todo.deleted else None
         if body.title is not None:
@@ -301,6 +307,10 @@ def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
     def action(todo: models.Todo) -> dict:
         if todo.repeat is None:
             raise HTTPException(400, "this todo does not repeat")
+        share = shares.bound()
+        if share is not None and str(todo.todo_id) == share.id:
+            # Its next occurrence would be a second top-level item in the share, seen by nobody.
+            raise HTTPException(400, "the top of a shared list can't repeat")
         if todo.spawned_id is not None:
             return {"created": False, "spawned_id": str(todo.spawned_id)}
         copy = db.spawn_next_occurrence(todo, today)
@@ -330,6 +340,8 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
         else:
             _check_editable(todo, False)
         check_share_root(todo, "move")
+        if shares.bound() is not None and body.parent_id is None:
+            raise HTTPException(409, "crosses share boundary")  # a share has one top-level item
         _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
@@ -416,6 +428,9 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
     content = text if (
         text and len(body.descriptions) == 1 and types.has_field_type(body.type, "content")
     ) else None
+
+    if shares.bound() is not None and not types.can_type(body.type or types.DEFAULT, "shareable"):
+        raise HTTPException(409, "crosses share boundary")
 
     def action(todo: models.Todo) -> dict:
         _check_accepts_children(todo_id)

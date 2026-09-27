@@ -4,7 +4,7 @@ title: Trash, clear completed and archive
 description: Soft delete, undo, and 30-day archive to todos_archive.
 resource: app/db_firestore.py
 tags: [delete, archive]
-timestamp: 2026-09-27T06:00:00Z
+timestamp: 2026-09-27T16:00:00Z
 ---
 - **Clear completed:** `POST /todos/clear-completed` soft-deletes every done todo whose whole subtree is done (only the topmost of each subtree is flagged, so undo restores the subtree). A plan of 200 writes or fewer is one transaction (`X-Txn-Id` replayed); above that it commits in batches of 200, like calendar sync, so it stays under Firestore's 500-write cap. Toast Undo queues an `undelete` per item.
 - **Trash** (`web/trash.js`): its own screen (the List / Next up control is hidden, accent-colored Back button); `GET /todos/trash` (one entry per item, most recently deleted first, by `deleted_at`; see below); restore with `undelete`. If an ancestor is also deleted the todo restores at top level.
@@ -21,4 +21,4 @@ timestamp: 2026-09-27T06:00:00Z
 
 **Search and Trash.** Search asks the server for trash matches (debounced 250 ms, first 10) instead of matching a downloaded list. A trashed hit says what it is and what it went with ("Todo · deleted with Work · open in Trash"); tapping it closes search, opens the Trash page and that item's viewer (`Trash.open(item)`, which needs no paging because the search already has the item), where Undelete restores it.
 
-**Shared items** ([sharing](sharing.md)): a share has its own trash and archive (it is its own partition). `GET /todos/trash` merges your trash with the trash of each share in your list that you may edit, newest first, each shared entry tagged `share` (restore it with `X-Share`). Removing a shared item from your list (deleting its mount) is not trash. The archive sweep runs per share partition, triggered by any member's visit.
+**Shared items** ([sharing](sharing.md)): a share has its own trash and archive (it is its own partition). `GET /todos/trash` merges your trash with the trash of each share in your list that you may edit, newest first, each shared entry tagged `share` (restore it with `X-Share`). Removing a shared item from your list (deleting its mount) is not trash. The archive sweep runs per share partition, triggered by any member's visit. The archive sweep never moves a removed mount (so Remove from my list sticks past 30 days).

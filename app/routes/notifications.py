@@ -3,11 +3,12 @@ from __future__ import annotations
 
 import datetime
 import logging
+import uuid
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app import auth, db, push, shares, tenant
+from app import auth, db, models, push, shares, tenant
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -63,9 +64,19 @@ def notify_todo(body: push.HeadsUp) -> dict:
     if user not in auth.allowed_emails():
         raise HTTPException(400, "unknown user")
     now = datetime.datetime.now(datetime.UTC)
-    if body.partition and body.partition.startswith("shares/"):
+    partition = body.partition
+    if not (partition and partition.startswith("shares/")) and auth.sharing_enabled():
+        # Queued before the item was shared or moved: find where it lives now.
+        with tenant.as_user(user):
+            try:
+                gone = db.get_todo(models.TodoId(uuid.UUID(body.todo_id))) is None
+            except ValueError:
+                gone = False
+            if gone:
+                partition = shares.locate(body.todo_id) or partition
+    if partition and partition.startswith("shares/"):
         # A shared item: everyone who has it in their list hears about it on their devices.
-        share = shares.get(body.partition.split("/", 1)[1])
+        share = shares.get(partition.split("/", 1)[1])
         if share is None or share.state != "active":
             return {"sent": 0, "skipped": "stale"}
         sent = 0
