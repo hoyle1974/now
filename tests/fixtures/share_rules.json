@@ -1,0 +1,18 @@
+{
+  "_doc": "Who may do what on a shared item. Server: tests/test_share_rules.py. Client: tests_js/share-rules.test.js (web/share-ui.js). Change the fixture and both sides together.",
+  "roles": ["owner", "rw", "ro", "stranger", "revoked"],
+  "actions": {
+    "read":         {"owner": true, "rw": true,  "ro": true,  "stranger": false, "revoked": false},
+    "collapse":     {"owner": true, "rw": true,  "ro": true,  "stranger": false, "revoked": false},
+    "edit_child":   {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false},
+    "check_child":  {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false},
+    "add_child":    {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false},
+    "delete_child": {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false},
+    "edit_root":    {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false},
+    "delete_root":  {"owner": true, "rw": false, "ro": false, "stranger": false, "revoked": false},
+    "change_mode":  {"owner": true, "rw": false, "ro": false, "stranger": false, "revoked": false},
+    "unshare":      {"owner": true, "rw": false, "ro": false, "stranger": false, "revoked": false},
+    "move_mount":   {"owner": true, "rw": true,  "ro": true,  "stranger": false, "revoked": false},
+    "drag_across":  {"owner": true, "rw": true,  "ro": false, "stranger": false, "revoked": false}
+  }
+}
