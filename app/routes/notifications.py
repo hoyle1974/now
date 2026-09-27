@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from app import auth, db, push, tenant
+from app import auth, db, push, shares, tenant
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -62,8 +62,19 @@ def notify_todo(body: push.HeadsUp) -> dict:
     user = (body.user or auth.owner()).lower()
     if user not in auth.allowed_emails():
         raise HTTPException(400, "unknown user")
+    now = datetime.datetime.now(datetime.UTC)
+    if body.partition and body.partition.startswith("shares/"):
+        # A shared item: everyone who has it in their list hears about it on their devices.
+        share = shares.get(body.partition.split("/", 1)[1])
+        if share is None or share.state != "active":
+            return {"sent": 0, "skipped": "stale"}
+        sent = 0
+        for member in shares.members_with_mount(share):
+            with tenant.as_user(member), tenant.as_partition(share.partition()):
+                sent += push.run_heads_up(body.todo_id, body.due, now, send=push.send_fcm).get("sent", 0)
+        return {"sent": sent}
     with tenant.as_user(user):
-        return push.run_heads_up(body.todo_id, body.due, datetime.datetime.now(datetime.UTC), send=push.send_fcm)
+        return push.run_heads_up(body.todo_id, body.due, now, send=push.send_fcm)
 
 @router.post("/internal/sync-calendar/{todo_id}")
 def sync_calendar(todo_id: str, body: SyncCalendarBody) -> dict:

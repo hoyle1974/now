@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime
 import hashlib
 import json
@@ -32,6 +33,8 @@ class HeadsUp(BaseModel):
     todo_id: str = Field(min_length=1, max_length=64)
     due: str = Field(min_length=1, max_length=64)
     user: str | None = Field(None, max_length=320)
+    # users/{email} or shares/{id} (absent on older tasks: the user's own)
+    partition: str | None = Field(None, max_length=400)
 
 
 class TokenOnly(BaseModel):
@@ -127,7 +130,7 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
     net). Reads only todos due within two days (or overdue), and nothing at all when no
     device is registered. The marker is written before the send, so a failure loses one
     push rather than repeating it."""
-    from app import db, tasks
+    from app import auth, db, shares, tasks, tenant
     send = send or send_fcm
     devices = db.list_push_devices()
     # Calendars have no due_date, so get_due_todos would never surface them; walk the
@@ -141,7 +144,14 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
     if not devices:
         return {"devices": 0, "sent": 0, "scheduled": 0}
     # Two days ahead covers "end of today" in any timezone; each device filters precisely.
-    todos = db.get_due_todos((now_utc + datetime.timedelta(days=2)).replace(tzinfo=None))
+    # Shared items the person has in their list count as theirs (docs/okf/features/sharing.md).
+    horizon = (now_utc + datetime.timedelta(days=2)).replace(tzinfo=None)
+    by_partition = [(None, db.get_due_todos(horizon))]
+    if auth.sharing_enabled():
+        for share in shares.visible_mounted(tenant.current()):
+            with tenant.as_partition(share.partition()):
+                by_partition.append((share.partition(), db.get_due_todos(horizon)))
+    todos = [t for _, found in by_partition for t in found]
     sent = 0
     for dev in devices:
         for p in plan_device(dev["id"], dev.get("tz", "UTC"), now_utc, todos, db.get_push_marker):
@@ -157,9 +167,12 @@ def run_notify(now_utc: datetime.datetime, send: Callable[[str, Push], None] | N
             except Exception:
                 logging.exception("push send failed for device %s", dev["id"])
     tz = tasks.home_tz(devices)
-    scheduled = sum(tasks.schedule_heads_up(str(t.todo_id), t.due_date, t.done, t.deleted, now_utc, tz, create_task,
-                                       item_type=t.type)
-                    for t in todos) if tz else 0
+    scheduled = 0
+    for part, found in by_partition if tz else ():
+        with tenant.as_partition(part) if part else contextlib.nullcontext():
+            scheduled += sum(tasks.schedule_heads_up(str(t.todo_id), t.due_date, t.done, t.deleted, now_utc, tz,
+                                                     create_task, item_type=t.type)
+                             for t in found)
     return {"devices": len(devices), "sent": sent, "scheduled": scheduled}
 
 

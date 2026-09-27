@@ -335,3 +335,15 @@ def sweep(now: datetime.datetime | None = None) -> int:
             bump_meta_rev()
             removed += 1
     return removed
+
+
+def members_with_mount(share: Share) -> list[str]:
+    """Everyone who has this share in their list (a live mount): who hears its reminders."""
+    out = []
+    for email in auth.allowed_emails():
+        if not is_member(share, email):
+            continue
+        snap = db.user_ref(email).collection("todos").document(share.id).get()
+        if snap.exists and not (snap.to_dict() or {}).get("deleted"):
+            out.append(email)
+    return out
