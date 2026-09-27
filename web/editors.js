@@ -161,6 +161,12 @@ function renderViewer(todo, counts, trashed = null) {
     add(facts, "dd", "view-value", value);
   };
   fact("Type", Types.get(todo).label);
+  const shared = !trashed && ShareUI.badge(todo, myEmail());
+  if (shared) {
+    const share = todo.share;
+    fact("Shared", `${share.mode === "ro" ? "Everyone can view" : "Everyone can edit"}${
+      share.owner === myEmail() ? " · yours" : ` · ${ShareUI.localPart(share.owner)}'s`}`);
+  }
   if (Types.can(todo, "hasCheckbox")) fact("Status", todo.done ? "Done" : "Open");
   if (Types.hasField(todo, "due_date")) {
     fact(todo.end_date ? "When" : "Due", todo.due_date ? Due.formatSpan(todo.due_date, todo.end_date) : "No due date");
@@ -203,7 +209,7 @@ function renderViewer(todo, counts, trashed = null) {
   body.appendChild(facts);
 
   // A synced event has no edit sheet. Priority is the one field the user owns.
-  if (!trashed && Types.hasField(todo, "priority") && !Types.can(todo, "editable")) {
+  if (!trashed && Types.hasField(todo, "priority") && !Types.can(todo, "editable") && ShareUI.editable(todo, myEmail())) {
     const select = document.createElement("select");
     for (const [value, label] of [["high", "High"], ["normal", "Normal"], ["low", "Low"]]) {
       const option = document.createElement("option");
@@ -249,7 +255,7 @@ function renderViewer(todo, counts, trashed = null) {
   const buttons = DOM.actionBar(
     DOM.sheetButton("Close", "plain", close),
     ...(trashed ? [DOM.sheetButton("Undelete", "primary", trashed.onRestore)]
-      : Types.can(todo, "editable") ? [DOM.sheetButton("Edit", "primary", () => {
+      : Types.can(todo, "editable") && ShareUI.editable(todo, myEmail()) ? [DOM.sheetButton("Edit", "primary", () => {
           setActivePanel("edit", todo.todo_id);
           viewerOrigin = todo.todo_id;
           renderTree();

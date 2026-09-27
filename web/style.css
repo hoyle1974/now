@@ -452,6 +452,38 @@ svg {
   display: none;
 }
 
+/* Shared items (docs/okf/features/sharing.md): a chip on the share's root, an icon on
+   everything inside it. */
+.share-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--label-2);
+  background: var(--fill, rgba(120, 120, 128, 0.12));
+  white-space: nowrap;
+}
+
+.share-chip svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.2;
+}
+
+.share-chip--icon {
+  padding: 1px 4px;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.todo-check input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .todo-chip {
   display: inline-flex;
   align-items: center;

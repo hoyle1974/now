@@ -237,6 +237,7 @@ const engine = Sync.createEngine({
 
 AttachmentsUI.init({
   model,
+  me: () => myEmail(),
   notify: (message) => showNotice({ level: "error", message }),
   observeRev: (prev, rev, partition) => engine.observeRev(prev, rev, partition),
 });
@@ -345,14 +346,17 @@ function setPriority(todoId, priority) {
 }
 
 async function deleteTodo(todoId) {
+  const node = model.todosById.get(todoId);
+  // Someone else's shared item only leaves your list (docs/okf/features/sharing.md).
+  const removing = node && node.share_root && node.share.owner !== myEmail();
   if (engine.enqueue({ kind: "delete", target_id: todoId })) {
-    showUndo(todoId);
+    showUndo(todoId, removing ? "Removed from your list" : "Deleted");
   }
 }
 
 // Soft-delete undo: restore a deleted todo within 5 seconds.
-function showUndo(todoId) {
-  toast.show({ message: "Deleted", action: { label: "Undo", run: () =>
+function showUndo(todoId, message = "Deleted") {
+  toast.show({ message, action: { label: "Undo", run: () =>
     engine.enqueue({ kind: "undelete", target_id: todoId }) } });
 }
 

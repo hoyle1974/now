@@ -9,6 +9,19 @@ function sinkDone(todos) {
   return [...todos.filter((t) => !sunk(t)), ...todos.filter(sunk)];
 }
 
+// The shared marker: an icon on every node from a share, and on its root a chip saying
+// whether you can edit it and whose it is.
+function renderShareBadge(todo, me) {
+  const badge = ShareUI.badge(todo, me);
+  if (!badge) return null;
+  const chip = document.createElement("span");
+  chip.className = badge.label ? "share-chip" : "share-chip share-chip--icon";
+  chip.appendChild(icon("share"));
+  if (badge.label) chip.appendChild(document.createTextNode(badge.by ? `${badge.label} · ${badge.by}` : badge.label));
+  else chip.setAttribute("aria-label", "Shared");
+  return chip;
+}
+
 function renderNode(todo, todosById, descendantCounts, depth = 0) {
   const li = document.createElement("li");
   li.className = "todo-node";
@@ -16,6 +29,9 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   li.style.setProperty("--depth", depth);
   const hasChildren = todo.child_ids.length > 0;
   const isCollapsed = hasChildren && todo.collapsed;
+  // A read-only share shows but never offers edits; its root still moves (your mount).
+  const me = myEmail();
+  const canEdit = ShareUI.editable(todo, me);
 
   // A row shows only its own stored state: a done parent does not make its
   // subtasks look done, and they can still be checked and unchecked.
@@ -35,7 +51,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
 
   // Long-press a row to drag it: drop above/below another row to move there, or
   // onto the middle of a row to make it a subtask of that row.
-  if (model.todosById.size > 1) {
+  if (model.todosById.size > 1 && (canEdit || todo.share_root)) {
     // Hard press: the drag only starts after a long-press anywhere on the row
     // (so scrolling and taps are untouched). Moving before the threshold is a
     // scroll and cancels; when armed the row lifts (with a small buzz where
@@ -147,6 +163,7 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   const checkbox = document.createElement("input");
   checkbox.type = "checkbox";
   checkbox.checked = shownDone;
+  checkbox.disabled = !canEdit;
   checkbox.setAttribute("aria-label", `Mark "${todo.title}" ${shownDone ? "not done" : "done"}`);
   checkbox.addEventListener("change", () => {
     // #3: Instant checkbox response - update UI immediately
@@ -167,6 +184,8 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
   label.className = "todo-title";
   label.textContent = todo.title;
   body.append(label, renderMeta(todo, hasChildren, descendantCounts.get(todo.todo_id)));
+  const shareBadge = renderShareBadge(todo, me);
+  if (shareBadge) (shareBadge.classList.contains("share-chip--icon") ? label : body).appendChild(shareBadge);
 
   const trailing = document.createElement("div");
   trailing.className = "todo-trailing";
@@ -204,13 +223,13 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       setActivePanel(mode, todo.todo_id);
       renderTree();
     };
-    if (Types.can(todo, "allowsUserChildren")) {
+    if (Types.can(todo, "allowsUserChildren") && canEdit) {
       menu.append(
         menuItem("Add item", "plus", openPanel("add")),
         menuItem("Add several", "split", openPanel("split"))
       );
     }
-    if (Types.can(todo, "editable")) {
+    if (Types.can(todo, "editable") && canEdit) {
       menu.append(
         menuItem("Edit", "pencil", openPanel("edit")),
         // One entry however many types there are; switching only changes the label:
@@ -227,14 +246,16 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       })
     );
 
-    if (Types.can(todo, "editable")) {
+    if (Types.can(todo, "editable") && (canEdit || todo.share_root)) {
       menu.append(
         menuItem("Move up", "up", () => reportedFailure(moveTodo(todo.todo_id, "up"))),
         menuItem("Move down", "down", () => reportedFailure(moveTodo(todo.todo_id, "down")))
       );
+      // Someone else's shared item only leaves your list; the owner deletes it for everyone.
+      const removeOnly = todo.share_root && todo.share.owner !== me;
       menu.append(
         menuItem(
-          "Delete",
+          removeOnly ? "Remove from my list" : todo.share_root ? "Delete for everyone" : "Delete",
           "trash",
           () => {
             setActivePanel(null);

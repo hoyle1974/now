@@ -24,10 +24,16 @@ const AttachmentsUI = (() => {
 
   const el = DOM.el;
 
+  // A shared item's images live in its share: say which (docs/okf/features/sharing.md).
+  function shareHeaders(todoId) {
+    const node = deps.model && deps.model.todosById.get(todoId);
+    return node && node.share ? { "X-Share": node.share.id } : {};
+  }
+
   function blobUrl(todoId, attachmentId) {
     const key = `${todoId}/${attachmentId}`;
     if (!blobUrls.has(key)) {
-      const pending = fetch(Attachments.attachmentPath(todoId, attachmentId))
+      const pending = fetch(Attachments.attachmentPath(todoId, attachmentId), { headers: shareHeaders(todoId) })
         .then((r) => {
           if (!r.ok) throw new Error(`HTTP ${r.status}`);
           return r.blob();
@@ -142,7 +148,8 @@ const AttachmentsUI = (() => {
         grid.appendChild(thumb);
       }
       grid.hidden = !list().length;
-      addBtn.disabled = !Attachments.canUpload(todo) || list().length >= Attachments.MAX_PER_TODO;
+      addBtn.disabled = !Attachments.canUpload(todo) || list().length >= Attachments.MAX_PER_TODO ||
+        !ShareUI.editable(todo, deps.me && deps.me());
       if (!Attachments.canUpload(todo)) say("Images can be added once this todo has synced.");
     }
 
@@ -164,7 +171,7 @@ const AttachmentsUI = (() => {
 
     let busy = false;
     async function upload(files) {
-      if (busy || !files.length || !Attachments.canUpload(todo)) return;
+      if (busy || !files.length || !Attachments.canUpload(todo) || !ShareUI.editable(todo, deps.me && deps.me())) return;
       busy = true;
       addBtn.disabled = true;
       try {
@@ -176,7 +183,8 @@ const AttachmentsUI = (() => {
           try {
             const form = new FormData();
             form.append("file", file, file.name || "image");
-            response = await fetch(Attachments.attachmentPath(todo.todo_id), { method: "POST", body: form });
+            response = await fetch(Attachments.attachmentPath(todo.todo_id),
+              { method: "POST", body: form, headers: shareHeaders(todo.todo_id) });
           } catch {
             deps.notify(Attachments.uploadError(0));
             break;
@@ -198,7 +206,8 @@ const AttachmentsUI = (() => {
     async function remove(a) {
       let response;
       try {
-        response = await fetch(Attachments.attachmentPath(todo.todo_id, a.id), { method: "DELETE" });
+        response = await fetch(Attachments.attachmentPath(todo.todo_id, a.id),
+          { method: "DELETE", headers: shareHeaders(todo.todo_id) });
       } catch {
         deps.notify("You appear to be offline. Images can only be removed while connected.");
         return;
