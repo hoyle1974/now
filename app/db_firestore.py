@@ -32,11 +32,11 @@ class _State:
     A lock here would serialize unrelated users' reads for no correctness benefit."""
     def __init__(self) -> None:
         self.client: Any = None
-        # user email -> (rev, roots, todosById) of that user's last full tree read. A tree
+        # partition -> (rev, roots, todosById) of that partition's last full tree read. A tree
         # read costs one document read per todo, so it is reused for as long as the
         # revision counter hasn't moved (every write to a todo bumps it in run_atomic).
         self.tree_cache: dict[str, tuple] = {}
-        # user email -> time.monotonic() of that user's last archive attempt
+        # partition -> time.monotonic() of that partition's last archive attempt
         self.archive_checked: dict[str, float] = {}
 
     def reset(self) -> None:
@@ -47,19 +47,36 @@ class _State:
 _state = _State()
 
 USERS = "users"
+SHARES = "shares"
 
 
 def user_ref(email: str | None = None):
-    """users/{email}: every collection below belongs to that one person. Defaults to
-    the bound user (app/tenant.py) and raises when none is bound."""
+    """users/{email}: that one person's own partition. Defaults to the bound user
+    (app/tenant.py) and raises when none is bound. For per-person data (mounts,
+    view state, push devices) regardless of which partition is bound."""
     return get_conn().collection(USERS).document(email or tenant.current())
 
 
+def partition_ref(path: str | None = None):
+    """The partition db calls work in: users/{email} or shares/{id} (default: the
+    bound one, tenant.partition()). Every collection below belongs to it."""
+    kind, _, key = (path or tenant.partition()).partition("/")
+    if kind not in (USERS, SHARES) or not key:
+        raise ValueError(f"bad partition {path!r}")
+    return get_conn().collection(kind).document(key)
+
+
 def _todos():
-    return user_ref().collection("todos")
+    return partition_ref().collection("todos")
 
 
 def _sub(name: str):
+    return partition_ref().collection(name)
+
+
+def _person(name: str):
+    """A collection that belongs to the signed-in person whatever partition is bound
+    (push devices and sent-markers)."""
     return user_ref().collection(name)
 
 # Todos deleted for ARCHIVE_AFTER_DAYS move (subtree and all) out of "todos", so
@@ -731,14 +748,14 @@ def get_tree(rev: int | None = None) -> tuple[list[models.Todo], dict[str, model
     its contents: a write in between costs one extra reload, never a stale hit.
     Callers get their own copy, so they may modify what they receive.
     """
-    user = tenant.current()
+    part = tenant.partition()
     if rev is None:
         rev = get_rev()
-    cached = _state.tree_cache.get(user)
+    cached = _state.tree_cache.get(part)
     if cached is not None and cached[0] == rev:
         return copy.deepcopy(cached[1:])
     roots, reachable = _read_tree()
-    _state.tree_cache[user] = (rev, roots, reachable)
+    _state.tree_cache[part] = (rev, roots, reachable)
     return copy.deepcopy((roots, reachable))
 
 def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
@@ -1126,7 +1143,7 @@ def sweep_orphan_blobs(min_age: datetime.timedelta = datetime.timedelta(hours=1)
     cutoff = _now_utc() - min_age
     known: dict[str, set[str]] = {}
     removed = 0
-    prefix = blobstore.user_todos_prefix()
+    prefix = blobstore.partition_todos_prefix()
     for key, created in store.list_blobs(prefix):
         parts = key[len(prefix):].split("/")
         if len(parts) != 2 or _aware(created) > cutoff:
@@ -1176,15 +1193,15 @@ def maybe_archive_expired() -> int:
     instances and one at a time per process. Meant to run off the request path
     (see _load_tree). A failure releases the claim so a later read retries; this
     process backs off for _ARCHIVE_RETRY_SECONDS first."""
-    user = tenant.current()
+    part = tenant.partition()
     now_m = time.monotonic()
-    checked = _state.archive_checked.get(user)
+    checked = _state.archive_checked.get(part)
     if checked is not None and now_m - checked < _ARCHIVE_CHECK_SECONDS:
         return 0
     if not _archive_lock.acquire(blocking=False):
         return 0
     try:
-        _state.archive_checked[user] = time.monotonic()
+        _state.archive_checked[part] = time.monotonic()
         started = _now_utc()
         if not _claim_archive_run(started):
             return 0
@@ -1193,7 +1210,7 @@ def maybe_archive_expired() -> int:
             moved = archive_expired(_now_utc())
             sweep_orphan_blobs()
         except Exception:
-            _state.archive_checked[user] = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
+            _state.archive_checked[part] = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
             with contextlib.suppress(Exception):  # the lease expires by itself
                 _finish_archive_run(started, ok=False)
             raise
@@ -1209,27 +1226,27 @@ PUSH_SENT = "push_sent"
 
 
 def upsert_push_device(dev_id: str, token: str, tz: str, platform: str) -> None:
-    _sub(PUSH_DEVICES).document(dev_id).set(
+    _person(PUSH_DEVICES).document(dev_id).set(
         {"token": token, "tz": tz, "platform": platform, "updated_at": _now_utc()})
 
 
 def delete_push_device(dev_id: str) -> None:
-    _sub(PUSH_DEVICES).document(dev_id).delete()
+    _person(PUSH_DEVICES).document(dev_id).delete()
 
 
 def list_push_devices() -> list[dict]:
-    return [{"id": d.id, **d.to_dict()} for d in _sub(PUSH_DEVICES).stream()]
+    return [{"id": d.id, **d.to_dict()} for d in _person(PUSH_DEVICES).stream()]
 
 
 def get_push_marker(key: str) -> list[str] | None:
     """The todo ids stored with a sent-marker, or None when nothing was sent."""
-    snap = _sub(PUSH_SENT).document(key).get()
+    snap = _person(PUSH_SENT).document(key).get()
     return list(snap.to_dict().get("todo_ids") or []) if snap.exists else None
 
 
 def put_push_marker(key: str, todo_ids: list[str], expires_at: datetime.datetime) -> None:
     # expires_at feeds a Firestore TTL policy on this collection.
-    _sub(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
+    _person(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
 
 
 def get_due_todos(before: datetime.datetime) -> list[models.Todo]:

@@ -91,13 +91,17 @@ def use_memory() -> MemoryStore:
     return _store
 
 
-def user_todos_prefix() -> str:
-    return f"users/{tenant.current()}/todos/"
+def partition_todos_prefix() -> str:
+    """Blob keys mirror Firestore paths: users/{email}/todos/ or shares/{id}/todos/."""
+    return f"{tenant.partition()}/todos/"
+
+
+user_todos_prefix = partition_todos_prefix  # older name
 
 
 def key_for(todo_id: str, attachment_id: str) -> str:
-    return f"{user_todos_prefix()}{todo_id}/{attachment_id}"
+    return f"{partition_todos_prefix()}{todo_id}/{attachment_id}"
 
 
 def todo_prefix(todo_id: str) -> str:
-    return f"{user_todos_prefix()}{todo_id}/"
+    return f"{partition_todos_prefix()}{todo_id}/"

@@ -85,3 +85,27 @@ def test_background_tasks_see_the_bound_user(monkeypatch):
 
     TestClient(mini).get("/bg", headers={"Authorization": "Bearer kid"})
     assert seen == ["kid@example.com"]
+
+
+def test_partition_defaults_to_the_users_partition():
+    with tenant.as_user("A@x.com"):
+        assert tenant.partition() == "users/a@x.com"
+
+
+def test_as_partition_rebinds_only_the_partition():
+    with tenant.as_user("a@x.com"), tenant.as_partition("shares/s1"):
+        assert tenant.partition() == "shares/s1"
+        assert tenant.current() == "a@x.com"
+    with tenant.as_user("a@x.com"):
+        assert tenant.partition() == "users/a@x.com"
+
+
+def test_as_user_drops_a_bound_share_partition():
+    # Background loops bind each user in turn; they must never inherit a share binding.
+    with tenant.as_user("a@x.com"), tenant.as_partition("shares/s1"), tenant.as_user("b@x.com"):
+        assert tenant.partition() == "users/b@x.com"
+
+
+def test_partition_without_user_raises():
+    with pytest.raises(RuntimeError):
+        tenant.partition()

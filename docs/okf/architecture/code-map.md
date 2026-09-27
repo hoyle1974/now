@@ -3,13 +3,13 @@ type: Code Map
 title: Code map
 description: Where things live in the repository.
 tags: [architecture, navigation]
-timestamp: 2026-09-25T05:20:00Z
+timestamp: 2026-09-27T02:00:00Z
 ---
 **Server (`app/`)**
 - `main.py` — app wiring (lifespan, upload-size middleware, static mount); `routes/` — the routes ([API](../api/routes.md)): `todos`, `attachments`, `calendar`, `notifications`, `system`, shared helpers in `common`.
 - `models.py` — pydantic models and limits ([Todo](../data/todo.md)).
-- `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep; every collection is partitioned under `users/{email}/...` ([Firestore collections](../data/firestore.md)), keyed by `tenant.current()`.
-- `tenant.py` — the signed-in user's email, a per-request `ContextVar` set by `auth.bind_user`; every Firestore path and blob key is derived from it (`tenant.current()` raises if nothing is bound).
+- `db_firestore.py`, `db_firestore_helpers.py`, `db.py` — data layer, transactions, tree cache, archive sweep; every collection lives in a *partition*, `users/{email}/...` or `shares/{id}/...` ([Firestore collections](../data/firestore.md)), chosen by `tenant.partition()` (`db.partition_ref()`); push devices and sent-markers always use the person's own `users/{email}` (`db.user_ref()`).
+- `tenant.py` — two per-request `ContextVar`s: the signed-in user's email (`tenant.current()`, set by `auth.bind_user`) and the data partition (`tenant.partition()`, default `users/{email}`, rebound with `as_partition` for a share). Every Firestore path and blob key is derived from the partition; both raise if no user is bound. `as_user` also resets the partition, so a loop over users never inherits a share.
 - `types.json`, `types.py` — item type registry ([item types](../features/item-types.md)); `scripts/gen_types.py` generates `web/types-data.js`, wrapped by `web/types.js`.
 - `next_up.py` — ranking ([next up](../features/next-up.md)).
 - `recurrence.py` — next-occurrence date maths ([repeating](../features/repeating-todos.md)).

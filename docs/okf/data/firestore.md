@@ -4,14 +4,15 @@ title: Firestore collections
 description: Collections and documents used in Firestore.
 resource: app/db_firestore.py
 tags: [data, firestore]
-timestamp: 2026-09-22T05:37:00Z
+timestamp: 2026-09-27T02:00:00Z
 ---
-Every collection below lives under `users/{email}/...` (`db.user_ref(email)` builds the
-parent `users/{email}` document reference; it defaults to the signed-in user bound by
-`app/tenant.py`). The `users/{email}` parent documents never exist themselves — only
+Every collection below lives under a *partition*: `users/{email}/...` for a person's own
+data, or `shares/{id}/...` for a shared subtree (same layout). `db.partition_ref()` builds
+the parent document reference from `tenant.partition()` (`app/tenant.py`); `db.user_ref(email)`
+always builds `users/{email}` (defaults to the signed-in user) and is used for per-person
+data such as push devices and sent-markers, whatever partition is bound. The `users/{email}` parent documents never exist themselves — only
 their subcollections — so listing them is done with `list_documents()`, not `stream()`.
-Firestore paths and blob keys (`app/blobstore.py`) are both partitioned this way; nothing
-is shared across users.
+Firestore paths and blob keys (`app/blobstore.py`, `{partition}/todos/{id}/{attachment}`) are both partitioned this way.
 
 - `todos` — live and soft-deleted [todos](todo.md). Every tree read scans it, so it is kept small.
 - `todos_archive` — todos deleted 30+ days ago with their subtrees ([archive](../features/trash-archive.md)).
