@@ -238,6 +238,16 @@ function renderNode(todo, todosById, descendantCounts, depth = 0) {
       );
     }
 
+    // Sharing lives in the viewer (it applies at once); the menu is where people look for it.
+    const sharing = ShareUI.sharingRow(model, todo, me, true, (n) => Types.can(n, "shareable"));
+    if (sharing.visible) {
+      menu.append(menuItem(todo.share_root ? "Sharing…" : "Share…", "share", () => {
+        setActivePanel("view", todo.todo_id);
+        renderTree();
+        const control = document.querySelector('#todo-tree select[aria-label="Sharing"]');
+        if (control) { control.scrollIntoView({ block: "center" }); control.focus(); }
+      }));
+    }
     menu.append(
       menuItem("Copy with subtasks", "copy", () => {
         setActivePanel(null);
