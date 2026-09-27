@@ -34,6 +34,20 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(bind_user), Depends(bind_partition), Depends(check_txn_id)])
 
+@app.exception_handler(db.Frozen)
+async def _frozen(request, exc):
+    """A write hit a partition whose data is being moved (app/migrate.py). If that move's
+    run died, finish it now; either way the client retries (a 5xx)."""
+    from starlette.concurrency import run_in_threadpool
+
+    from app import migrate, tenant
+    try:
+        await run_in_threadpool(migrate.resume_if_stale, tenant.partition())
+    except Exception:
+        log.exception("resuming a stale migration failed")
+    return JSONResponse({"detail": "migrating"}, status_code=503)
+
+
 _UPLOAD_PATH_RE = re.compile(r"^/todos/[^/]+/attachments$")
 
 # Multipart framing adds a little to the file's own size.

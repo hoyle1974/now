@@ -24,6 +24,13 @@ class MemoryStore:
     def get(self, key: str) -> tuple[bytes, str] | None:
         return self._objects.get(key)
 
+    def copy(self, src: str, dst: str) -> bool:
+        """Copy one object; False when src is missing (already moved)."""
+        if src not in self._objects:
+            return False
+        self.put(dst, *self._objects[src])
+        return True
+
     def delete(self, key: str) -> None:
         self._objects.pop(key, None)
         self._times.pop(key, None)
@@ -55,6 +62,14 @@ class GcsStore:
         except NotFound:
             return None
         return data, blob.content_type or "application/octet-stream"
+
+    def copy(self, src: str, dst: str) -> bool:
+        """Server-side copy of one object; False when src is missing (already moved)."""
+        blob = self._bucket.get_blob(src)
+        if blob is None:
+            return False
+        self._bucket.copy_blob(blob, self._bucket, dst)
+        return True
 
     def delete(self, key: str) -> None:
         from google.cloud.exceptions import NotFound

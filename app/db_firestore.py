@@ -104,6 +104,16 @@ REV_DOC = "rev"
 # why the functions below read everything first and hand back the updated
 # todo instead of re-reading it afterwards.
 _tx: contextvars.ContextVar = contextvars.ContextVar("firestore_tx", default=None)
+# True while app/migrate.py itself writes: a partition frozen for a migration refuses
+# every other write (see Frozen) but not the migration's own.
+migration_writes: contextvars.ContextVar[bool] = contextvars.ContextVar("migration_writes", default=False)
+
+
+class Frozen(Exception):
+    """This partition's data is being moved (app/migrate.py): the write must wait.
+    Answered as 503 "migrating", which clients retry."""
+
+
 # A one-element list set alongside _tx; flipped to True by the first todo write
 # so run_atomic knows whether the revision counter must move.
 _wrote: contextvars.ContextVar = contextvars.ContextVar("firestore_wrote", default=None)
@@ -205,14 +215,18 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]],
                     return (logged["status"], (None if raw is None else json.loads(raw)),
                             logged.get("prev_rev", 0), logged.get("rev", 0))
             rev_snap = rev_ref.get(transaction=tx)
-            prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
+            rev_data = rev_snap.to_dict() if rev_snap.exists else {}
+            if rev_data.get("migrating") and not migration_writes.get():
+                raise Frozen()
+            prev = rev_data.get("value", 0)
             rev = prev
 
             status, body = fn()
 
             if _wrote.get()[0]:
                 rev += 1
-                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by})
+                # merge: the rev doc also carries a migration's freeze record
+                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by}, merge=True)
             if log_ref is not None:
                 tx.set(log_ref, {
                     "status": status,
@@ -1094,6 +1108,9 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
     together with the revision bump.
     """
     now = now or _now_utc()
+    rev_snap = _sub(REV_COLLECTION).document(REV_DOC).get()
+    if rev_snap.exists and (rev_snap.to_dict() or {}).get("migrating"):
+        raise Frozen()  # a migration is moving this partition's documents; next run
     cutoff = now - datetime.timedelta(days=days)
     moving: dict[str, dict] = {}
     for doc in _todos().where("deleted", "==", True).stream():
@@ -1131,7 +1148,7 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
             tx.delete(_todos().document(data["todo_id"]))
         if going:
             prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
-            tx.set(rev_ref, {"value": prev + 1})
+            tx.set(rev_ref, {"value": prev + 1}, merge=True)
         return going
 
     for start in range(0, len(docs), 200):
