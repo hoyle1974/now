@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "104";
+const APP_VERSION = "105";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -109,7 +109,8 @@ async function sendRequest(req) {
       const value = response.headers.get(name);
       return value === null ? undefined : Number(value);
     };
-    return { status: response.status, body, prev: header("X-Rev-Prev"), rev: header("X-Rev") };
+    return { status: response.status, body, prev: header("X-Rev-Prev"), rev: header("X-Rev"),
+      partition: response.headers.get("X-Partition") || undefined };
   } finally {
     clearTimeout(timer);
   }
@@ -233,7 +234,7 @@ const engine = Sync.createEngine({
 AttachmentsUI.init({
   model,
   notify: (message) => showNotice({ level: "error", message }),
-  observeRev: (prev, rev) => engine.observeRev(prev, rev),
+  observeRev: (prev, rev, partition) => engine.observeRev(prev, rev, partition),
 });
 
 // Is the user in the middle of typing into the list (an inline editor, or the
@@ -255,7 +256,7 @@ const freshness = Freshness.create({
   fetchRev: async () => {
     const response = await fetch(`${API_BASE}/rev`, { cache: "no-store" });
     if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
-    return response.json(); // { rev, version, triggered_by }
+    return response.json(); // { rev, revs, version, triggered_by }
   },
   appVersion: APP_VERSION,
   reload: () => location.reload(),
@@ -415,7 +416,7 @@ async function fetchTree() {
     todosById.set(id, todo);
   }
 
-  return { roots: response.roots, todosById, rev: response.rev };
+  return { roots: response.roots, todosById, rev: response.rev, revs: response.revs };
 }
 
 // One-shot visual states keyed by todo id. Every edit re-renders the whole

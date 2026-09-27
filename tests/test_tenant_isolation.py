@@ -171,3 +171,18 @@ def test_share_partition_has_its_own_todos_and_rev():
     with tenant.as_user(TEST_USER):
         assert db.get_rev() == 0
         assert db.get_tree()[0] == []
+
+
+def test_rev_returns_revs_map_with_own_partition():
+    act_as(app, TEST_USER)
+    client.post("/todos", json={"title": "a"})
+    body = client.get("/todos/rev").json()
+    assert body["revs"] == {f"users/{TEST_USER}": body["rev"]}
+    tree = client.get("/todos/tree").json()
+    assert tree["revs"] == {f"users/{TEST_USER}": tree["rev"]}
+
+
+def test_write_reply_carries_x_partition():
+    act_as(app, TEST_USER)
+    r = client.post("/todos", json={"title": "a"})
+    assert r.headers["X-Partition"] == f"users/{TEST_USER}"

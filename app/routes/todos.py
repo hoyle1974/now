@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Re
 from fastapi.encoders import jsonable_encoder
 
 from app import db, models, next_up, tasks, types
-from app.routes.common import affected_refs, apply, reply, saved
+from app.routes.common import affected_refs, apply, reply, revs, saved
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -102,6 +102,7 @@ def get_tree(background: BackgroundTasks) -> dict:
 
     return {
         "rev": rev,
+        "revs": revs(rev),
         "roots": roots,
         "todosById": todosById
     }

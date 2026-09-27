@@ -408,6 +408,9 @@
 
   // ---- engine -----------------------------------------------------------
 
+  // Key for our own list's revision when the server sent no revs map.
+  const OWN_KEY = "users/";
+
   function createEngine(opts) {
     const { model, store, send, refetch } = opts;
     const onChange = opts.onChange || (() => {});
@@ -432,9 +435,11 @@
     // Bumped on every enqueue and every op that leaves the outbox, so a caller
     // can tell whether anything changed while it was awaiting a tree fetch.
     let epoch = 0;
-    // The server's change counter as we last saw it, and whether we've learned
-    // that another window has written since (see observeRev / noteRemoteRev).
-    let knownRev = null;
+    // The server's change counters as we last saw them, one per data partition
+    // ("users/<email>" for our own list, "shares/<id>" per mounted share, "shares"
+    // for the list of shares), and whether we've learned that another window has
+    // written since (see observeRev / noteRemoteRevs). null until the first tree.
+    let knownRevs = null;
     let stale = false;
     // True while the outbox can't be written to device storage: edits still
     // sync, but would be lost if the page were closed first.
@@ -492,19 +497,46 @@
     // it ended (rev). If prev is ahead of what we knew, another window wrote in
     // between. A prev below what we know is a replayed answer to a request we
     // already accounted for.
-    function observeRev(prev, rev) {
-      if (prev == null || rev == null) return;
-      if (knownRev !== null && prev > knownRev) {
-        stale = true;
-        log("stale", `remote write detected: prev ${prev} > known ${knownRev}`);
-      }
-      if (knownRev === null || rev > knownRev) knownRev = rev;
+    // Our own partition's key: the one "users/..." key, or OWN_KEY when the
+    // server only ever sent a bare integer (older server).
+    function ownKey() {
+      const keys = knownRevs ? Object.keys(knownRevs) : [];
+      return keys.find((k) => k.startsWith("users/")) || OWN_KEY;
     }
 
-    // Result of the cheap /todos/rev poll. Deliberately leaves knownRev alone:
-    // it only moves when we actually load the newer tree.
+    function knownRev() {
+      return knownRevs === null ? null : (knownRevs[ownKey()] ?? null);
+    }
+
+    // `partition` is the X-Partition the write landed in (absent: our own).
+    function observeRev(prev, rev, partition) {
+      if (prev == null || rev == null) return;
+      const key = partition || ownKey();
+      const known = knownRevs === null ? null : (knownRevs[key] ?? null);
+      if (known !== null && prev > known) {
+        stale = true;
+        log("stale", `remote write detected on ${key}: prev ${prev} > known ${known}`);
+      }
+      if (knownRevs === null) knownRevs = {};
+      if (known === null || rev > known) knownRevs[key] = rev;
+    }
+
+    // Result of the cheap /todos/rev poll. Deliberately leaves knownRevs alone:
+    // they only move when we actually load the newer tree. Stale when any
+    // partition moved, or one appeared or disappeared (a share came or went).
+    function noteRemoteRevs(revs) {
+      if (knownRevs === null) { stale = true; return; }
+      const mine = Object.keys(knownRevs);
+      const theirs = Object.keys(revs);
+      if (mine.length !== theirs.length || theirs.some((k) => !(k in knownRevs) || revs[k] > knownRevs[k])) {
+        stale = true;
+      }
+    }
+
+    // Older servers (and callers) with only a bare integer for our own list.
     function noteRemoteRev(rev) {
-      if (knownRev === null || rev > knownRev) stale = true;
+      const known = knownRev();
+      if (known === null || rev > known) stale = true;
     }
 
     // -- ids
@@ -819,7 +851,7 @@
             break;
           }
           log("send", `${op.kind} ${res.status} (${Date.now() - startedAt}ms) rev ${res.prev ?? "?"}->${res.rev ?? "?"}`);
-          observeRev(res.prev, res.rev);
+          observeRev(res.prev, res.rev, res.partition);
           let proceed;
           try {
             proceed = await handle(op, res);
@@ -901,8 +933,11 @@
       model.todosById = todosById;
       model.roots = tree.roots.map((r) => todosById.get(r.todo_id) || r);
       model.trash = new Map();
-      if (tree.rev != null) {
-        knownRev = tree.rev;
+      if (tree.revs) {
+        knownRevs = { ...tree.revs };
+        stale = false;
+      } else if (tree.rev != null) {
+        knownRevs = { [OWN_KEY]: tree.rev };
         stale = false;
       }
       for (const op of ops) {
@@ -921,9 +956,11 @@
       pending: () => ops.length,
       needsTree: () => needTree,
       epoch: () => epoch,
-      knownRev: () => knownRev,
+      knownRev,
+      knownRevs: () => (knownRevs === null ? null : { ...knownRevs }),
       isStale: () => stale,
       noteRemoteRev,
+      noteRemoteRevs,
       observeRev,
       status,
       saved: () => saveChain,

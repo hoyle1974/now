@@ -4,14 +4,14 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-25T05:20:00Z
+timestamp: 2026-09-27T02:30:00Z
 ---
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. `?deep=1` also pings Firestore (503 if it cannot). |
 | `POST /todos` | Create; optional `type` ([item types](../features/item-types.md)). |
 | `GET /todos/tree` | Full tree; adds derived `blocked`. Triggers the [archive](../features/trash-archive.md) sweep and, in the background, a [calendar sync](../features/calendar-sync.md) nudge for every stale `calendar` item in the tree. |
-| `GET /todos/rev` | Current revision + app `version` + `triggered_by` (the `client_session_id` behind the last rev-bumping write, or null); the cheap freshness check ([sync](../features/sync-model.md)). |
+| `GET /todos/rev` | Current revision (`rev`, own partition) and `revs` (one per partition, [sync](../features/sync-model.md)) + app `version` + `triggered_by` (the `client_session_id` behind the last rev-bumping write, or null); the cheap freshness check ([sync](../features/sync-model.md)). |
 | `GET /todos/next` | [Next up](../features/next-up.md). |
 | `GET /todos/trash?limit&offset&q` (paged, cap 100; one entry per trashed item, with `deleted_with`, `trashed_at`; returns `has_more`), `POST /todos/clear-completed`, `PATCH /todos/{id}/undelete` (also restores deleted ancestors) | [Trash](../features/trash-archive.md). |
 | `GET /todos/root` | Reads; also nudges stale `calendar` roots (same as `/todos/tree`, see [calendar sync](../features/calendar-sync.md)). |
@@ -31,7 +31,7 @@ timestamp: 2026-09-25T05:20:00Z
 | `POST /internal/sync-calendar/{id}` `{calendar_id, user, client_session_id?}` | Cloud Tasks only (same OIDC check); fetches/parses/reconciles one `calendar` item's events ([calendar sync](../features/calendar-sync.md)). |
 | `DELETE /todos/{id}` | Soft delete (204). |
 
-Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev`.
+Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev` / `X-Rev`, for the partition named in `X-Partition`.
 
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
 

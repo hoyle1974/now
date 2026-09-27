@@ -1167,3 +1167,51 @@ test("every op kind in the table can be applied and sent, and its flags are cons
   assert.throws(() => Sync.buildRequest({ kind: "nope", target_id: "a", txn_id: "t" }), /unknown op kind/);
   assert.equal(Sync.applyOp(Sync.createModel(), { kind: "nope", target_id: "a" }), false);
 });
+
+// ---- per-partition revisions (sharing) ----------------------------------
+
+function withRevs(tree, revs) { return Object.assign(tree, { rev: revs["users/me"], revs }); }
+
+test("rebuild adopts the tree's revs map; knownRev is the own partition", () => {
+  const h = harness({ tree: treeOf(todo("a")) });
+  h.engine.rebuild(withRevs(treeOf(todo("a")), { "users/me": 4, "shares": 1, "shares/S": 7 }));
+  assert.deepEqual(h.engine.knownRevs(), { "users/me": 4, "shares": 1, "shares/S": 7 });
+  assert.equal(h.engine.knownRev(), 4);
+  assert.equal(h.engine.isStale(), false);
+});
+
+test("noteRemoteRevs marks stale when a share rev rises", () => {
+  const h = harness({ tree: treeOf(todo("a")) });
+  h.engine.rebuild(withRevs(treeOf(todo("a")), { "users/me": 4, "shares/S": 7 }));
+  h.engine.noteRemoteRevs({ "users/me": 4, "shares/S": 7 });
+  assert.equal(h.engine.isStale(), false);
+  h.engine.noteRemoteRevs({ "users/me": 4, "shares/S": 8 });
+  assert.equal(h.engine.isStale(), true);
+});
+
+test("noteRemoteRevs marks stale when a share key appears or disappears", () => {
+  const h = harness({ tree: treeOf(todo("a")) });
+  h.engine.rebuild(withRevs(treeOf(todo("a")), { "users/me": 4, "shares/S": 7 }));
+  h.engine.noteRemoteRevs({ "users/me": 4 });
+  assert.equal(h.engine.isStale(), true);
+  h.engine.rebuild(withRevs(treeOf(todo("a")), { "users/me": 4 }));
+  h.engine.noteRemoteRevs({ "users/me": 4, "shares/T": 1 });
+  assert.equal(h.engine.isStale(), true);
+});
+
+test("a write reply only compares the partition it names", async () => {
+  const h = harness({ script: [ok(todo("a", { version: 2 }), 200, { prev: 7, rev: 8, partition: "shares/S" })] });
+  h.engine.rebuild(withRevs(treeOf(todo("a")), { "users/me": 4, "shares/S": 7 }));
+  h.engine.enqueue({ kind: "patch", target_id: "a", payload: { done: true } });
+  await h.engine.flush();
+  assert.equal(h.engine.isStale(), false, "prev 7 matches the share, not users/me's 4");
+  assert.deepEqual(h.engine.knownRevs(), { "users/me": 4, "shares/S": 8 });
+});
+
+test("a legacy integer rev still works (old server)", () => {
+  const h = harness({ tree: treeOf(todo("a")) });
+  h.engine.rebuild(withRev(treeOf(todo("a")), 3));
+  assert.equal(h.engine.knownRev(), 3);
+  h.engine.noteRemoteRev(4);
+  assert.equal(h.engine.isStale(), true);
+});

@@ -150,12 +150,12 @@ const AttachmentsUI = (() => {
       const n = node();
       n.attachments = body.attachments;
       n.version = body.version;
-      deps.observeRev(headers.prev, headers.rev);
+      deps.observeRev(headers.prev, headers.rev, headers.partition);
     }
 
     const revHeaders = (r) => {
       const num = (name) => (r.headers.get(name) === null ? undefined : Number(r.headers.get(name)));
-      return { prev: num("X-Rev-Prev"), rev: num("X-Rev") };
+      return { prev: num("X-Rev-Prev"), rev: num("X-Rev"), partition: r.headers.get("X-Partition") || undefined };
     };
 
     async function readDetail(response) {

@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks, Header, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app import db, models, tasks
+from app import db, models, tasks, tenant
 
 # The txn id becomes a Firestore document id, so only accept a plain token
 # (clients send UUIDs). Firestore also reserves ids of the form __name__.
@@ -28,10 +28,17 @@ def _parse_if_match(value: str | None) -> int | None:
     except ValueError:
         raise HTTPException(400, "If-Match must be an integer version") from None
 
+def revs(own_rev: int) -> dict[str, int]:
+    """Revision per data partition the caller sees, keyed by partition path. The
+    client refreshes when any value rises or a key comes or goes."""
+    return {tenant.partition(): own_rev}
+
 def reply(status: int, body: dict | None, prev: int | None = None, rev: int | None = None) -> Response:
     # X-Rev-Prev / X-Rev let the client notice writes made elsewhere: if
     # Prev is ahead of what it last saw, another window wrote in between.
-    headers = {} if rev is None else {"X-Rev-Prev": str(prev), "X-Rev": str(rev)}
+    # X-Partition names whose counter they are (users/{email} or shares/{id}).
+    headers = {} if rev is None else {"X-Rev-Prev": str(prev), "X-Rev": str(rev),
+                                      "X-Partition": tenant.partition()}
     if body is None:
         return Response(status_code=status, headers=headers)
     return JSONResponse(body, status_code=status, headers=headers)

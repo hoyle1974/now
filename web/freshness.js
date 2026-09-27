@@ -90,6 +90,7 @@
         }
         if (!engine.isStale()) {
           let rev;
+          let revs = null;
           let version = null;
           onPhase("checking");
           const startedAt = now();
@@ -97,6 +98,7 @@
             const res = await fetchRev();
             if (res !== null && typeof res === "object") {
               rev = res.rev;
+              revs = res.revs ?? null;
               version = res.version ?? null;
               triggeredBy = res.triggered_by ?? null;
             } else {
@@ -117,6 +119,8 @@
           onLog("rev", `server ${rev}, known ${known ?? "?"}${known === null || rev > known ? " -> stale" : ""} (${now() - startedAt}ms)`);
           if (appVersion !== null && version !== null && version !== appVersion) {
             newVersion = version;
+          } else if (revs && engine.noteRemoteRevs) {
+            engine.noteRemoteRevs(revs);
           } else {
             engine.noteRemoteRev(rev);
           }
