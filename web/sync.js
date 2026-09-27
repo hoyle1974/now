@@ -282,6 +282,7 @@
           if (model.todosById.has(tmpIds[i])) return;
           const child = newNode(tmpIds[i], title, payload.due_date, id, next++, payload.type);
           if (payload.descriptions.length === 1 && payload.content) child.content = payload.content;
+          if (parent.share) child.share = parent.share;
           model.todosById.set(child.todo_id, child);
           parent.child_ids.push(child.todo_id);
         });
@@ -366,15 +367,45 @@
         node.parent_id = newParentId;
         if (newParent) newParent.child_ids = sibs.map((s) => s.todo_id);
         else model.roots = sibs;
+        if (!node.share_root) retag(model, id, newParent ? newParent.share : null);
         return true;
       },
-      request: (op) => ({
-        method: "PATCH", path: `/todos/${op.target_id}/reparent`,
-        body: { parent_id: op.payload.parent_id ?? null, index: op.payload.index ?? null },
-      }),
+      request: (op) => {
+        const body = { parent_id: op.payload.parent_id ?? null, index: op.payload.index ?? null };
+        if (op.payload.parent_share !== undefined) body.parent_share = op.payload.parent_share;
+        return { method: "PATCH", path: `/todos/${op.target_id}/reparent`, body };
+      },
+      // Across a share's edge the whole subtree changed partition on the server.
+      reloadAfterAck: (op) => op.payload.parent_share !== undefined && !op.mount &&
+        (op.share ?? null) !== op.payload.parent_share,
       ack: ackVersion,
     },
   };
+
+  // ---- sharing ----------------------------------------------------------
+  // A node from a share carries `share: {id, mode, owner}` (and `share_root` on its
+  // root, which is merged with our own mount of it). Requests about it carry
+  // X-Share so the server works in that share; moving the root, or removing it when
+  // it isn't ours, acts on our mount instead (docs/okf/features/sharing.md).
+  function routeFor(kind, node, me) {
+    const share = node && node.share;
+    if (!share) return { share: null, mount: false };
+    if (node.share_root) {
+      if (kind === "move" || kind === "reparent") return { share: null, mount: true };
+      if ((kind === "delete" || kind === "undelete") && share.owner !== me) return { share: null, mount: true };
+    }
+    return { share: share.id, mount: false };
+  }
+
+  // Give a moved subtree its new parent's share tag (until the reload brings the real one).
+  function retag(model, id, share) {
+    for (const n of subtreeNodes(model, id)) {
+      if (share) n.share = share;
+      else delete n.share;
+    }
+  }
+
+  const SHARE_REFUSALS = new Set(["share revoked", "read only", "owner only"]);
 
   function patchBody(payload) {
     const body = {};
@@ -401,8 +432,10 @@
     const spec = OPS[op.kind];
     if (!spec) throw new Error("unknown op kind " + op.kind);
     const headers = { "Content-Type": "application/json", "X-Txn-Id": op.txn_id };
-    const versioned = typeof spec.versioned === "function" ? spec.versioned(op) : Boolean(spec.versioned);
+    // A mount's place is ours alone: last write wins, so no If-Match.
+    const versioned = !op.mount && (typeof spec.versioned === "function" ? spec.versioned(op) : Boolean(spec.versioned));
     if (versioned && version != null && version > 0) headers["If-Match"] = String(version);
+    if (op.share) headers["X-Share"] = op.share;
     return { ...spec.request(op), headers };
   }
 
@@ -426,6 +459,8 @@
     // navigator.onLine can't be trusted to say "yes", but a "no" is reliable
     // enough to stop burning retries; a manual kick(true) overrides it.
     const isOnline = opts.isOnline || (() => true);
+    // The signed-in email: decides whether removing a shared item is ours to do.
+    const me = opts.me || (() => null);
 
     let ops = [];
     const aliases = new Map();
@@ -642,6 +677,16 @@
         if (Array.isArray(op.payload[f])) op.payload[f] = op.payload[f].map(resolve);
       }
       if (OPS[kind] && OPS[kind].prepare) OPS[kind].prepare(op, uuid);
+      // Where it goes is decided now, before the local change moves things around.
+      const target = OPS[kind]?.mintsTarget ? null : nodeOf(op.target_id);
+      Object.assign(op, routeFor(kind, target, me()));
+      if (kind === "reparent") {
+        const parent = op.payload.parent_id ? model.todosById.get(op.payload.parent_id) : null;
+        // A mount moves within our own list: only a target inside a share needs saying (refused).
+        if ((target && target.share && !op.mount) || (parent && parent.share)) {
+          op.payload.parent_share = parent && parent.share ? parent.share.id : null;
+        }
+      }
       const applied = applyOp(model, op);
       if (!applied && !(OPS[kind] && OPS[kind].queueEvenIfUnapplied)) return false;
       const merged = tryCoalesce(op);
@@ -711,12 +756,18 @@
       if (code >= 200 && code < 300) {
         ackSuccess(op, body);
         dropHead(op);
+        repoint(op, res.partition);
         // The new occurrence (a whole subtree with server ids) exists only on
         // the server, so reload to bring it in.
-        if (OPS[op.kind]?.reloadAfterAck) await refetchAndRebuild();
+        const reload = OPS[op.kind]?.reloadAfterAck;
+        if (typeof reload === "function" ? reload(op) : reload) await refetchAndRebuild();
         return true;
       }
       const spec = OPS[op.kind] || {};
+      const detail = body && typeof body.detail === "string" ? body.detail : "";
+      if ((code === 403 && SHARE_REFUSALS.has(detail)) || (code === 409 && detail === "crosses share boundary")) {
+        return refuseShared(op, detail);
+      }
       if (code === 400 && spec.on400) {
         dropHead(op);
         log("drop", spec.on400.log);
@@ -794,8 +845,39 @@
         scheduleRetry(op);
         return false;
       }
-      const detail = body && typeof body.detail === "string" ? `: ${body.detail}` : "";
-      return failPermanently(op, `the server rejected it (${code})${detail}`);
+      return failPermanently(op, `the server rejected it (${code})${detail ? `: ${detail}` : ""}`);
+    }
+
+    // The server moved the item (share, unshare, drag across): send what is still
+    // queued for it to where it lives now.
+    function repoint(op, partition) {
+      if (!partition || op.mount) return;
+      const share = partition.startsWith("shares/") ? partition.slice("shares/".length) : null;
+      if ((op.share ?? null) === share) return;
+      for (const o of ops) if (o.target_id === op.target_id && !o.mount) o.share = share;
+      persist();
+    }
+
+    // A shared item refused the edit: it isn't coming back by retrying.
+    async function refuseShared(op, detail) {
+      const title = (id) => `“${(nodeOf(id) || {}).title || "that item"}”`;
+      let message;
+      if (detail === "share revoked") {
+        const gone = op.share ? ops.filter((o) => o.share === op.share) : [op];
+        const count = gone.length;
+        const what = count === 1 ? "your edit" : `${count} edits`;
+        message = `Couldn't save ${what} to ${title(op.share || op.target_id)}: it's no longer shared with you.`;
+        removeOps((o) => gone.includes(o));
+      } else {
+        dropHead(op);
+        message = detail === "read only" ? `Couldn't save: ${title(op.share || op.target_id)} is read-only.`
+          : detail === "owner only" ? "Only the owner can do that."
+            : "That move isn't allowed for shared items.";
+      }
+      log("drop", `${op.kind}: ${detail}`);
+      notice("error", message);
+      await refetchAndRebuild();
+      return true;
     }
 
     async function failPermanently(op, why) {

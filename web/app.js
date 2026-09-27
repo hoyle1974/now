@@ -211,8 +211,12 @@ async function refreshFromRemote(triggeredBy) {
 
 const model = Sync.createModel();
 FieldsUI.init({ model, focusTodo: (id, y) => focusTodo(id, y) });
+// The signed-in email (web/auth.js); local test servers without sign-in set NOW_CONFIG.devEmail.
+const myEmail = () => (window.NowAuth && window.NowAuth.email()) || (window.NOW_CONFIG && window.NOW_CONFIG.devEmail) || null;
+
 const engine = Sync.createEngine({
   model,
+  me: myEmail,
   store: IdbStore.create(),
   send: sendRequest,
   refetch: () => fetchTree(),

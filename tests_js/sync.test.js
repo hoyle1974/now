@@ -28,7 +28,7 @@ function memoryStore() {
 const ok = (body, status = 200, revs = {}) => () => Promise.resolve({ status, body, ...revs });
 const netFail = () => () => Promise.reject(new Error("network"));
 
-function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails = false, now = null } = {}) {
+function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails = false, now = null, me = "me@x.com" } = {}) {
   const net = { online: true };
   const model = Sync.createModel();
   model.roots = tree.roots;
@@ -62,6 +62,7 @@ function harness({ tree = treeOf(), script = [], refetchTree = null, saveFails =
     random: () => 0.5,
     ...(now ? { now } : {}),
     uuid: () => "u" + (++n),
+    me: () => me,
   });
   const fire = () => { const t = timers.filter((x) => x.live).pop(); t.live = false; t.fn(); };
   return { net, model, engine, calls, notices, logs, remaps, timers, store, fire, get refetches() { return refetches; } };
@@ -1214,4 +1215,151 @@ test("a legacy integer rev still works (old server)", () => {
   assert.equal(h.engine.knownRev(), 3);
   h.engine.noteRemoteRev(4);
   assert.equal(h.engine.isStale(), true);
+});
+
+
+// ---- sharing: routing -------------------------------------------------------
+
+const SHARE = { id: "S", mode: "rw", owner: "owner@x.com" };
+
+function sharedTree(share = SHARE) {
+  return treeOf(
+    todo("home", { child_ids: [] }),
+    todo("S", { type: "list", share, share_root: true, child_ids: ["c"] }),
+    todo("c", { parent_id: "S", share, share_root: false }),
+  );
+}
+
+test("adds X-Share for a node inside a share", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(todo("c", { version: 2 }))] });
+  h.engine.enqueue({ kind: "patch", target_id: "c", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+});
+
+test("no X-Share for an item of your own", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(todo("home", { version: 2 }))] });
+  h.engine.enqueue({ kind: "patch", target_id: "home", payload: { title: "x" } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], undefined);
+});
+
+test("share-root move sends no X-Share and no If-Match (it moves your mount)", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(todo("S", { version: 5 }))] });
+  h.engine.enqueue({ kind: "reparent", target_id: "S", payload: { parent_id: "home", index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], undefined);
+  assert.equal(h.calls[0].headers["If-Match"], undefined);
+  assert.equal("parent_share" in h.calls[0].body, false);
+});
+
+test("a non-owner deleting a share root removes the mount (no header)", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(null, 204)] });
+  h.engine.enqueue({ kind: "delete", target_id: "S" });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], undefined);
+});
+
+test("the owner deleting a share root carries X-Share", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(null, 204)], me: "owner@x.com" });
+  h.engine.enqueue({ kind: "delete", target_id: "S" });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+});
+
+test("routing is fixed at enqueue, not after the local move", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(todo("c", { version: 2 })), ok(todo("c", { version: 3 }))],
+    refetchTree: sharedTree() });
+  h.engine.enqueue({ kind: "reparent", target_id: "c", payload: { parent_id: null, index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+  assert.deepEqual(h.calls[0].body, { parent_id: null, index: 0, parent_share: null });
+});
+
+test("reparent across a share edge reloads after the ack", async () => {
+  const h = harness({ tree: sharedTree(), script: [ok(todo("home", { version: 2 }))], refetchTree: sharedTree() });
+  h.engine.enqueue({ kind: "reparent", target_id: "home", payload: { parent_id: "S", index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].body.parent_share, "S");
+  assert.equal(h.calls[0].headers["X-Share"], undefined);
+  assert.equal(h.refetches, 1);
+});
+
+test("a reparent inside one share does not reload", async () => {
+  const tree = sharedTree();
+  tree.todosById.set("d", todo("d", { parent_id: "S", share: SHARE }));
+  tree.todosById.get("S").child_ids.push("d");
+  const h = harness({ tree, script: [ok(todo("d", { version: 2 }))] });
+  h.engine.enqueue({ kind: "reparent", target_id: "d", payload: { parent_id: "c", index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].body.parent_share, "S");
+  assert.equal(h.refetches, 0);
+});
+
+test("children made under a shared item are routed to the share", async () => {
+  const h = harness({ tree: sharedTree(), script: [
+    ok({ ...todo("S", { version: 2 }), affected: [{ todo_id: "S", version: 2 }, { todo_id: "n1", version: 1 }] }),
+    ok(todo("n1", { version: 2 })),
+  ] });
+  h.engine.enqueue({ kind: "split", target_id: "S", payload: { descriptions: ["new"] } });
+  await h.engine.flush();
+  h.engine.enqueue({ kind: "patch", target_id: "n1", payload: { done: true } });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+  assert.equal(h.calls[1].headers["X-Share"], "S");
+});
+
+test("403 share revoked drops every queued edit to that share with one notice", async () => {
+  const revoked = () => Promise.resolve({ status: 403, body: { detail: "share revoked" } });
+  const h = harness({ tree: sharedTree(), script: [revoked, ok(todo("home", { version: 2 }))], refetchTree: treeOf(todo("home")) });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "patch", target_id: "c", payload: { title: "a" } });
+  h.engine.enqueue({ kind: "patch", target_id: "S", payload: { title: "b" } });
+  h.engine.enqueue({ kind: "patch", target_id: "home", payload: { title: "c" } });
+  h.net.online = true;
+  await h.engine.flush();
+  assert.equal(h.calls.length, 2, "the second shared edit is dropped unsent");
+  assert.equal(h.calls[1].path, "/todos/home");
+  assert.equal(h.notices.length, 1);
+  assert.match(h.notices[0].message, /2 edits .* no longer shared with you/);
+});
+
+test("403 read only drops the op with a notice", async () => {
+  const h = harness({ tree: sharedTree(), script: [() => Promise.resolve({ status: 403, body: { detail: "read only" } })],
+    refetchTree: sharedTree() });
+  h.engine.enqueue({ kind: "patch", target_id: "c", payload: { title: "a" } });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 0);
+  assert.match(h.notices[0].message, /read-only/);
+});
+
+test("409 crosses share boundary drops and reloads", async () => {
+  const h = harness({ tree: sharedTree(), script: [() => Promise.resolve({ status: 409, body: { detail: "crosses share boundary" } })],
+    refetchTree: sharedTree() });
+  h.engine.enqueue({ kind: "reparent", target_id: "c", payload: { parent_id: "home", index: 0 } });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 0);
+  assert.equal(h.refetches, 1);
+  assert.match(h.notices[0].message, /isn't allowed for shared items/);
+});
+
+test("403 without a share detail still retries as auth", async () => {
+  const h = harness({ tree: sharedTree(), script: [() => Promise.resolve({ status: 403, body: { detail: "Not allowed" } })] });
+  h.engine.enqueue({ kind: "patch", target_id: "c", payload: { title: "a" } });
+  await h.engine.flush();
+  assert.equal(h.engine.pending(), 1);
+});
+
+test("an X-Partition naming a new home re-points the queued ops for that item", async () => {
+  const h = harness({ tree: sharedTree(), script: [
+    ok(todo("home", { version: 2 }), 200, { partition: "shares/T" }),
+    ok(todo("home", { version: 3 })),
+  ] });
+  h.net.online = false;
+  h.engine.enqueue({ kind: "patch", target_id: "home", payload: { title: "a" } });
+  h.engine.enqueue({ kind: "move", target_id: "home", payload: { direction: "down" } });
+  h.net.online = true;
+  await h.engine.flush();
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].headers["X-Share"], "T");
 });
