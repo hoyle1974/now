@@ -1371,17 +1371,33 @@ test("an undelete for an item not in the model can name its share (trash restore
   assert.equal(h.calls[0].headers["X-Share"], "S");
 });
 
-test("clear completed never touches shared items (the server clears only your own list)", () => {
+test("clear completed covers editable shares, never a share's root or a read-only share", () => {
   const model = Sync.createModel();
+  const tree = sharedTree();                       // S is rw, owned by someone else
+  tree.todosById.get("c").done = true;
+  const RO = { id: "R", mode: "ro", owner: "owner@x.com" };
+  tree.todosById.set("R", todo("R", { type: "list", share: RO, share_root: true, child_ids: ["r1"] }));
+  tree.todosById.set("r1", todo("r1", { parent_id: "R", share: RO, done: true }));
+  tree.todosById.set("mine", todo("mine", { done: true }));
+  tree.roots.push(tree.todosById.get("R"), tree.todosById.get("mine"));
+  model.roots = tree.roots;
+  model.todosById = tree.todosById;
+  assert.deepEqual(Sync.clearableIds(model, "me@x.com").sort(), ["c", "mine"]);
+  assert.deepEqual(Sync.clearScopes(model, "me@x.com"), { "": ["mine"], S: ["c"] });
+});
+
+test("clearing a share's completed items sends X-Share and clears only that share locally", async () => {
   const tree = sharedTree();
   tree.todosById.get("c").done = true;
   tree.todosById.set("mine", todo("mine", { done: true }));
   tree.roots.push(tree.todosById.get("mine"));
-  model.roots = tree.roots;
-  model.todosById = tree.todosById;
-  assert.deepEqual(Sync.clearableIds(model), ["mine"]);
+  const h = harness({ tree, script: [ok({ cleared: [{ todo_id: "c", version: 2 }] })] });
+  h.engine.enqueue({ kind: "clear_completed", target_id: "clear-completed:S", payload: { scope: "S" }, share: "S" });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+  assert.equal(h.model.todosById.has("c"), false);
+  assert.equal(h.model.todosById.has("mine"), true);
 });
-
 
 // ---- Cursor review (2026-09-27) ---------------------------------------------------
 

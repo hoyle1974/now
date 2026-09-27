@@ -24,7 +24,7 @@
   treeEl.after(footer);
 
   function updateFooter() {
-    const n = Sync.clearableIds(model).length;
+    const n = Sync.clearableIds(model, myEmail()).length;
     clearBtn.hidden = n === 0;
     clearBtn.textContent = `Clear ${n} completed`;
     clearBtn.title = "Removes done todos (and done subtasks) to Trash";
@@ -34,13 +34,23 @@
   updateFooter();
 
   function clearCompleted() {
-    const ids = Sync.clearableIds(model);
-    if (!ids.length) return;
-    if (!engine.enqueue({ kind: "clear_completed", target_id: "clear-completed" })) return;
+    // One op per list the items live in: our own, and each shared list we can edit
+    // (those go to that share's trash, for everyone; docs/okf/features/sharing.md).
+    const scopes = Sync.clearScopes(model, myEmail());
+    const cleared = [];
+    for (const [scope, ids] of Object.entries(scopes)) {
+      if (engine.enqueue({ kind: "clear_completed", target_id: `clear-completed:${scope || "mine"}`,
+        payload: { scope, me: myEmail() }, share: scope || undefined })) {
+        for (const id of ids) cleared.push([id, scope]);
+      }
+    }
+    if (!cleared.length) return;
     toast.show({
-      message: ids.length === 1 ? "Cleared 1 completed" : `Cleared ${ids.length} completed`,
+      message: cleared.length === 1 ? "Cleared 1 completed" : `Cleared ${cleared.length} completed`,
       ttl: 8000,
-      action: { label: "Undo", run: () => { for (const id of ids) engine.enqueue({ kind: "undelete", target_id: id }); } },
+      action: { label: "Undo", run: () => {
+        for (const [id, scope] of cleared) engine.enqueue({ kind: "undelete", target_id: id, share: scope || undefined });
+      } },
     });
   }
   clearBtn.addEventListener("click", clearCompleted);

@@ -464,8 +464,13 @@ def _plan_clear_completed() -> list[str]:
 
     planned: list[str] = []
     pending = list(children.get(None, []))
+    # A share's root is not an item to clear (it would end the share for everyone): look inside it.
+    kind, _, share_root = tenant.partition().partition("/")
     while pending:
         tid = pending.pop()
+        if kind == SHARES and tid == share_root:
+            pending.extend(children.get(tid, []))
+            continue
         all_done, has_todo = check(tid)
         if all_done and has_todo:
             planned.append(tid)

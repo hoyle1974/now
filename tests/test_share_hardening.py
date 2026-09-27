@@ -45,13 +45,25 @@ def test_rw_member_cannot_delete_root_with_a_patch():
     assert share_doc(ROOT) is not None
 
 
-def test_clear_completed_is_refused_inside_a_share():
+def test_clear_completed_inside_a_share_clears_done_items_but_never_the_root():
     make_share(TEST_USER, mode="rw", mount_for=(TEST_USER, OTHER_USER))
     act_as(app, OTHER_USER)
-    client.patch(f"/todos/{CHILD}", json={"done": True}, headers=H)
+    client.patch(f"/todos/{CHILD}", json={"done": True}, headers=H)  # now everything in the share is done
     r = client.post("/todos/clear-completed", headers=H)
-    assert r.status_code == 400
-    assert share_doc(ROOT) is not None and share_doc(CHILD) is not None
+    assert r.status_code == 200, r.text
+    assert [c["todo_id"] for c in r.json()["cleared"]] == [CHILD]
+    assert share_doc(ROOT) is not None and share_doc(CHILD) is None
+
+
+def test_read_only_member_cannot_clear_a_share():
+    make_share(TEST_USER, mode="ro", mount_for=(TEST_USER, OTHER_USER))
+    with tenant.as_user(TEST_USER), tenant.as_partition(SHARE):
+        t = db.get_todo(models.TodoId(CHILD))
+        t.done = True
+        db.run_atomic(None, lambda: (db.update_todo(t), (200, None))[-1])
+    act_as(app, OTHER_USER)
+    assert client.post("/todos/clear-completed", headers=H).status_code == 403
+    assert share_doc(CHILD) is not None
 
 
 # ---- 3. no second top-level item in a share --------------------------------------------

@@ -102,15 +102,17 @@
 
   // Ids "Clear completed" would delete: done todos whose whole subtree is done.
   // Only the topmost of each such subtree (it takes its descendants with it),
-  // mirroring the server (db_firestore.clear_completed).
-  function clearableIds(model) {
+  // mirroring the server (db_firestore.clear_completed), which runs once per partition:
+  // our own list, and each share we may edit (`me` is the signed-in email; a read-only
+  // share is only ours to clear when we own it). A share's root is never cleared: in our
+  // list it stands in for our mount (no checkbox, nothing beneath it on the server's
+  // side), and inside the share only what is under it is looked at.
+  function clearableIds(model, me = null) {
     const memo = new Map();
+    const editable = (share) => share.mode === "rw" || (me && share.owner === me);
     // [everything beneath is done, a todo is here or beneath]; a container's own done means nothing.
-    // A shared item stands in for our mount of it (the server's plan only sees our own
-    // partition, where a mount has no children and no checkbox): never cleared, never
-    // a reason to keep its container.
     const check = (node) => {
-      if (node.share) return [true, false];
+      if (node.share_root) return [true, false];
       if (!memo.has(node.todo_id)) {
         memo.set(node.todo_id, [false, false]);
         const kids = node.child_ids.map((c) => model.todosById.get(c)).filter(Boolean).map(check);
@@ -122,13 +124,30 @@
     };
     const out = [];
     const pending = model.roots.slice();
+    const descend = (node) => node.child_ids.forEach((c) => { const n = model.todosById.get(c); if (n) pending.push(n); });
     while (pending.length) {
       const node = pending.pop();
+      if (node.share_root) {
+        if (editable(node.share)) descend(node);
+        continue;
+      }
       const [allDone, hasTodo] = check(node);
       if (allDone && hasTodo) out.push(node.todo_id);
-      else if (!node.share) node.child_ids.forEach((c) => { const n = model.todosById.get(c); if (n) pending.push(n); });
+      else descend(node);
     }
     return out;
+  }
+
+  // clearableIds grouped by where they live: "" for our own list, else the share id.
+  // Each group is one clear_completed op (one request per partition).
+  function clearScopes(model, me = null) {
+    const scopes = {};
+    for (const id of clearableIds(model, me)) {
+      const node = model.todosById.get(id);
+      const scope = node && node.share ? node.share.id : "";
+      (scopes[scope] = scopes[scope] || []).push(id);
+    }
+    return scopes;
   }
 
   // ---- ops --------------------------------------------------------------
@@ -228,8 +247,10 @@
       request: (op) => ({ method: "DELETE", path: `/todos/${op.target_id}` }),
     },
     clear_completed: {
-      apply(model) {
-        const ids = clearableIds(model);
+      // payload.scope: "" (or absent, older outboxes) our own list, else a share id; the
+      // op carries that share (X-Share) and clears only its items locally.
+      apply(model, { payload = {} }) {
+        const ids = clearScopes(model, payload.me || null)[payload.scope || ""] || [];
         if (!ids.length) return false;
         ids.forEach((cid) => OPS.delete.apply(model, { target_id: cid }));
         return true;
@@ -1071,5 +1092,5 @@
     };
   }
 
-  return { createModel, applyOp, clearableIds, buildRequest, createEngine, normalizeDue, isTmp, OPS };
+  return { createModel, applyOp, clearableIds, clearScopes, buildRequest, createEngine, normalizeDue, isTmp, OPS };
 });

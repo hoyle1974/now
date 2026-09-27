@@ -188,8 +188,8 @@ def clear_completed(x_txn_id: str | None = Header(None)) -> Response:
     One transaction when the plan fits in CLEAR_COMPLETED_BATCH writes; several
     batches above that, so Firestore's 500-write cap is not hit.
     """
-    if shares.bound() is not None:
-        raise HTTPException(400, "clear completed works on your own list")
+    # Inside a share (X-Share, a can-edit member): its done items go to the share's trash
+    # for everyone; the share's own root never does (db._plan_clear_completed).
     return reply(*db.run_clear_completed(x_txn_id))
 
 @router.get("/todos/{todo_id}", response_model=models.Todo)
