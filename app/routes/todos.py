@@ -9,8 +9,9 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 
-from app import db, models, next_up, shares, tasks, tenant, types
-from app.routes.common import affected_refs, apply, check_share_root, reply, revs, saved
+from app import auth, db, models, next_up, shares, tasks, tenant, types
+from app import migrate
+from app.routes.common import affected_refs, apply, atomic, check_share_root, reply, revs, saved
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,6 +22,13 @@ def _check_accepts_children(parent_id) -> None:
     parent = db.get_todo(models.TodoId(parent_id) if not isinstance(parent_id, models.TodoId) else parent_id)
     if parent is not None and not types.can(parent, "allowsUserChildren"):
         raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
+
+def _check_mount(todo: models.Todo) -> None:
+    """A mount moves, is removed and restored by its owner-person alone, and only while
+    its share is live for them."""
+    share = shares.get(str(todo.todo_id))
+    if share is None or share.state != "active" or not shares.is_member(share, tenant.current()):
+        raise HTTPException(403, "share revoked")
 
 def _check_editable(todo: models.Todo, allowed: bool) -> None:
     """Content edits and deletes are blocked for a type marked read-only in the
@@ -45,7 +53,7 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
         db.create_todo(todo)
         return 200, jsonable_encoder(todo)
 
-    return saved(db.run_atomic(x_txn_id, create), background)
+    return saved(atomic(x_txn_id, create), background)
 
 @router.get("/todos/root", response_model=list[models.Todo])
 def list_todos(background: BackgroundTasks) -> list[models.Todo]:
@@ -219,7 +227,7 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
-    return saved(db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)), background,
+    return saved(atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=view_only)), background,
                   schedule=not view_only)
 
 def _collapse_shared(share: shares.Share, todo_id: uuid.UUID, collapsed: bool) -> Response:
@@ -248,15 +256,29 @@ def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
         copy = db.spawn_next_occurrence(todo, today)
         return {"created": True, "spawned_id": str(copy.todo_id), "todo": jsonable_encoder(copy)}
 
-    return saved(db.run_atomic(x_txn_id, lambda: apply(todo_id, None, action)),
+    return saved(atomic(x_txn_id, lambda: apply(todo_id, None, action)),
                   background, lambda body: body.get("todo"))
 
 @router.patch("/todos/{todo_id}/reparent", response_model=None)
 def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
-    """Move a todo under another parent (or to the top level) at an index."""
+    """Move a todo under another parent (or to the top level) at an index.
+
+    `parent_share` names the partition the new parent is in (a share id, or null for the
+    caller's own list); omitted means "same partition as the todo". When it differs from
+    where the todo is, the todo and its subtree migrate there (app/migrate.py)."""
+    here = tenant.partition()
+    target = here
+    if "parent_share" in body.model_fields_set and auth.sharing_enabled():
+        target = f"users/{tenant.current()}" if body.parent_share is None else f"shares/{body.parent_share}"
+    if target != here:
+        return _reparent_across(todo_id, body, here, target)
+
     def action(todo: models.Todo) -> dict:
-        _check_editable(todo, False)
+        if todo.type == "mount":
+            _check_mount(todo)
+        else:
+            _check_editable(todo, False)
         check_share_root(todo, "move")
         _check_accepts_children(body.parent_id)
         try:
@@ -267,7 +289,35 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
             raise HTTPException(404, "parent not found") from e
         return jsonable_encoder(moved)
 
-    return reply(*db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)))
+    return reply(*atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=True)))
+
+_MIGRATION_STATUS = {"crosses share boundary": 409, "not eligible": 400, "too large": 413,
+                     "parent not found": 404}
+
+def _reparent_across(todo_id: uuid.UUID, body: models.TodoReparent, here: str, target: str) -> Response:
+    """Drag an item into or out of a share: its whole subtree changes partition. Needs edit
+    rights on both sides (bind_partition already checked the source's)."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    if todo.type == "mount" or (shares.bound() is not None and str(todo_id) == shares.bound().id):
+        raise HTTPException(409, "crosses share boundary")
+    target_share = shares.check_partition_write(target)
+    parent = None if body.parent_id is None else str(body.parent_id)
+    if parent is not None:
+        with tenant.as_partition(target):
+            parent_todo = db.get_todo(body.parent_id)
+        if parent_todo is None:
+            raise HTTPException(404, "parent not found")
+        if not types.can(parent_todo, "allowsUserChildren"):
+            raise HTTPException(400, f"{types.caps(parent_todo.type)['label']} does not accept added items")
+    try:
+        migrate.migrate_subtree(here, str(todo_id), target, kind="move", dst_parent=parent, index=body.index)
+    except migrate.MigrationError as e:
+        raise HTTPException(_MIGRATION_STATUS.get(e.detail, 400), e.detail) from e
+    shares.bind_partition(target, target_share)
+    moved = db.get_todo(models.TodoId(todo_id))
+    return reply(200, jsonable_encoder(moved))
 
 @router.delete("/todos/{todo_id}", status_code=204, response_model=None)
 def delete_todo(todo_id: uuid.UUID,
@@ -276,6 +326,10 @@ def delete_todo(todo_id: uuid.UUID,
     # (also those of a calendar inside the deleted item) are hard-deleted instead:
     # the feed brings them back if the calendar is restored.
     def action(todo: models.Todo) -> None:
+        if todo.type == "mount":  # "Remove from my list": only this person's mount goes
+            todo.deleted = True
+            db.update_todo(todo)
+            return None
         _check_editable(todo, False)
         check_share_root(todo, "delete")
         purge = db.calendar_purge_plan(todo)
@@ -284,20 +338,22 @@ def delete_todo(todo_id: uuid.UUID,
         db.update_todo(todo)
         return None
 
-    return reply(*db.run_atomic(
-        x_txn_id, lambda: apply(todo_id, if_match, action, missing_ok=True)))
+    return reply(*atomic(
+        x_txn_id, lambda: apply(todo_id, if_match, action, missing_ok=True, mount_ok=True)))
 
 @router.patch("/todos/{todo_id}/undelete", response_model=None)
 def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
                            x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Restore a soft-deleted todo and its entire subtree (undo)"""
     def action(todo: models.Todo) -> dict:
+        if todo.type == "mount":
+            _check_mount(todo)
         check_share_root(todo, "undelete")
         restored, affected = db.undelete_todo(models.TodoId(todo_id))
         return {**jsonable_encoder(restored), "affected": affected_refs(affected)}
 
-    return saved(db.run_atomic(
-        x_txn_id, lambda: apply(todo_id, if_match, action, include_deleted=True)), background)
+    return saved(atomic(
+        x_txn_id, lambda: apply(todo_id, if_match, action, include_deleted=True, mount_ok=True)), background)
 
 @router.post("/todos/{todo_id}/split", response_model=None)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: BackgroundTasks,
@@ -318,7 +374,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
             todo, body.descriptions, due_date, body.type or types.DEFAULT, content)
         return {**jsonable_encoder(parent), "affected": affected_refs(affected)}
 
-    result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+    result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     if result[0] == 200 and due_date:
         # The new children (affected[1:]) all carry the split's due date; the parent is unchanged.
         for child in result[1]["affected"][1:]:  # type: ignore[index]
@@ -347,7 +403,10 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
     def action(todo: models.Todo) -> dict:
-        _check_editable(todo, False)
+        if todo.type == "mount":
+            _check_mount(todo)
+        else:
+            _check_editable(todo, False)
         check_share_root(todo, "move")
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
@@ -356,4 +415,4 @@ def move_todo(todo_id: uuid.UUID, direction: str,
             raise HTTPException(404 if e.kind == "missing" else 400, detail) from e
         return jsonable_encoder(moved)
 
-    return reply(*db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)))
+    return reply(*atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=True)))

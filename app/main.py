@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, models
 from app.auth import bind_partition, bind_user, require_user
-from app.routes import attachments, calendar, notifications, system, todos
+from app.routes import attachments, calendar, notifications, shares, system, todos
 from app.routes.common import check_txn_id
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -68,10 +68,11 @@ async def _limit_upload_size(request, call_next):
     return await call_next(request)
 
 # Order matters: system's /todos/rev must be matched before todos' /todos/{todo_id}.
-for _router in (system.router, notifications.router, calendar.router, todos.router, attachments.router):
+for _router in (system.router, notifications.router, calendar.router, shares.router, todos.router,
+                attachments.router):
     app.include_router(_router)
 
-_API_PREFIXES = ("/todos", "/push", "/calendar")
+_API_PREFIXES = ("/todos", "/push", "/calendar", "/shares")
 
 
 @app.middleware("http")

@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Header, HTTPException, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 
 from app import attachments, blobstore, db, models
-from app.routes.common import apply, reply
+from app.routes.common import apply, atomic, reply
 
 router = APIRouter()
 
@@ -40,7 +40,7 @@ def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
         return body is not None and any(a["id"] == meta.id for a in body.get("attachments", []))
 
     try:
-        result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+        result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     except BaseException:
         # A failed attempt may have set the todo up in a transaction that never
         # committed: keep the blob only if the stored todo really lists it.
@@ -81,7 +81,7 @@ def delete_attachment(todo_id: uuid.UUID, attachment_id: str,
         db.update_todo(todo)
         return jsonable_encoder(todo)
 
-    result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+    result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     if result[0] == 200:
         blobstore.get_store().delete(blobstore.key_for(str(todo_id), attachment_id))
     return reply(*result)

@@ -149,6 +149,8 @@ class TodoUpdate(BaseModel):
 class TodoReparent(BaseModel):
     parent_id: TodoId | None = Field(None)  # null moves to the top level
     index: int | None = Field(None)         # position among the new siblings; null = last
+    # Partition of the new parent: a share id, or null for your own list. Omitted = the todo's own.
+    parent_share: str | None = Field(None, pattern=r"^[A-Za-z0-9-]{1,64}$")
 
 class TodoRepeatRequest(BaseModel):
     today: datetime.date | None = Field(None)  # the client's local date; server date if omitted
@@ -216,3 +218,7 @@ class Todo(BaseModel):
     def _instants_as_utc(self, v: datetime.datetime | None) -> str | None:
         # due_date and end_date stay bare: they are the user's wall-clock time.
         return as_utc_instant(v)
+
+
+class ShareRequest(BaseModel):
+    mode: Literal["ro", "rw"]

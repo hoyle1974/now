@@ -135,6 +135,8 @@ async def bind_partition(request: Request) -> None:
 
     from app import shares
     share_id = request.headers.get("x-share")
+    if not share_id and request.method == "GET":
+        share_id = request.query_params.get("share")  # an <img src> can't send headers
     email = getattr(request.state, "user", None) or tenant.current_or_none()
     if not share_id or not email:
         return

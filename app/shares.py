@@ -137,3 +137,49 @@ def bound() -> Share | None:
 
 def bind(share: Share | None) -> contextvars.Token:
     return _bound.set(share)
+
+
+# ---- where an item lives now ----------------------------------------------------
+
+def mounted_share_ids(email: str) -> list[str]:
+    """Shares the person has in their list (live mounts only)."""
+    return sorted(m["todo_id"] for m in mounts(email) if not m.get("deleted"))
+
+
+def locate(todo_id: str) -> str | None:
+    """The partition an item the caller can reach lives in now, when it isn't in the bound
+    one: their own partition, then each share they have mounted (a mount doc is not the
+    item). For an edit a device queued before a share / unshare / move."""
+    here, email = tenant.partition(), tenant.current()
+    for part in [f"users/{email}", *(f"{SHARES}/{i}" for i in mounted_share_ids(email))]:
+        if part == here:
+            continue
+        snap = db.partition_ref(part).collection("todos").document(todo_id).get()
+        if snap.exists and (snap.to_dict() or {}).get("type") != "mount":
+            return part
+    return None
+
+
+def check_partition_write(partition: str) -> Share | None:
+    """May the caller write in this partition? Their own always; a share if it is active,
+    they are a member and may edit. Raises the HTTP refusal otherwise; returns the share."""
+    from fastapi import HTTPException
+    email = tenant.current()
+    if partition == f"users/{email}":
+        return None
+    if not partition.startswith(f"{SHARES}/"):
+        raise HTTPException(403, "share revoked")
+    share = get(partition.split("/", 1)[1])
+    if share is None or share.state == "unshared" or not is_member(share, email):
+        raise HTTPException(403, "share revoked")
+    if share.state == "migrating":
+        raise HTTPException(503, "migrating")
+    if not can_write(share, email):
+        raise HTTPException(403, "read only")
+    return share
+
+
+def bind_partition(partition: str, share: Share | None) -> None:
+    """Rebind for the rest of this request (a request runs in its own context copy)."""
+    tenant.set_partition(None if share is None else partition)
+    bind(share)

@@ -41,7 +41,7 @@ ACTIONS = {
 }
 
 # Rows whose routes arrive with the share routes (plan Task 7).
-LATER = {"change_mode", "unshare", "move_mount", "drag_across"}
+LATER: set[str] = set()
 
 
 @pytest.fixture(autouse=True)

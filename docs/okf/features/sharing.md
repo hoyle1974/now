@@ -4,7 +4,7 @@ title: Sharing between users
 description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
 resource: app/shares.py
 tags: [sharing, multi-user, data, sync]
-timestamp: 2026-09-27T04:00:00Z
+timestamp: 2026-09-27T05:00:00Z
 ---
 Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`).
 
@@ -22,3 +22,9 @@ Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/
 Each step is safe to repeat. A run that dies leaves the freeze; when its lease has expired, `migrate.resume_if_stale(partition)` finishes it (called when a write hits the freeze, and on tree loads). Refusals (`MigrationError.detail`): `crosses share boundary` (a calendar item or mount would enter a share), `not eligible` (already shared, a mount, or not in a user's partition), `too large` (over 2,000 nodes), `parent not found`.
 
 **Requests** on shared items carry `X-Share: <id>` ([routes](../api/routes.md)); `auth.bind_partition` checks membership and mode, then binds `shares/{id}`. A read-only member's `collapsed` patch goes to their own view state (`users/{email}/view_state/{id}`, 90-day TTL). Only the owner deletes or restores the root, and the root never moves inside the share (its place is each member's mount). Writes in a share stamp `last_edited_by`.
+
+**Share, unshare, mode** (`app/routes/shares.py`): `PUT /todos/{id}/share {mode}` shares an item from your own list (or changes the mode of a share you own, via its mount); `DELETE /todos/{id}/share` unshares; `GET /shares` lists what you can see. Mounts are ordinary todos in your partition for move / remove / restore (last write wins, no `If-Match`), refused with 403 `share revoked` once the share is gone for you.
+
+**Edits sent to an item's old home.** Share, unshare and cross-edge moves keep ids and versions, so an edit a device queued earlier still applies: `common.apply` raises `Moved` when the todo isn't where the request addressed it but `shares.locate` finds it (own list, then mounted shares) or when a content edit hits a mount (its content is the share root), and `common.atomic` checks the caller may write there, rebinds and runs the write once more. The addressed partition's `txn_log` is read first, so a write committed before the move replays its stored answer. An owner's `X-Share` request to an unshared share runs in their own partition, where the items went back. A member whose access ended gets 403 `share revoked`; an item dragged out of the share by someone else is 404 `todo not found` for the rest.
+
+**Moving across the edge.** `PATCH /todos/{id}/reparent` with `parent_share` different from the item's partition runs `migrate_subtree(kind="move")` after checking edit rights on both sides; mounts and a share's root never cross (409 `crosses share boundary`).

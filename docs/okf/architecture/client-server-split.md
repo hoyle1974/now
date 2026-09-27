@@ -3,11 +3,11 @@ type: Architecture
 title: Client/server split
 description: Which features put their logic in the browser vs the backend, and why — plus the rule for deciding new ones.
 tags: [architecture, frontend, backend]
-timestamp: 2026-09-25T05:20:00Z
+timestamp: 2026-09-27T05:00:00Z
 ---
 The backend is often just CRUD + optimistic concurrency over the [Todo](../data/todo.md) model; a lot of real behaviour is decided entirely client-side, over data the server stores unchanged. This page names which features fall on which side and why, so the split is a decision on record, not an accident of who wrote it first.
 
-**Why this works today:** each user's tree is small and never shared ([multi-user](../ops/multi-user.md) partitions data per email, no cross-user access), so the client can hold and search a whole tenant's data in memory cheaply. That assumption is load-bearing — it's *why* client-only search, auto-done, outline etc. are viable, not just a stylistic choice. If sharing between users is ever added, or a single account's data grows large, several of these stop being free:
+**Why this works today:** each user's tree is small, and a shared item arrives spliced into it by the server ([sharing](../features/sharing.md)), so the client can still hold and search everything it can see in memory cheaply. That assumption is load-bearing — it's *why* client-only search, auto-done, outline etc. are viable, not just a stylistic choice. If sharing between users is ever added, or a single account's data grows large, several of these stop being free:
 
 - **Search is the one most likely to move.** It's already flagged as a future add: once a user's tree is big enough that fetching-and-filtering everything client-side gets slow (or once trees are ever shared/merged across users), search needs a real server endpoint (indexed query, pagination) rather than an in-memory scan. Revisit `web/search.js` first if this changes.
 
@@ -38,6 +38,8 @@ These stay server-side on purpose, usually because they need atomicity, cross-de
 - **Calendar feed** ([calendar feed](../features/calendar-feed.md)) — `app/ics.py` is consumed by external calendar apps, not the web UI; there is no client to move it to.
 - **Reorder/move persistence** — the final write and ordering guarantee for a reparent/move stays in `app/routes/todos.py` + `db.reorder_todo`, even though the drag targeting above is client-side.
 - **Calendar item sync** ([calendar sync](../features/calendar-sync.md)) — fetching/parsing an external ICS feed and reconciling it into `calendar_event` children (`app/calendar_sync.py`, `app/calendar_jobs.py`, `db.apply_calendar_sync`) must run server-side: it needs to run with no client open (the daily digest nudges it), be identical across every device signed into the same calendar, and commit the create/update/delete plan in Firestore transactions (one transaction at or under 200 writes, several batches above that). The client only triggers it (loading the tree, "Sync now") and renders the result. Choosing a series' next occurrence and extracting end time, notes, repeat summary, video link and attendees also happen in the sync (2026-09-22): the result must be the same on every device and be ready with no client open (digest, heads-ups); the client only formats them (`Due.formatSpan`, `Fields.guestSummary`).
+
+- **Sharing** ([sharing](../features/sharing.md)) — permissions, the partition move (`app/migrate.py`), finding an item's new home for queued edits (`shares.locate`, `common.atomic`), and splicing shares into each member's tree all run server-side: they need atomicity (a subtree moving between partitions), must be identical for every member and device, and are the security boundary (a client must never be trusted to decide what it may read or write). The client only routes (`X-Share`), shows badges and locks controls for read-only shares.
 
 ## Rule for new features: discuss the split when it isn't obvious
 
