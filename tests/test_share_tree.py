@@ -184,3 +184,28 @@ def test_share_whose_root_was_archived_ends():
         db.partition_ref().collection("todos").document(CHILD).delete()
         assert shares.sweep() == 1
     assert shares.get(ROOT) is None
+
+
+def test_one_failing_share_does_not_stop_the_others_housekeeping(monkeypatch):
+    from app import migrate
+    from app.routes import todos as todos_routes
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    calls = []
+    monkeypatch.setattr(migrate, "resume_if_stale", lambda p: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(shares, "sweep_daily", lambda: calls.append("sweep"))
+    with tenant.as_user(TEST_USER):
+        todos_routes._housekeeping()
+    assert calls == ["sweep"]
+
+
+def test_mounts_are_checked_only_when_the_share_list_changed(monkeypatch):
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    tree()
+    scans = []
+    real = shares.active_shares
+    monkeypatch.setattr(shares, "active_shares", lambda: scans.append(1) or real())
+    tree()
+    assert scans == []
+    shares.bump_meta_rev()
+    tree()
+    assert scans == [1]

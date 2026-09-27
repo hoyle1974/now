@@ -40,11 +40,14 @@ class _State:
         self.archive_checked: dict[str, float] = {}
         # email -> (own rev, mounted share ids): app/shares.revs, valid while the rev holds
         self.mount_cache: dict[str, tuple[int, list[str]]] = {}
+        # email -> shares_meta rev at which app/shares.ensure_mounts last checked them
+        self.ensure_checked: dict[str, int] = {}
 
     def reset(self) -> None:
         self.tree_cache = {}
         self.archive_checked = {}
         self.mount_cache = {}
+        self.ensure_checked = {}
 
 
 _state = _State()

@@ -196,7 +196,7 @@ def test_get_shares_lists_active_for_member():
     act_as(app, OTHER_USER)
     body = client.get("/shares").json()
     assert body["items"] == [{"id": ROOT, "title": "Trip", "owner": TEST_USER, "mode": "ro",
-                              "mounted": False, "removed": False}]
+                              "mounted": True, "removed": False}]
 
 
 # ---- edits addressed to an item's old home ---------------------------------------
@@ -323,3 +323,36 @@ def test_replayed_cross_edge_move_answers_with_the_moved_item():
     again = client.patch(f"/todos/{cake}/reparent", json=body)  # the first response was lost
     assert first.status_code == 200 and again.status_code == 200, again.text
     assert again.json()["todo_id"] == cake and again.headers["X-Partition"] == f"shares/{ROOT}"
+
+
+# ---- ultra review fixes ------------------------------------------------------------
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+
+
+def test_upload_from_a_stale_device_stores_the_image_with_the_share():
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    act_as(app, TEST_USER)
+    r = client.post(f"/todos/{CHILD}/attachments", files={"file": ("p.png", PNG, "image/png")})  # no X-Share
+    assert r.status_code == 200, r.text
+    [a] = r.json()["attachments"]
+    got = client.get(f"/todos/{CHILD}/attachments/{a['id']}", headers=H)
+    assert got.status_code == 200 and got.content == PNG
+    assert blobstore.get_store().keys() == [f"shares/{ROOT}/todos/{CHILD}/{a['id']}"]
+
+
+def test_image_read_from_a_stale_device_follows_the_item():
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    act_as(app, TEST_USER)
+    a = client.post(f"/todos/{CHILD}/attachments", files={"file": ("p.png", PNG, "image/png")},
+                    headers=H).json()["attachments"][0]
+    assert client.get(f"/todos/{CHILD}/attachments/{a['id']}").status_code == 200  # no X-Share
+
+
+def test_add_to_my_list_works_before_the_first_tree_load():
+    make_share(TEST_USER, mode="rw", mount_for=(TEST_USER,))
+    act_as(app, OTHER_USER)
+    [item] = client.get("/shares").json()["items"]
+    assert item["mounted"] is True  # listing gives the caller their place, like a tree load
+    assert client.delete(f"/todos/{ROOT}").status_code == 204
+    assert client.patch(f"/todos/{ROOT}/undelete").status_code == 200

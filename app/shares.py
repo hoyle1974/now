@@ -160,6 +160,18 @@ def locate(todo_id: str) -> str | None:
     return None
 
 
+def check_partition_read(partition: str) -> Share | None:
+    """May the caller read in this partition? Their own always; a live share they belong to."""
+    from fastapi import HTTPException
+    email = tenant.current()
+    if partition == f"users/{email}":
+        return None
+    share = get(partition.split("/", 1)[1]) if partition.startswith(f"{SHARES}/") else None
+    if share is None or share.state != "active" or not is_member(share, email):
+        raise HTTPException(403, "share revoked")
+    return share
+
+
 def check_partition_write(partition: str) -> Share | None:
     """May the caller write in this partition? Their own always; a share if it is active,
     they are a member and may edit. Raises the HTTP refusal otherwise; returns the share."""
@@ -194,6 +206,12 @@ def ensure_mounts(email: str) -> list[dict]:
     the new ones that aren't their own, for the client to announce."""
     if not auth.sharing_enabled():
         return []
+    # Only when the share list changed since this person was last checked (a new share
+    # bumps it); every tree load would otherwise read every share record.
+    from app.db_firestore import _state
+    current = meta_rev()
+    if _state.ensure_checked.get(email) == current:
+        return []
     have = {m["todo_id"] for m in mounts(email)}
     new: list[dict] = []
     for share in active_shares():
@@ -208,6 +226,7 @@ def ensure_mounts(email: str) -> list[dict]:
             db.run_atomic(None, lambda m=mount: (db.create_todo(m), (200, None))[-1])
         if share.owner != email:
             new.append({"id": share.id, "title": root.title, "owner": share.owner})
+    _state.ensure_checked[email] = current
     return new
 
 

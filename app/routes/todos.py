@@ -75,15 +75,25 @@ def _housekeeping() -> None:
         log.exception("archiving old deleted todos failed")
     if not auth.sharing_enabled():
         return
+    # Each step on its own: one stuck share must not hold up the others or the sweep.
+    steps = [("own migration", lambda: migrate.resume_if_stale(tenant.partition()))]
     try:
-        migrate.resume_if_stale(tenant.partition())
-        for share in shares.visible_mounted(tenant.current()):
-            with tenant.as_partition(share.partition()):
-                migrate.resume_if_stale(share.partition())
-                db.maybe_archive_expired()
-        shares.sweep_daily()
+        mounted = shares.visible_mounted(tenant.current())
     except Exception:
-        log.exception("share housekeeping failed")
+        log.exception("listing shares for housekeeping failed")
+        mounted = []
+    for share in mounted:
+        def step(part=share.partition()):
+            with tenant.as_partition(part):
+                migrate.resume_if_stale(part)
+                db.maybe_archive_expired()
+        steps.append((share.partition(), step))
+    steps.append(("share sweep", shares.sweep_daily))
+    for name, run in steps:
+        try:
+            run()
+        except Exception:
+            log.exception("share housekeeping failed: %s", name)
 
 def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
     """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
@@ -331,9 +341,6 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
 
     return reply(*atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=True)))
 
-_MIGRATION_STATUS = {"crosses share boundary": 409, "not eligible": 400, "too large": 413,
-                     "parent not found": 404}
-
 def _reparent_across(todo_id: uuid.UUID, body: models.TodoReparent, here: str, target: str) -> Response:
     """Drag an item into or out of a share: its whole subtree changes partition. Needs edit
     rights on both sides (bind_partition already checked the source's)."""
@@ -358,7 +365,7 @@ def _reparent_across(todo_id: uuid.UUID, body: models.TodoReparent, here: str, t
     try:
         migrate.migrate_subtree(here, str(todo_id), target, kind="move", dst_parent=parent, index=body.index)
     except migrate.MigrationError as e:
-        raise HTTPException(_MIGRATION_STATUS.get(e.detail, 400), e.detail) from e
+        raise HTTPException(migrate.HTTP_STATUS.get(e.detail, 400), e.detail) from e
     shares.bind_partition(target, target_share)
     moved = db.get_todo(models.TodoId(todo_id))
     return reply(200, jsonable_encoder(moved))

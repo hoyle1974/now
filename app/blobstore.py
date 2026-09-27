@@ -24,6 +24,9 @@ class MemoryStore:
     def get(self, key: str) -> tuple[bytes, str] | None:
         return self._objects.get(key)
 
+    def exists(self, key: str) -> bool:
+        return key in self._objects
+
     def copy(self, src: str, dst: str) -> bool:
         """Copy one object; False when src is missing (already moved)."""
         if src not in self._objects:
@@ -62,6 +65,10 @@ class GcsStore:
         except NotFound:
             return None
         return data, blob.content_type or "application/octet-stream"
+
+    def exists(self, key: str) -> bool:
+        """Metadata only: never downloads the bytes."""
+        return self._bucket.get_blob(key) is not None
 
     def copy(self, src: str, dst: str) -> bool:
         """Server-side copy of one object; False when src is missing (already moved)."""

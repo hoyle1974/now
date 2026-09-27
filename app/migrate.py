@@ -40,6 +40,10 @@ class MigrationError(Exception):
         self.detail = detail
 
 
+# How each MigrationError.detail answers over HTTP (the share and reparent routes).
+HTTP_STATUS = {"crosses share boundary": 409, "not eligible": 400, "too large": 413, "parent not found": 404}
+
+
 def _now() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
@@ -72,6 +76,8 @@ def _validate(kind: Kind, src: str, dst: str, nodes: list[dict], dst_parent: str
         raise MigrationError("too large")
     if _is_share(dst) and any(not types.can_type(n.get("type"), "shareable") for n in nodes):
         raise MigrationError("crosses share boundary")
+    if kind == "move" and dst_parent is None and _is_share(dst):
+        raise MigrationError("crosses share boundary")  # a share has exactly one top-level item
     if kind == "move" and dst_parent is not None:
         parent = _todos(dst).document(dst_parent).get()
         if not parent.exists or (parent.to_dict() or {}).get("deleted"):
@@ -127,6 +133,17 @@ def migrate_subtree(src: str, root_id: str, dst: str, *, kind: Kind, dst_parent:
         "blobs": [f'{n["todo_id"]}/{a["id"]}' for n in nodes for a in n.get("attachments") or []],
     }
     _freeze(src, record)
+    # What moves is read again now that nothing else can write: an item or image added
+    # between the first read and the freeze moves too.
+    try:
+        nodes = _collect(src, root_id)
+        _validate(kind, src, dst, nodes, dst_parent)
+    except Exception:
+        _rev_ref(src).update({"migrating": firestore.DELETE_FIELD})
+        raise
+    record["ids"] = [n["todo_id"] for n in nodes]
+    record["blobs"] = [f'{n["todo_id"]}/{a["id"]}' for n in nodes for a in n.get("attachments") or []]
+    _rev_ref(src).update({"migrating.ids": record["ids"], "migrating.blobs": record["blobs"]})
     if kind == "share":
         shares.put(shares.Share(id=root_id, owner=tenant.current(), mode=mode or "rw", state="migrating"))
     _run(record, crash_after)
@@ -183,7 +200,7 @@ def _copy_blobs(record: dict) -> None:
     store = blobstore.get_store()
     for pair in record["blobs"]:
         dst_key = _blob_key(record["dst"], pair)
-        if store.get(dst_key) is None:
+        if not store.exists(dst_key):
             store.copy(_blob_key(record["src"], pair), dst_key)
 
 

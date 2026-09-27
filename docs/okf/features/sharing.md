@@ -4,7 +4,7 @@ title: Sharing between users
 description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
 resource: app/shares.py
 tags: [sharing, multi-user, data, sync]
-timestamp: 2026-09-27T10:00:00Z
+timestamp: 2026-09-27T14:00:00Z
 ---
 Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`; `SHARING_ENABLED=1 ./deploy.sh`, [deploy](../ops/deploy.md)). Client side: `web/share-ui.js` (permissions mirror, badges, edge crossing, the viewer's Sharing control), routing in `web/sync.js` ([sync](sync-model.md)), controls listed in the [UI inventory](ui-inventory.md).
 
@@ -13,7 +13,7 @@ Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/
 **Who may do what** is the fixture `tests/fixtures/share_rules.json` (owner / rw / ro / stranger / revoked × read, collapse, edit, check, add, delete, root delete, mode, unshare, move mount, drag across), checked against the routes by `tests/test_share_rules.py`.
 
 **Migration** (`app/migrate.py`, `migrate_subtree(src, root_id, dst, kind=share|unshare|move)`). One routine moves a subtree between partitions for share, unshare and dragging an item into or out of a share. Ids, versions and every field are kept. Steps, recorded in the source's `meta/rev` under `migrating` with a 2-minute lease:
-1. **frozen** — every other write to the source partition gets `db.Frozen` → 503 `migrating` (clients retry); the archive sweep skips it too.
+1. **frozen** — the subtree is read again after the lock is taken (so an item or image added just before it moves too), then every other write to the source partition gets `db.Frozen` → 503 `migrating` (clients retry); the archive sweep skips it too.
 2. **blobs** — attachment bytes copied to `{dst}/todos/...`.
 3. **copied** — documents copied in batches of 200; the root is placed at its destination (share: top of the share; unshare: where the owner's mount was; move: `dst_parent`/`index`).
 4. **switched** — source documents deleted (share: the root's own doc becomes the owner's mount, same place); destination siblings renumbered for a move; both revisions bumped; share state set (`active`, or `unshared` with `returned_to`); `shares_meta/rev` bumped for share/unshare.
@@ -37,7 +37,7 @@ Each step is safe to repeat. A run that dies leaves the freeze; when its lease h
 
 **Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
 
-`POST /todos` with `X-Share` is refused (400): a share has exactly one top-level item. A retried cross-edge move whose first answer was lost returns the item where it now is. A write that followed its item to a new partition schedules its heads-up there.
+`POST /todos` with `X-Share`, and a cross-edge move to a share's top level, are refused: a share has exactly one top-level item. An image uploaded or read by a device that addressed the item's old home follows it to its new partition (`routes/attachments._follow`). `GET /shares` first gives the caller a place for every share, like a tree load, so Add to my list always works. `ensure_mounts` only scans share records when `shares_meta/rev` moved since that person was last checked. Housekeeping runs each share's steps on its own, so one stuck share can't block the others. `POST /todos` with `X-Share` is refused (400): a share has exactly one top-level item. A retried cross-edge move whose first answer was lost returns the item where it now is. A write that followed its item to a new partition schedules its heads-up there.
 
 **Clear completed** works on your own list only: shared items are never cleared by it (the server's plan sees only your partition, and the client's `clearableIds` skips shared nodes to match).
 

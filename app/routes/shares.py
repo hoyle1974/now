@@ -9,8 +9,6 @@ from app import auth, db, migrate, models, shares, tenant
 
 router = APIRouter()
 
-_STATUS = {"crosses share boundary": 409, "not eligible": 400, "too large": 413}
-
 
 def _enabled() -> None:
     if not auth.sharing_enabled():
@@ -50,7 +48,7 @@ def share_todo(todo_id: uuid.UUID, body: models.ShareRequest) -> dict:
         migrate.migrate_subtree(tenant.partition(), str(todo_id), f"{shares.SHARES}/{todo_id}",
                                 kind="share", mode=body.mode)
     except migrate.MigrationError as e:
-        raise HTTPException(_STATUS.get(e.detail, 400), e.detail) from e
+        raise HTTPException(migrate.HTTP_STATUS.get(e.detail, 400), e.detail) from e
     return {"share": _view(shares.get(str(todo_id)))}
 
 
@@ -74,6 +72,7 @@ def list_shares() -> dict:
     """"Shared with me": every live share the caller can see, and whether it is in their list."""
     _enabled()
     email = tenant.current()
+    shares.ensure_mounts(email)  # like a tree load: every share you can see has a place in your list
     mine = {m["todo_id"]: m for m in shares.mounts(email)}
     items = []
     for share in shares.active_shares():

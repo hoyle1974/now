@@ -219,3 +219,42 @@ def test_archive_sweep_leaves_a_frozen_partition_alone():
     with pytest.raises(db.Frozen):
         db.archive_expired()
     assert ids["D"] in docs(ME)
+
+
+# ---- ultra review fixes ------------------------------------------------------------
+
+def test_items_added_between_snapshot_and_freeze_move_too(monkeypatch):
+    ids = trip()
+    real = migrate._freeze
+    added = {}
+
+    def late_child_then_freeze(src, record):
+        added["id"] = mk("late", ids["C2"], attachment="img2")  # lands before the lock
+        return real(src, record)
+    monkeypatch.setattr(migrate, "_freeze", late_child_then_freeze)
+    migrate.migrate_subtree(ME, ids["R"], f"shares/{ids['R']}", kind="share", mode="rw")
+    assert added["id"] in docs(f"shares/{ids['R']}")
+    assert added["id"] not in docs(ME)
+    assert blobstore.get_store().get(f"shares/{ids['R']}/todos/{added['id']}/img2") is not None
+
+
+def test_move_to_the_top_of_a_share_is_refused():
+    ids = trip()
+    migrate.migrate_subtree(ME, ids["R"], f"shares/{ids['R']}", kind="share", mode="rw")
+    P = mk("stray")
+    with pytest.raises(migrate.MigrationError) as e:
+        migrate.migrate_subtree(ME, P, f"shares/{ids['R']}", dst_parent=None, index=0, kind="move")
+    assert e.value.detail == "crosses share boundary"
+
+
+def test_resume_checks_blob_existence_without_downloading(monkeypatch):
+    ids = trip()
+    with pytest.raises(RuntimeError):
+        migrate.migrate_subtree(ME, ids["R"], f"shares/{ids['R']}", kind="share", mode="rw", crash_after="blobs")
+    past = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(minutes=5)).isoformat()
+    db.partition_ref(ME).collection("meta").document("rev").update(
+        {"migrating.lease_until": past, "migrating.step": "frozen"})
+    store = blobstore.get_store()
+    monkeypatch.setattr(store, "get", lambda key: pytest.fail("downloaded a blob to check it exists"))
+    assert migrate.resume_if_stale(ME) is True
+    assert store.exists(f"shares/{ids['R']}/todos/{ids['C1']}/img1")
