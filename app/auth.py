@@ -120,6 +120,47 @@ def require_user(request: Request) -> None:
     request.state.user = email
 
 
+_SHARE_ID_RE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
+# PATCH /todos/{id} may be a collapse (view state), which a read-only member may send;
+# the route decides once it has read the body (routes/todos.update_todo).
+_PATCH_TODO_RE = re.compile(r"^/todos/[^/]+$")
+
+
+async def bind_partition(request: Request) -> None:
+    """Runs after bind_user. With X-Share: <id>, the request works inside that share's
+    partition, after checking the caller may (403 "share revoked" / "read only"; 503
+    "migrating" while its data moves; 404 "sharing disabled" when the feature is off).
+    An unshared share's owner is sent back to their own partition, where its items went."""
+    from starlette.concurrency import run_in_threadpool
+
+    from app import shares
+    share_id = request.headers.get("x-share")
+    email = getattr(request.state, "user", None) or tenant.current_or_none()
+    if not share_id or not email:
+        return
+    if not sharing_enabled():
+        raise HTTPException(404, "sharing disabled")
+    if not _SHARE_ID_RE.match(share_id):
+        raise HTTPException(400, "invalid X-Share")
+    share = await run_in_threadpool(shares.get, share_id)
+    if share is None:
+        raise HTTPException(403, "share revoked")
+    if share.state == "unshared":
+        if share.returned_to == email:
+            return  # its items are back in the owner's own partition
+        raise HTTPException(403, "share revoked")
+    if share.state == "migrating":
+        raise HTTPException(503, "migrating")
+    if not shares.is_member(share, email):
+        raise HTTPException(403, "share revoked")
+    writing = request.method not in ("GET", "HEAD")
+    if writing and not shares.can_write(share, email) and not (
+            request.method == "PATCH" and _PATCH_TODO_RE.match(request.url.path)):
+        raise HTTPException(403, "read only")
+    tenant.set_partition(share.partition())
+    shares.bind(share)
+
+
 async def bind_user(request: Request) -> None:
     """Runs after require_user. Async on purpose: it executes in the request's own task,
     so the ContextVar it sets is copied into the worker thread that runs a sync route."""

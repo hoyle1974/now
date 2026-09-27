@@ -25,6 +25,10 @@ def reset(token: contextvars.Token) -> None:
     _current.reset(token)
 
 
+def current_or_none() -> str | None:
+    return _current.get()
+
+
 def current() -> str:
     email = _current.get()
     if not email:

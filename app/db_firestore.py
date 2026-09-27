@@ -266,8 +266,15 @@ def _next_order_idx(parent_id: str | None) -> int:
     return max((d["order_idx"] if d.get("order_idx") is not None else -1 for d in docs), default=-1) + 1
 
 
+def _stamp_editor(todo: models.Todo) -> None:
+    """Inside a share, remember who wrote last (the "Alex checked off …" line)."""
+    if tenant.partition().startswith(f"{SHARES}/"):
+        todo.last_edited_by = tenant.current()
+
+
 def create_todo(todo: models.Todo):
     """Create a new todo in Firestore"""
+    _stamp_editor(todo)
 
     # Roots are ordered like any other sibling list, so a new todo goes last.
     if todo.order_idx is None:
@@ -572,6 +579,7 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
 
     if bump_version:
         todo.version += 1
+        _stamp_editor(todo)
     if not todo.deleted:
         todo.deleted_at = None
     elif todo.deleted_at is None:
@@ -831,6 +839,7 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
             type=type,
             content=content,
         )
+        _stamp_editor(child_todo)
         _set(_todos().document(str(child_todo.todo_id)),
              db_firestore_helpers.todo_to_doc(child_todo))
         new_ids.append(child_todo.todo_id)

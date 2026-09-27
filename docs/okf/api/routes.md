@@ -4,7 +4,7 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-27T02:30:00Z
+timestamp: 2026-09-27T03:30:00Z
 ---
 | Route | Purpose |
 |---|---|
@@ -30,6 +30,8 @@ timestamp: 2026-09-27T02:30:00Z
 | `POST /internal/notify-todo` `{todo_id, due, user}` | Cloud Tasks only (same OIDC check); `user` names whose todo it is (absent on a task queued before this change → falls back to the owner; 400 if it names anyone outside `ALLOWED_EMAILS`); sends one 1-hour heads-up unless the todo changed, returns `{sent}` ([push reminders](../features/push-reminders.md)). |
 | `POST /internal/sync-calendar/{id}` `{calendar_id, user, client_session_id?}` | Cloud Tasks only (same OIDC check); fetches/parses/reconciles one `calendar` item's events ([calendar sync](../features/calendar-sync.md)). |
 | `DELETE /todos/{id}` | Soft delete (204). |
+
+**`X-Share: <share id>`** (any route, [sharing](../features/sharing.md)): run the request inside that share's partition (`auth.bind_partition`). Refusals, told apart by `detail`: 403 `share revoked` (no such share, not a member, or unshared and you aren't the owner it went back to — the owner is sent to their own partition instead), 403 `read only` (a write by a read-only member; a `collapsed`-only `PATCH` is allowed and goes to the member's own view state, not the share), 403 `owner only` (deleting or restoring the share root as a non-owner), 409 `crosses share boundary` (moving the share root inside the share), 503 `migrating`, 400 `invalid X-Share`, 404 `sharing disabled` while `SHARING_ENABLED` is off. Writes inside a share stamp `last_edited_by`.
 
 Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev` / `X-Rev`, for the partition named in `X-Partition`.
 

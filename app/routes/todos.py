@@ -9,8 +9,8 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 
-from app import db, models, next_up, tasks, types
-from app.routes.common import affected_refs, apply, reply, revs, saved
+from app import db, models, next_up, shares, tasks, tenant, types
+from app.routes.common import affected_refs, apply, check_share_root, reply, revs, saved
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -172,6 +172,12 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
     readonly_ok = bool(body.model_fields_set) and body.model_fields_set <= {"collapsed", "priority"}
     if view_only:
         if_match = None
+    share = shares.bound()
+    if share is not None:
+        if view_only:
+            return _collapse_shared(share, todo_id, bool(body.collapsed))
+        if not shares.can_write(share, tenant.current()):
+            raise HTTPException(403, "read only")
 
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, readonly_ok)
@@ -216,6 +222,16 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
     return saved(db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)), background,
                   schedule=not view_only)
 
+def _collapse_shared(share: shares.Share, todo_id: uuid.UUID, collapsed: bool) -> Response:
+    """Collapsing a shared node is the member's own view state, never a write to the share
+    (so a read-only member may do it, and one member's collapse is not everyone's)."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    shares.set_collapsed(tenant.current(), share.id, str(todo_id), collapsed)
+    todo.collapsed = collapsed
+    return reply(200, jsonable_encoder(todo))
+
 @router.post("/todos/{todo_id}/repeat", response_model=None)
 def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
                 body: models.TodoRepeatRequest | None = None,
@@ -241,6 +257,7 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
     """Move a todo under another parent (or to the top level) at an index."""
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, False)
+        check_share_root(todo, "move")
         _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
@@ -260,6 +277,7 @@ def delete_todo(todo_id: uuid.UUID,
     # the feed brings them back if the calendar is restored.
     def action(todo: models.Todo) -> None:
         _check_editable(todo, False)
+        check_share_root(todo, "delete")
         purge = db.calendar_purge_plan(todo)
         todo.deleted = True
         db.apply_calendar_purge(purge, todo)
@@ -274,6 +292,7 @@ def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
                            x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Restore a soft-deleted todo and its entire subtree (undo)"""
     def action(todo: models.Todo) -> dict:
+        check_share_root(todo, "undelete")
         restored, affected = db.undelete_todo(models.TodoId(todo_id))
         return {**jsonable_encoder(restored), "affected": affected_refs(affected)}
 
@@ -329,6 +348,7 @@ def move_todo(todo_id: uuid.UUID, direction: str,
 
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, False)
+        check_share_root(todo, "move")
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except db.MoveError as e:  # only the deliberate refusals; real failures propagate

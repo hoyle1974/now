@@ -9,7 +9,7 @@ from fastapi import BackgroundTasks, Header, HTTPException, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from app import db, models, tasks, tenant
+from app import db, models, shares, tasks, tenant
 
 # The txn id becomes a Firestore document id, so only accept a plain token
 # (clients send UUIDs). Firestore also reserves ids of the form __name__.
@@ -75,3 +75,15 @@ def saved(result: tuple, background: BackgroundTasks, todo_of: Callable[[dict], 
     if status == 200 and schedule:
         background.add_task(tasks.schedule_from_body, todo_of(body))
     return reply(*result)
+
+
+def check_share_root(todo: models.Todo, action: str) -> None:
+    """Inside a share, its root is special: only the owner deletes or restores it, and it
+    never moves within the share (where it sits is each member's own mount)."""
+    share = shares.bound()
+    if share is None or str(todo.todo_id) != share.id:
+        return
+    if action in ("delete", "undelete") and share.owner != tenant.current():
+        raise HTTPException(403, "owner only")
+    if action == "move":
+        raise HTTPException(409, "crosses share boundary")
