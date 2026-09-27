@@ -454,3 +454,32 @@ test("a revs map from fetchRev is handed to noteRemoteRevs", async () => {
   await f.check();
   assert.deepEqual(seen, [{ "users/me": 1, "shares/S": 2 }]);
 });
+
+// ---- follow-up checks after a calendar sync was started (2026-09-27) ------------------
+
+test("watch() checks at each delay, even inside the debounce window", async () => {
+  const { s, f } = setup({ serverRev: 6 });
+  f.watch([10000, 30000, 60000, 300000]);
+  assert.deepEqual(s.liveTimers().map((t) => t.ms), [10000, 30000, 60000, 300000]);
+  const first = s.liveTimers()[0];
+  first.live = false;
+  await first.fn();
+  assert.equal(s.revFetches, 1);
+  assert.equal(s.refreshes, 1, "the sync landed: refreshed");
+});
+
+test("watch() again replaces the pending follow-ups", () => {
+  const { s, f } = setup();
+  f.watch([10000, 30000]);
+  f.watch([10000, 30000]);
+  assert.equal(s.liveTimers().length, 2);
+});
+
+test("a follow-up while the page is hidden does nothing (returning checks anyway)", async () => {
+  const { s, f } = setup({ serverRev: 6, active: false });
+  f.watch([10000]);
+  const t = s.liveTimers()[0];
+  t.live = false;
+  await t.fn();
+  assert.equal(s.revFetches, 0);
+});

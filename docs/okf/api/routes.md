@@ -4,13 +4,13 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-27T16:00:00Z
+timestamp: 2026-09-27T19:00:00Z
 ---
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. `?deep=1` also pings Firestore (503 if it cannot). |
 | `POST /todos` | Create; optional `type` ([item types](../features/item-types.md)). |
-| `GET /todos/tree` | Full tree; adds derived `blocked`. Triggers the [archive](../features/trash-archive.md) sweep and, in the background, a [calendar sync](../features/calendar-sync.md) nudge for every stale `calendar` item in the tree. |
+| `GET /todos/tree` | Full tree; adds derived `blocked`, and `calendars_syncing` (true when this load started a calendar sync). Triggers the [archive](../features/trash-archive.md) sweep and, in the background, a [calendar sync](../features/calendar-sync.md) nudge for every stale `calendar` item in the tree. |
 | `GET /todos/rev` | Current revision (`rev`, own partition) and `revs` (one per partition, [sync](../features/sync-model.md)) + app `version` + `triggered_by` (the `client_session_id` behind the last rev-bumping write, or null); the cheap freshness check ([sync](../features/sync-model.md)). |
 | `GET /todos/next` | [Next up](../features/next-up.md). |
 | `GET /todos/trash?limit&offset&q` (paged, cap 100; one entry per trashed item, with `deleted_with`, `trashed_at`; returns `has_more`), `POST /todos/clear-completed`, `PATCH /todos/{id}/undelete` (also restores deleted ancestors) | [Trash](../features/trash-archive.md). |

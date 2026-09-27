@@ -746,3 +746,13 @@ def test_http_fetch_stops_a_runaway_feed(monkeypatch):
     monkeypatch.setattr(requests, "get", lambda *a, **k: Slow())
     with pytest.raises(calendar_sync.CalendarSyncError, match="took too long"):
         calendar_sync._http_fetch("https://example.com/cal.ics")
+
+
+def test_tree_says_when_it_started_a_calendar_sync(db_setup):
+    cal = models.Todo(title="Family", type="calendar")
+    db.create_todo(cal)
+    tree = client.get("/todos/tree", headers={"Authorization": "Bearer test"}).json()
+    assert tree["calendars_syncing"] is True  # never synced: stale
+    db.mark_calendar_synced(str(cal.todo_id), error=None)
+    tree = client.get("/todos/tree", headers={"Authorization": "Bearer test"}).json()
+    assert tree["calendars_syncing"] is False

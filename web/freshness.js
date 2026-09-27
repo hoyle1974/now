@@ -204,7 +204,23 @@
       await attempt();
     }
 
-    return { check, poke };
+    // Something will change on the server shortly (a calendar sync this load started):
+    // check again after each delay, skipping the debounce. Calling it again replaces the
+    // pending ones. A hidden page skips its turn: coming back checks anyway.
+    let watchTimers = [];
+    function watch(delaysMs) {
+      watchTimers.forEach((t) => timers.clearTimeout(t));
+      watchTimers = delaysMs.map((ms) => timers.setTimeout(async () => {
+        if (!isActive()) {
+          onLog("watch", `${ms}ms: page not visible, skipped`);
+          return;
+        }
+        onLog("watch", `${ms}ms follow-up`);
+        await check({ force: true });
+      }, ms));
+    }
+
+    return { check, poke, watch };
   }
 
   return { create };

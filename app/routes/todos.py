@@ -95,16 +95,20 @@ def _housekeeping() -> None:
         except Exception:
             log.exception("share housekeeping failed: %s", name)
 
-def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
+def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> bool:
     """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
     Runs as a background task (after the response is sent) so a slow/dead feed URL
     never adds latency to the read; the Cloud Task enqueue call itself is a fast
-    Cloud Tasks API call, not the ICS fetch."""
+    Cloud Tasks API call, not the ICS fetch. True when one of them is due, i.e. a sync
+    is starting: the client then checks back for its result (Freshness.watch)."""
     values = todos.values() if isinstance(todos, dict) else todos
     now = datetime.datetime.now(datetime.UTC)
+    started = False
     for t in values:
         if t.type == "calendar":
             background.add_task(tasks.enqueue_calendar_sync, str(t.todo_id), t.last_synced_at, now)
+            started = started or tasks.calendar_stale(t.last_synced_at, now)
+    return started
 
 def _member_tree(background: BackgroundTasks) -> tuple[int, dict[str, int], list[models.Todo], dict[str, models.Todo]]:
     """The caller's own tree with every share they can see spliced in at their mounts:
@@ -144,7 +148,7 @@ def get_tree(background: BackgroundTasks) -> dict:
     # older than the tree we return, so the worst case is one redundant refresh.
     new_shares = shares.ensure_mounts(tenant.current())
     rev, all_revs, roots, todosById = _member_tree(background)
-    _nudge_stale_calendars(todosById, background)
+    syncing = _nudge_stale_calendars(todosById, background)
 
     return {
         "rev": rev,
@@ -152,6 +156,8 @@ def get_tree(background: BackgroundTasks) -> dict:
         "roots": roots,
         "todosById": todosById,
         "new_shares": new_shares,
+        # A calendar sync starts after this response; the client looks again a few times.
+        "calendars_syncing": syncing,
     }
 
 TRASH_PAGE_MAX = 100  # a hard cap on one page, whatever the client asks for

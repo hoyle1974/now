@@ -4,7 +4,7 @@ title: Calendar item sync (inbound ICS)
 description: A `calendar` item mirrors an external ICS feed's events into `calendar_event` children, kept fresh by a staleness-triggered Cloud Task.
 resource: app/calendar_jobs.py
 tags: [calendar, ics, sync, cloud-tasks]
-timestamp: 2026-09-27T16:00:00Z
+timestamp: 2026-09-27T19:00:00Z
 ---
 This is the *inbound* counterpart to the outbound [calendar feed](calendar-feed.md) (which exports now's own todos as ICS for external calendar apps to subscribe to). Here, an external ICS feed (e.g. a Google Calendar) is imported *into* now as a `calendar` item and its child `calendar_event` items ([item types](item-types.md)).
 
@@ -40,3 +40,5 @@ All-day events land at midnight ([due time](due-time.md) convention). `due_date`
 **Tests.** `tests/test_calendar_sync.py` covers parsing/diffing (next-occurrence-only series, stepping forward once an occurrence ends, EXDATE and moved instances, the long series window, all-day series, details/attendees/cancelled via `fixtures/calendar/details.ics` and `series.ics`, `describe_rrule`), storing and updating the new fields in place, hard deletes (sync removal, deleting a calendar or a list holding one, PATCH `deleted`, undelete restoring the calendar empty, the stale-event sweep incl. the archive), the home-timezone window date, `apply_calendar_sync`/`mark_calendar_synced`, `run_calendar_sync` (success, no-URL no-op, fetch-failure-keeps-existing-events, via a dependency-injected `fetch`), the `POST /todos/{id}/sync` route (202/400, and that it threads `client_session_id`) and the tree-read nudge. Manually verified `_http_fetch` against a real Google Calendar ICS URL: valid ICS, 115 events parsed in the 60-day window.
 
 **Limits and cache (2026-09-27).** A feed download stops past 50 MB (`MAX_FEED_BYTES`) or 60 s in all (`MAX_FETCH_SECONDS`) — generous on purpose (a 2 MB cap rejected a real Google feed). `mark_calendar_synced` writes without a revision bump, so it drops the partition's cached tree; otherwise every tree load saw the old sync time and queued another sync (hourly instead of every 6 hours). `.calendar-url` is in `.gcloudignore`, so the token never reaches the Cloud Build staging bucket. Not done: pinning the resolved address against DNS rebinding (the metadata host is blocked by name and address, and every redirect hop is re-checked).
+
+**Seeing the result.** The sync runs after the tree response, so the open page would not hear about it until the next focus/visibility/pull/pill. The tree response says `calendars_syncing: true` when it started one (a calendar was stale, `tasks.calendar_stale`), and the client then checks for changes at 10 s, 30 s, 1 min and 5 min (`Freshness.watch`, `CALENDAR_FOLLOW_UPS_MS` in `web/tree-view.js`): one revision read each, skipped while the page is hidden, only on loads that started a sync.

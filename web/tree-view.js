@@ -166,6 +166,9 @@ function placeOpenMenu() {
 // finished while the fetch was in flight, the snapshot may predate it, so wait
 // for the outbox to settle and read again instead of painting stale state.
 let treeLoadedOnce = false;
+// When a list load starts a calendar sync: check back after 10 s, 30 s, 1 min and 5 min
+// (one small read each; only on loads that started a sync, ~every 6 hours per calendar).
+const CALENDAR_FOLLOW_UPS_MS = [10000, 30000, 60000, 300000];
 
 async function loadAndRender() {
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -183,6 +186,8 @@ async function loadAndRender() {
       engine.rebuild(tree);
       if (!treeLoadedOnce) announceNewShares(tree.newShares);
       treeLoadedOnce = true;
+      // This load started a calendar sync on the server: look for its result.
+      if (tree.calendarsSyncing) freshness.watch(CALENDAR_FOLLOW_UPS_MS);
       // The ranking is computed from the same data, so keep it in step.
       if (activeTab === "next") reportedFailure(refreshNext());
       return;

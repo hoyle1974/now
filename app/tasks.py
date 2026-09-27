@@ -173,6 +173,15 @@ def create_calendar_sync_task(calendar_id: str, client_session_id: str | None = 
     return True
 
 
+def calendar_stale(last_synced_at: datetime.datetime | None, now_utc: datetime.datetime,
+                   threshold: datetime.timedelta = CALENDAR_STALE_AFTER) -> bool:
+    """Due for a sync: never synced, or last synced `threshold` or more ago."""
+    if last_synced_at is not None and last_synced_at.tzinfo is None:
+        # Firestore round-trips it without tzinfo (mark_calendar_synced stores naive UTC).
+        last_synced_at = last_synced_at.replace(tzinfo=_UTC)
+    return last_synced_at is None or now_utc - last_synced_at >= threshold
+
+
 def enqueue_calendar_sync(calendar_id: str, last_synced_at: datetime.datetime | None,
                           now_utc: datetime.datetime, threshold: datetime.timedelta = CALENDAR_STALE_AFTER,
                           client_session_id: str | None = None, manual: bool = False,
@@ -182,11 +191,7 @@ def enqueue_calendar_sync(calendar_id: str, last_synced_at: datetime.datetime | 
     always calls this with last_synced_at forced stale). Never raises: the digest
     and the tree-load nudge call it and must not fail because of a calendar."""
     try:
-        if last_synced_at is not None and last_synced_at.tzinfo is None:
-            # Firestore round-trips it without tzinfo (mark_calendar_synced stores naive UTC).
-            last_synced_at = last_synced_at.replace(tzinfo=_UTC)
-        stale = last_synced_at is None or now_utc - last_synced_at >= threshold
-        if not stale:
+        if not calendar_stale(last_synced_at, now_utc, threshold):
             return False
         if create:
             return create(calendar_id, client_session_id)
