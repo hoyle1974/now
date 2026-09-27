@@ -4,9 +4,9 @@ title: Sharing between users
 description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
 resource: app/shares.py
 tags: [sharing, multi-user, data, sync]
-timestamp: 2026-09-27T06:00:00Z
+timestamp: 2026-09-27T10:00:00Z
 ---
-Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`).
+Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`; `SHARING_ENABLED=1 ./deploy.sh`, [deploy](../ops/deploy.md)). Client side: `web/share-ui.js` (permissions mirror, badges, edge crossing, the viewer's Sharing control), routing in `web/sync.js` ([sync](sync-model.md)), controls listed in the [UI inventory](ui-inventory.md).
 
 **Model.** Sharing an item moves it and its whole subtree out of the owner's partition into its own partition `shares/{id}` ([Firestore](../data/firestore.md)), where `id` is the root's todo id. No request ever reads another user's partition. Every member (the owner too) has a `mount` todo with the same id in their own partition ([item types](item-types.md)): it holds only where that person placed it. Audience is everyone on the deployment (`members: "all"`; a list of emails later). Mode is `ro` (strictly view-only) or `rw`. Only `shareable` types (`todo`, `list`, `project`, `note`) may be in a share: never a calendar, an event or a mount.
 
@@ -36,3 +36,7 @@ Each step is safe to repeat. A run that dies leaves the freeze; when its lease h
 **Cleanup** (on tree loads, after the response): each visible mounted share gets the daily archive sweep (claimed per partition) and a stale migration is finished; once a day per process `shares.sweep` deletes unshared tombstones older than 30 days (with their `txn_log`) and ends a share whose root is gone (archived). `prune_txn_log` covers share partitions too.
 
 **Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
+
+**Clear completed** works on your own list only: shared items are never cleared by it (the server's plan sees only your partition, and the client's `clearableIds` skips shared nodes to match).
+
+**Deviations from the design spec** (decided while building): the migration freeze covers the whole source partition for its few seconds, not only the moving ids; heads-up tasks stay one per todo and fan out to members in the handler; the Sharing control lives in the item's viewer (it applies at once, online only) rather than the Edit sheet.

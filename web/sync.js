@@ -106,7 +106,11 @@
   function clearableIds(model) {
     const memo = new Map();
     // [everything beneath is done, a todo is here or beneath]; a container's own done means nothing.
+    // A shared item stands in for our mount of it (the server's plan only sees our own
+    // partition, where a mount has no children and no checkbox): never cleared, never
+    // a reason to keep its container.
     const check = (node) => {
+      if (node.share) return [true, false];
       if (!memo.has(node.todo_id)) {
         memo.set(node.todo_id, [false, false]);
         const kids = node.child_ids.map((c) => model.todosById.get(c)).filter(Boolean).map(check);
@@ -122,7 +126,7 @@
       const node = pending.pop();
       const [allDone, hasTodo] = check(node);
       if (allDone && hasTodo) out.push(node.todo_id);
-      else node.child_ids.forEach((c) => { const n = model.todosById.get(c); if (n) pending.push(n); });
+      else if (!node.share) node.child_ids.forEach((c) => { const n = model.todosById.get(c); if (n) pending.push(n); });
     }
     return out;
   }

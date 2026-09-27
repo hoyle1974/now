@@ -1370,3 +1370,14 @@ test("an undelete for an item not in the model can name its share (trash restore
   await h.engine.flush();
   assert.equal(h.calls[0].headers["X-Share"], "S");
 });
+
+test("clear completed never touches shared items (the server clears only your own list)", () => {
+  const model = Sync.createModel();
+  const tree = sharedTree();
+  tree.todosById.get("c").done = true;
+  tree.todosById.set("mine", todo("mine", { done: true }));
+  tree.roots.push(tree.todosById.get("mine"));
+  model.roots = tree.roots;
+  model.todosById = tree.todosById;
+  assert.deepEqual(Sync.clearableIds(model), ["mine"]);
+});

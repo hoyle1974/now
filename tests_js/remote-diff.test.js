@@ -51,3 +51,12 @@ test("our own edits in a share read as before", () => {
   const after = tree({ id: "x", title: "T", done: true, version: 2, last_edited_by: "me@x.com" });
   assert.equal(sayAs("me@x.com", before, after), "“T” was checked off on another device");
 });
+
+test("a share arriving or leaving with its children is still one named line", () => {
+  const share = { id: "S", owner: "sam@x.com", mode: "rw" };
+  const trip = tree({ id: "S", title: "Portland trip", share, share_root: true },
+    { id: "c1", share }, { id: "c2", share });
+  assert.equal(sayAs("me@x.com", tree({ id: "mine" }), new Map([...tree({ id: "mine" }), ...trip])),
+    "sam shared “Portland trip” with everyone");
+  assert.equal(sayAs("me@x.com", trip, tree()), "sam stopped sharing “Portland trip”");
+});

@@ -491,6 +491,8 @@ svg {
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  font-size: 13px;
+  color: var(--label-2);
 }
 
 .todo-check input:disabled {

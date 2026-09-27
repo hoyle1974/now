@@ -4,12 +4,16 @@ title: Multi-user (family) operations
 description: Adding or removing a person from ALLOWED_EMAILS, migrating existing data into the per-user layout, and what stays owner-only.
 resource: app/auth.py
 tags: [multi-user, migration, auth, runbook]
-timestamp: 2026-09-22T05:37:00Z
+timestamp: 2026-09-27T10:00:00Z
 ---
 One deployment can serve a small family: each Google account in `ALLOWED_EMAILS` gets
 its own fully isolated Firestore/storage partition ([data model](../data/firestore.md),
-[stack](../architecture/stack.md)). There is still no sharing between them, no roles, no
-invite UI — the list is edited by redeploying, not through the app. See
+[stack](../architecture/stack.md)). An item can be shared with everyone on the deployment
+([sharing](../features/sharing.md)); still no roles and no invite UI — the list is edited by
+redeploying, not through the app. A person added later gets every existing share in their
+list on their first load; a person removed loses access to shares at once (membership is
+`ALLOWED_EMAILS`), and their own shares stay readable by the others until the owner's data
+is dealt with by hand. See
 [principles](../principles.md) for the cost note (reads scale with the number of
 allowed users; fine at family scale, must be watched at anything bigger).
 

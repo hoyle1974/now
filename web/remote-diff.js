@@ -46,19 +46,19 @@
   function describe({ added, removed, changed }, me = null) {
     const total = added.length + removed.length + changed.length;
     if (total === 0) return "";
-    if (total > 1) return `${total} changes from another device`;
     const other = (email) => email && me && email !== me;
+    // A share coming or going brings its whole subtree: one line about the share.
+    const arrived = added.find((a) => a.shareRoot && other(a.owner));
+    if (arrived) return `${nameOf(arrived.owner)} shared “${short(arrived.title)}” with everyone`;
+    const left = removed.find((r) => r.shareRoot && other(r.owner));
+    if (left) return `${nameOf(left.owner)} stopped sharing “${short(left.title)}”`;
+    if (total > 1) return `${total} changes from another device`;
     if (added.length) {
       const a = added[0];
-      if (a.shareRoot && other(a.owner)) return `${nameOf(a.owner)} shared “${short(a.title)}” with everyone`;
       if (other(a.by)) return `${nameOf(a.by)} added “${short(a.title)}”`;
       return `New from another device: “${short(a.title)}”`;
     }
-    if (removed.length) {
-      const r = removed[0];
-      if (r.shareRoot && other(r.owner)) return `${nameOf(r.owner)} stopped sharing “${short(r.title)}”`;
-      return `“${short(r.title)}” was removed on another device`;
-    }
+    if (removed.length) return `“${short(removed[0].title)}” was removed on another device`;
     const c = changed[0];
     if (other(c.by)) {
       if (c.done && !c.wasDone) return `${nameOf(c.by)} checked off “${short(c.title)}”`;
