@@ -1363,3 +1363,10 @@ test("an X-Partition naming a new home re-points the queued ops for that item", 
   assert.equal(h.calls.length, 2);
   assert.equal(h.calls[1].headers["X-Share"], "T");
 });
+
+test("an undelete for an item not in the model can name its share (trash restore)", async () => {
+  const h = harness({ script: [ok({ ...todo("gone"), affected: [] })] });
+  h.engine.enqueue({ kind: "undelete", target_id: "gone", share: "S" });
+  await h.engine.flush();
+  assert.equal(h.calls[0].headers["X-Share"], "S");
+});

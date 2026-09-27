@@ -88,5 +88,30 @@
     return edge.into ? `Everyone will see ${title}.` : `This removes ${title} for everyone else.`;
   }
 
-  return { can, editable, badge, crossesEdge, dropAllowed, crossingMessage, localPart };
+  // The viewer's Sharing control: {visible, value: "private"|"ro"|"rw", disabledReason}.
+  // Offered on your own share's root, and on a synced item of your own whose subtree is all
+  // shareable types (isShareable(node)) and holds no share; never on a node inside a share.
+  function sharingRow(model, node, me, online, isShareable) {
+    const hidden = { visible: false, value: null, disabledReason: null };
+    if (!node || String(node.todo_id).startsWith("tmp:")) return hidden;
+    let value;
+    if (node.share) {
+      if (!node.share_root || node.share.owner !== me) return hidden;
+      value = node.share.mode;
+    } else {
+      const pending = [node];
+      while (pending.length) {
+        const n = pending.pop();
+        if (n.share || !isShareable(n)) return hidden;
+        for (const c of n.child_ids || []) {
+          const child = model.todosById.get(c);
+          if (child) pending.push(child);
+        }
+      }
+      value = "private";
+    }
+    return { visible: true, value, disabledReason: online ? null : "Go online to change sharing" };
+  }
+
+  return { can, editable, badge, crossesEdge, dropAllowed, crossingMessage, sharingRow, localPart };
 });

@@ -154,6 +154,7 @@ document.getElementById("event-log-copy").addEventListener("click", async (event
   toggle.addEventListener("click", () => {
     tools.hidden = !tools.hidden;
     toggle.setAttribute("aria-expanded", String(!tools.hidden));
+    if (!tools.hidden) reportedFailure(SharedWithMe.refresh());
   });
   // Tapping anywhere outside the panel (or Escape) folds it away again, so it
   // never leaves the list pushed down.
@@ -346,3 +347,57 @@ function reactToDoneCount(n, todo) {
     window.Mascot.react("Done. See you next time! \ud83d\udd01", { key: "repeat", cooldown: 30000, delay: 1600 });
   }
 }
+
+
+// "Shared with me" in the More panel: every list shared on this app, and whether it is in
+// yours. Removing one only takes it out of your list; Add puts it back where it was
+// (docs/okf/features/sharing.md). Hidden while sharing is off (GET /shares is 404).
+const SharedWithMe = (() => {
+  async function act(id, removed) {
+    let response;
+    try {
+      response = removed
+        ? await fetch(`${API_BASE}/${id}/undelete`, { method: "PATCH" })
+        : await fetch(`${API_BASE}/${id}`, { method: "DELETE" });
+    } catch (e) {
+      showNotice({ level: "error", message: "You seem to be offline." });
+      return;
+    }
+    if (!response.ok) {
+      showNotice({ level: "error", message: `Couldn't change your list (${response.status}).` });
+      return;
+    }
+    await loadAndRender();
+    renderTree();
+    await refresh();
+  }
+
+  async function refresh() {
+    const row = document.getElementById("shares-row");
+    const list = document.getElementById("shares-list");
+    if (!row || !list) return;
+    let items = null;
+    try {
+      const response = await fetch("/shares", { cache: "no-store" });
+      items = response.ok ? (await response.json()).items : null;
+    } catch (e) { /* offline: leave it as it was */ return; }
+    row.hidden = !items || !items.length;
+    list.innerHTML = "";
+    for (const item of items || []) {
+      const mine = item.owner === myEmail();
+      const entry = DOM.el("span", "share-entry", null);
+      entry.append(DOM.el("span", "share-entry-title",
+        `${item.title} · ${mine ? "yours" : ShareUI.localPart(item.owner)} · ${item.mode === "ro" ? "view" : "edit"}`));
+      if (!mine) {
+        const inList = item.mounted && !item.removed;
+        const btn = DOM.button(inList ? "Remove" : "Add to my list", "log-toggle",
+          () => reportedFailure(act(item.id, !inList)));
+        btn.title = inList ? "Take it out of your list (it stays shared)" : "Put it back in your list";
+        entry.append(btn);
+      }
+      list.append(entry);
+    }
+  }
+
+  return { refresh };
+})();

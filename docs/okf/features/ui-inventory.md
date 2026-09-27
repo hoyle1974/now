@@ -3,7 +3,7 @@ type: Feature
 title: UI feature inventory
 description: Every user-facing capability and where to reach it; the checklist to run before shipping a UI change.
 tags: [ui, checklist, regression]
-timestamp: 2026-09-27T08:00:00Z
+timestamp: 2026-09-27T09:00:00Z
 ---
 Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this list. When a capability is added or moved, update this file in the same commit; removing one needs the user's explicit yes. Run through it in Chrome ([local browser testing](../ops/local-browser-testing.md)) before deploying UI changes.
 
@@ -17,6 +17,7 @@ Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this l
 - A **`calendar_event` row** (synced-in, [calendar sync](calendar-sync.md)) shows a repeat chip with the series' rule when it repeats (one row per series: its next occurrence). Its viewer shows When (start – end), Repeats, Location, Video call (Join call link), Guests (response summary and each guest's response) and Notes, plus a **Priority** select (High / Normal / Low) that applies at once. The row is read-only: no checkbox, no swipe-to-complete, no drag/reorder; its Edit button is absent from both the row menu and its viewer, and Delete/Move/Type are absent from the row menu too — tap still opens the read-only viewer, and Copy with subtasks still works. A **`calendar` row** never shows Add item/Add several in its row menu and refuses a dragged-in child (its `calendar_event` children arrive only through sync, never a manual add) — see [item types](item-types.md).
 
 - A **shared item** ([sharing](sharing.md)): its root row shows a chip "Shared · can edit" / "Shared · read-only" (plus the owner's name when it isn't yours); every row inside it shows a small shared icon after the title; the viewer adds a **Shared** fact (Everyone can view / edit · whose). In a **read-only** share the checkbox is disabled, swipe right/left, double-tap rename, drag, Add item/Add several, Edit/Type, Move and Delete are not offered, and the viewer has no Edit button or image add/remove — tap to view, fold/unfold (your own view) and Copy with subtasks still work, and the root row still moves (Move up/down, drag), since where it sits is yours. Dragging an item into or out of a share asks first ("Everyone will see “x”." / "This removes “x” for everyone else."); drags a share doesn't allow are refused with a toast. Next up rows from a share show a "Shared" chip.
+- **Viewer → Sharing** (select: Private / Everyone can view / Everyone can edit): shown on your own items whose subtree has only todos, lists, projects and notes (no calendar, no share inside), and on the root of a share you own; applies at once, online only ("Go online to change sharing" otherwise), Private asks "Stop sharing “x”? It disappears for everyone else." first. Mascot lines: "sam shared “x” with everyone", "sam stopped sharing “x”", and changes in a share name who made them ("alex checked off “x”").
 
 **Row menu `...`**: Add item, Add several, **Edit**, **Type: X** (panel, applies at once, Undo), Copy with subtasks (outline to clipboard), Move up, Move down, Delete (Undo). On a shared item's root the Delete entry reads **Remove from my list** when it isn't yours (only your list loses it; Undo toast "Removed from your list") and **Delete for everyone** when it is. Add item/Add several are left out under a `calendar` row; Edit/Type/Move/Delete are left out on a `calendar_event` row (both per [item types](item-types.md)'s `allowsUserChildren`/`editable` flags).
 
@@ -26,9 +27,9 @@ Rule (also in `CLAUDE.md`): a refactor must not silently drop anything on this l
 
 **Search**: titles, links, colors, note bodies, plus matches in the trash (opens the Trash page and that item, [trash](trash-archive.md)).
 
-**Trash** (footer link): every trashed item incl. those inside a deleted parent (except synced calendar events, which are never trashed: a deleted calendar comes back empty and re-syncs), type icon, tap for read-only view, Undelete (restores the parent chain), Load more. **Clear N completed** (footer, Undo).
+**Trash** (footer link): every trashed item incl. those inside a deleted parent (except synced calendar events, which are never trashed: a deleted calendar comes back empty and re-syncs), type icon, tap for read-only view, Undelete (restores the parent chain), Load more. Items from a share you can edit are listed too, noted "from “x” (shared)", and restore into the share. **Clear N completed** (footer, Undo).
 
-**More panel**: event log, reminders on/off, calendar feed (copy / subscribe) — **owner only**: the More panel shows no calendar link at all for any other signed-in email ([calendar feed](calendar-feed.md)), accent theme, completion sound, mascot (greets with overdue / due-today counts; his pupils glance around, follow phone tilt when shake is on, and look at where you tap him), shake, badge.
+**More panel**: **Shared** (every list shared on this app: title · whose · view/edit, with **Remove** / **Add to my list** for other people's; hidden when there are none or sharing is off), event log, reminders on/off, calendar feed (copy / subscribe) — **owner only**: the More panel shows no calendar link at all for any other signed-in email ([calendar feed](calendar-feed.md)), accent theme, completion sound, mascot (greets with overdue / due-today counts; his pupils glance around, follow phone tilt when shake is on, and look at where you tap him), shake, badge.
 
 **Toasts**: Undo after delete / clear completed / type change; errors stay until tapped; "offline, couldn't load your list".
 

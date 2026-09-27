@@ -13,7 +13,10 @@
   // doesn't bump the version and isn't worth announcing.
   function snapshot(todosById) {
     const out = new Map();
-    for (const [id, n] of todosById) out.set(id, { version: n.version, done: !!n.done, title: n.title });
+    for (const [id, n] of todosById) {
+      out.set(id, { version: n.version, done: !!n.done, title: n.title, by: n.last_edited_by || null,
+        shareRoot: !!n.share_root, owner: n.share ? n.share.owner : null });
+    }
     return out;
   }
 
@@ -36,14 +39,32 @@
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
   }
 
-  // The line the mascot says, or "" when nothing changed.
-  function describe({ added, removed, changed }) {
+  const nameOf = (email) => String(email).split("@")[0];
+
+  // The line the mascot says, or "" when nothing changed. `me` (the signed-in email)
+  // lets a change in a shared item name the person who made it.
+  function describe({ added, removed, changed }, me = null) {
     const total = added.length + removed.length + changed.length;
     if (total === 0) return "";
     if (total > 1) return `${total} changes from another device`;
-    if (added.length) return `New from another device: “${short(added[0].title)}”`;
-    if (removed.length) return `“${short(removed[0].title)}” was removed on another device`;
+    const other = (email) => email && me && email !== me;
+    if (added.length) {
+      const a = added[0];
+      if (a.shareRoot && other(a.owner)) return `${nameOf(a.owner)} shared “${short(a.title)}” with everyone`;
+      if (other(a.by)) return `${nameOf(a.by)} added “${short(a.title)}”`;
+      return `New from another device: “${short(a.title)}”`;
+    }
+    if (removed.length) {
+      const r = removed[0];
+      if (r.shareRoot && other(r.owner)) return `${nameOf(r.owner)} stopped sharing “${short(r.title)}”`;
+      return `“${short(r.title)}” was removed on another device`;
+    }
     const c = changed[0];
+    if (other(c.by)) {
+      if (c.done && !c.wasDone) return `${nameOf(c.by)} checked off “${short(c.title)}”`;
+      if (!c.done && c.wasDone) return `${nameOf(c.by)} reopened “${short(c.title)}”`;
+      return `${nameOf(c.by)} updated “${short(c.title)}”`;
+    }
     if (c.done && !c.wasDone) return `“${short(c.title)}” was checked off on another device`;
     if (!c.done && c.wasDone) return `“${short(c.title)}” was reopened on another device`;
     return `“${short(c.title)}” was updated on another device`;

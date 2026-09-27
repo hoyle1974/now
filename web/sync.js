@@ -665,7 +665,8 @@
 
     // Returns the target id (the new temp id for a create), or false if the
     // op can't apply locally.
-    function enqueue({ kind, target_id, payload = {} }) {
+    // `share`: where an item that isn't in the model lives (a trash restore of a shared item).
+    function enqueue({ kind, target_id, payload = {}, share = undefined }) {
       const op = {
         txn_id: uuid(), kind,
         target_id: OPS[kind]?.mintsTarget ? "tmp:" + uuid() : resolve(target_id),
@@ -680,6 +681,7 @@
       // Where it goes is decided now, before the local change moves things around.
       const target = OPS[kind]?.mintsTarget ? null : nodeOf(op.target_id);
       Object.assign(op, routeFor(kind, target, me()));
+      if (!target && share) op.share = share;
       if (kind === "reparent") {
         const parent = op.payload.parent_id ? model.todosById.get(op.payload.parent_id) : null;
         // A mount moves within our own list: only a target inside a share needs saying (refused).

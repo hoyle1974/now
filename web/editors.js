@@ -126,6 +126,42 @@ function renderTypePanel(todo) {
 // Full-screen read-only look at one todo; Edit hands off to the edit sheet.
 // trashed ({ deleted_with, trashed_at, onClose, onRestore }): the item is in the trash, so it is
 // shown as it was (no editing, no live links or images) with Undelete instead of Edit.
+// Share an item (and everything under it) with everyone on this app, or change / stop it.
+// Applies at once and only online: the server moves the data (docs/okf/features/sharing.md).
+function renderSharingControl(todo) {
+  const state = ShareUI.sharingRow(model, todo, myEmail(), navigator.onLine !== false,
+    (n) => Types.can(n, "shareable"));
+  if (!state.visible) return null;
+  const select = document.createElement("select");
+  select.setAttribute("aria-label", "Sharing");
+  for (const [value, label] of [["private", "Private"], ["ro", "Everyone can view"], ["rw", "Everyone can edit"]]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  }
+  select.value = state.value;
+  select.disabled = Boolean(state.disabledReason);
+  select.addEventListener("change", () => {
+    const value = select.value;
+    select.value = state.value; // shown again once the server has done it
+    reportedFailure(changeSharing(todo.todo_id, value));
+  });
+  const block = document.createElement("div");
+  block.className = "field-group";
+  const label = document.createElement("p");
+  label.className = "sheet-label";
+  label.textContent = "Sharing";
+  block.append(label, select);
+  if (state.disabledReason) {
+    const why = document.createElement("p");
+    why.className = "sheet-subtitle";
+    why.textContent = state.disabledReason;
+    block.append(why);
+  }
+  return block;
+}
+
 function renderViewer(todo, counts, trashed = null) {
   const add = (parent, tag, className, text) => {
     const node = document.createElement(tag);
@@ -226,6 +262,11 @@ function renderViewer(todo, counts, trashed = null) {
     label.textContent = "Priority";
     block.append(label, select);
     body.appendChild(block);
+  }
+
+  if (!trashed) {
+    const sharing = renderSharingControl(todo);
+    if (sharing) body.appendChild(sharing);
   }
 
   if (todo.type === "calendar" && !trashed) {

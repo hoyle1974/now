@@ -85,3 +85,48 @@ test("crossing confirm text names the item", () => {
   assert.equal(ShareUI.crossingMessage(m, "c", null), "This removes “Milk” for everyone else.");
   assert.equal(ShareUI.crossingMessage(m, "c", "S"), null);
 });
+
+// ---- the Sharing control in the viewer ----------------------------------------------
+
+function shareModel() {
+  const S = { id: "S", owner: ME, mode: "rw" };
+  const O = { id: "O", owner: "owner@x.com", mode: "rw" };
+  const nodes = [
+    { todo_id: "trip", type: "list", child_ids: ["t1"] },
+    { todo_id: "t1", type: "todo", parent_id: "trip", child_ids: [] },
+    { todo_id: "cals", type: "list", child_ids: ["cal"] },
+    { todo_id: "cal", type: "calendar", parent_id: "cals", child_ids: [] },
+    { todo_id: "S", type: "list", share: S, share_root: true, child_ids: ["s1"] },
+    { todo_id: "s1", type: "todo", parent_id: "S", share: S, child_ids: [] },
+    { todo_id: "O", type: "list", share: O, share_root: true, child_ids: [] },
+    { todo_id: "holder", type: "list", child_ids: ["O"] },
+    { todo_id: "tmp:1", type: "todo", child_ids: [] },
+  ];
+  return { todosById: new Map(nodes.map((n) => [n.todo_id, n])) };
+}
+const shareable = (n) => ["todo", "list", "project", "note"].includes(n.type);
+const row = (id, online = true) => {
+  const m = shareModel();
+  return ShareUI.sharingRow(m, m.todosById.get(id), ME, online, shareable);
+};
+
+test("sharing row: private items of plain types can be shared", () => {
+  assert.deepEqual(row("trip"), { visible: true, value: "private", disabledReason: null });
+});
+
+test("sharing row: your own share shows its mode; someone else's and nodes inside a share show nothing", () => {
+  assert.deepEqual(row("S"), { visible: true, value: "rw", disabledReason: null });
+  assert.equal(row("O").visible, false);
+  assert.equal(row("s1").visible, false);
+});
+
+test("sharing row: hidden for calendars, subtrees holding one or a share, and unsynced items", () => {
+  assert.equal(row("cal").visible, false);
+  assert.equal(row("cals").visible, false);
+  assert.equal(row("holder").visible, false);
+  assert.equal(row("tmp:1").visible, false);
+});
+
+test("sharing row: offline says why it can't change", () => {
+  assert.deepEqual(row("trip", false), { visible: true, value: "private", disabledReason: "Go online to change sharing" });
+});

@@ -3,7 +3,7 @@ type: Runbook
 title: Local server and Chrome testing
 description: How to run the app locally against the Firestore emulator and drive it in Chrome, signed in as one or two test users.
 tags: [tests, local, chrome, multi-user]
-timestamp: 2026-09-22T22:30:00Z
+timestamp: 2026-09-27T09:00:00Z
 ---
 Unit tests do not cover `web/app.js` and the other top-level UI scripts, so any UI change needs a look in a real browser before it ships. A refactor once deleted the engine setup from `app.js`; every test still passed and only the browser showed a blank app. Do this before deploying UI changes. Never point it at production: it uses the emulator and a copy of `web/`.
 
@@ -89,6 +89,16 @@ Open `http://localhost:8082/` (owner) in one Chrome profile/window and `http://l
 **Multi-user isolation checklist** (any change touching auth, tenant partitioning, push, or the calendar/budget owner-only paths — [multi-user runbook](multi-user.md)): using the two-port setup above,
 - as the owner (8082): the full checklist above passes (add/edit/complete/reorder/trash/undelete/search, More panel incl. calendar link, attachments);
 - as the second user (8083): the list starts empty; none of the owner's todos appear; adding/editing a todo there never appears back on 8082; the More panel has **no** calendar row at all.
+
+**Sharing checklist** (any change touching [sharing](../features/sharing.md)): two-port setup above, plus `SHARING_ENABLED=1` in both servers' environment, and a separate web copy per port whose `config.js` names that port's user so the client knows who it is (`window.NOW_CONFIG={devEmail:"owner@example.com"};` for 8082, `kid@example.com` for 8083; `auth.js` still bails out without a Firebase config).
+- 8082: make a list with two children, open its viewer, set **Sharing → Everyone can edit**. The row shows "Shared · can edit"; the children show the shared icon.
+- 8083: after a focus/refresh the list appears at the root with "Shared · can edit · owner" and the mascot says "owner shared “…” with everyone". Check a child off; rename one; add one; drag the shared list under an item of your own (it moves only for 8083).
+- 8082: refresh: the mascot names kid for the change ("kid checked off “…”"); the list is where 8082 left it.
+- 8082: set **Everyone can view**. 8083 after refresh: "Shared · read-only", checkbox disabled, no Edit/Add/Delete in the menu, no swipe; fold/unfold still works; the root still moves.
+- 8083: More → **Shared**: the list shows with **Remove**; Remove it (Undo toast "Removed from your list"), then **Add to my list** brings it back where it was.
+- 8083: drag one of your own items into a can-edit share: a confirm "Everyone will see “x”." appears; after it, 8082 sees the item.
+- 8082: Trash shows a deleted shared child labelled "(shared)"; Undelete restores it for both.
+- 8082: **Sharing → Private** asks "Stop sharing …?"; after it the list is an ordinary item again on 8082 and gone on 8083 (mascot: "owner stopped sharing …").
 
 **Pitfalls.**
 - **The service worker caches `?v=` scripts cache-first.** After changing a file without bumping the version, the browser keeps serving the old one (this hid a fix once). Clear it: `for (const r of await navigator.serviceWorker.getRegistrations()) await r.unregister(); for (const k of await caches.keys()) await caches.delete(k); location.reload()`. Bumping `APP_VERSION` and the `?v=` numbers in `index.html` (they must match) also works.

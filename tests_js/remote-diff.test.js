@@ -26,3 +26,28 @@ test("several changes are counted, long titles are shortened", () => {
   const s = say(tree(), tree({ id: "x", title: "A very long todo title that keeps going and going" }));
   assert.ok(s.includes("…") && s.length < 70);
 });
+
+const sayAs = (me, a, b) => RemoteDiff.describe(RemoteDiff.diff(RemoteDiff.snapshot(a), RemoteDiff.snapshot(b)), me);
+
+test("changes in a shared item name who made them", () => {
+  const before = tree({ id: "x", title: "Book hotel", last_edited_by: "me@x.com" });
+  const after = tree({ id: "x", title: "Book hotel", done: true, version: 2, last_edited_by: "alex@x.com" });
+  assert.equal(sayAs("me@x.com", before, after), "alex checked off “Book hotel”");
+  const renamed = tree({ id: "x", title: "Book the hotel", version: 2, last_edited_by: "alex@x.com" });
+  assert.equal(sayAs("me@x.com", before, renamed), "alex updated “Book the hotel”");
+  const added = tree({ id: "y", title: "Pack", last_edited_by: "alex@x.com" });
+  assert.equal(sayAs("me@x.com", tree(), added), "alex added “Pack”");
+});
+
+test("a share arriving or leaving names its owner", () => {
+  const share = { id: "S", owner: "sam@x.com", mode: "rw" };
+  const trip = tree({ id: "S", title: "Portland trip", share, share_root: true });
+  assert.equal(sayAs("me@x.com", tree(), trip), "sam shared “Portland trip” with everyone");
+  assert.equal(sayAs("me@x.com", trip, tree()), "sam stopped sharing “Portland trip”");
+});
+
+test("our own edits in a share read as before", () => {
+  const before = tree({ id: "x", title: "T" });
+  const after = tree({ id: "x", title: "T", done: true, version: 2, last_edited_by: "me@x.com" });
+  assert.equal(sayAs("me@x.com", before, after), "“T” was checked off on another device");
+});

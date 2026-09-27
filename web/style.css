@@ -479,6 +479,20 @@ svg {
   vertical-align: middle;
 }
 
+.shares-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.share-entry {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .todo-check input:disabled {
   opacity: 0.45;
   cursor: not-allowed;

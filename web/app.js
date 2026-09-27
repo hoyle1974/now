@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "105";
+const APP_VERSION = "106";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -203,7 +203,7 @@ function setPhase(next) {
 async function refreshFromRemote(triggeredBy) {
   const before = RemoteDiff.snapshot(model.todosById);
   await loadAndRender();
-  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)));
+  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)), myEmail());
   logEvent("remote", said || "refreshed, nothing visible changed");
   const ownSync = Boolean(triggeredBy) && triggeredBy === clientSessionId();
   if (said && !ownSync && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
@@ -394,6 +394,62 @@ async function saveSplit(todoId, descriptions, dueDate = null, type = null, cont
   engine.enqueue({ kind: "split", target_id: todoId, payload });
 }
 
+// Share / change / stop sharing an item (the viewer's Sharing control). Online only: the
+// server moves the item's data between partitions, then the list is reloaded.
+const SHARE_ERRORS = {
+  "crosses share boundary": "It holds a calendar, so it can't be shared.",
+  "not eligible": "This item can't be shared.",
+  "too large": "It's too big to share (over 2,000 items).",
+  "owner only": "Only the owner can change its sharing.",
+};
+
+async function changeSharing(todoId, value) {
+  const node = model.todosById.get(todoId);
+  if (!node) return;
+  const was = node.share_root ? node.share.mode : "private";
+  if (value === was) return;
+  const title = node.title;
+  const run = async () => {
+    toast.show({ message: value === "private" ? "Stopping sharing…" : "Sharing…", ttl: 3000 });
+    await engine.flush(); // queued edits go first, to where the item is now
+    let response;
+    try {
+      response = await fetch(`${API_BASE}/${todoId}/share`, value === "private"
+        ? { method: "DELETE" }
+        : { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: value }) });
+    } catch (e) {
+      showNotice({ level: "error", message: "Couldn't change sharing: you seem to be offline." });
+      return;
+    }
+    if (!response.ok) {
+      const detail = await response.json().then((b) => b && b.detail, () => null);
+      showNotice({ level: "error", message: SHARE_ERRORS[detail] || `Couldn't change sharing (${response.status}).` });
+      return;
+    }
+    logEvent("share", `${todoId.slice(0, 8)} -> ${value}`);
+    await loadAndRender();
+    renderTree();
+    showNotice({ level: "info", message: value === "private" ? `“${title}” is private again`
+      : value === "ro" ? `Everyone can view “${title}”` : `Everyone can edit “${title}”` });
+  };
+  if (value === "private") {
+    ConfirmDialog.open({ message: `Stop sharing “${title}”? It disappears for everyone else.`,
+      confirmLabel: "Stop sharing", cancelLabel: "Keep sharing", onConfirm: () => reportedFailure(run()) });
+    return;
+  }
+  await run();
+}
+
+// Shares that just appeared in this list (the server made their places): say so once.
+function announceNewShares(newShares) {
+  if (!newShares || !newShares.length || !window.Mascot) return;
+  const s = newShares[0];
+  const line = newShares.length === 1
+    ? `${ShareUI.localPart(s.owner)} shared “${s.title}” with everyone`
+    : `${newShares.length} lists were shared with you`;
+  window.Mascot.react(line, { key: "share", force: true, delay: 600 });
+}
+
 async function moveTodo(todoId, direction) {
   engine.enqueue({ kind: "move", target_id: todoId, payload: { direction } });
 }
@@ -424,7 +480,8 @@ async function fetchTree() {
     todosById.set(id, todo);
   }
 
-  return { roots: response.roots, todosById, rev: response.rev, revs: response.revs };
+  return { roots: response.roots, todosById, rev: response.rev, revs: response.revs,
+    newShares: response.new_shares || [] };
 }
 
 // One-shot visual states keyed by todo id. Every edit re-renders the whole
