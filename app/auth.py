@@ -39,6 +39,12 @@ def owner() -> str:
     return emails[0]
 
 
+def sharing_enabled() -> bool:
+    """SHARING_ENABLED turns sharing between users on (off by default). Off, the share
+    routes answer 404, X-Share is refused and no mounts are created; share data stays."""
+    return os.environ.get("SHARING_ENABLED", "").strip().lower() in ("1", "true", "yes")
+
+
 def check_config() -> None:
     if not allowed_emails():
         raise RuntimeError("ALLOWED_EMAILS is not set: export the Google accounts that may sign in, "

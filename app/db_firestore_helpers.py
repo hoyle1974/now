@@ -42,6 +42,7 @@ def doc_to_todo(doc_dict: dict) -> models.Todo:
         last_synced_at=(None if doc_dict.get("last_synced_at") is None
                         else datetime.datetime.fromisoformat(doc_dict["last_synced_at"])),
         last_sync_error=doc_dict.get("last_sync_error"),
+        last_edited_by=doc_dict.get("last_edited_by"),
         child_ids=[]
     )
 
@@ -79,6 +80,7 @@ def todo_to_doc(todo: models.Todo) -> dict:
         "external_uid": todo.external_uid,
         "last_synced_at": None if todo.last_synced_at is None else todo.last_synced_at.isoformat(),
         "last_sync_error": todo.last_sync_error,
+        "last_edited_by": todo.last_edited_by,
     }
 
 def get_subtree_docs(todos_collection, parent_id: str, getter=None) -> list[dict]:

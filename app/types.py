@@ -13,6 +13,8 @@ from typing import Any
 _SPEC: dict[str, dict[str, Any]] = json.loads(Path(__file__).with_name("types.json").read_text())
 DEFAULT = "todo"
 NAMES = tuple(_SPEC)
+# Types a person may pick (create, retype, split). A mount is server-managed.
+USER_NAMES = tuple(n for n in NAMES if _SPEC[n].get("userCreatable", True))
 
 
 def caps(name: str | None) -> dict[str, Any]:

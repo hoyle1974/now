@@ -28,8 +28,9 @@ def db_setup():
 # ---- registry ---------------------------------------------------------------
 
 def test_registry_has_the_three_types_and_flags():
-    assert set(types.NAMES) == {"todo", "list", "project", "note", "calendar", "calendar_event"}
-    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies", "allowsUserChildren", "editable"}
+    assert set(types.NAMES) == {"todo", "list", "project", "note", "calendar", "calendar_event", "mount"}
+    flags = {"hasCheckbox", "appearsInNextUp", "triggersAutodone", "countsInBadge", "showsProgress", "notifies",
+             "allowsUserChildren", "editable", "userCreatable", "shareable"}
     for name in types.NAMES:
         assert flags <= set(types.caps(name))
         assert "title" in types.caps(name)["fields"]
@@ -481,3 +482,31 @@ def test_note_content_is_stored_capped_and_kept_when_the_type_changes(db_setup):
     old = todo_to_doc(models.Todo(title="old"))
     old.pop("content", None)
     assert doc_to_todo(old).content is None
+
+
+# ---- mount (sharing) -----------------------------------------------------------
+
+def test_only_plain_types_are_shareable():
+    assert {n for n in types.NAMES if types.can_type(n, "shareable")} == {"todo", "list", "project", "note"}
+
+
+def test_mount_is_not_user_creatable():
+    assert types.can_type("mount", "userCreatable") is False
+    assert set(types.USER_NAMES) == set(types.NAMES) - {"mount"}
+    assert set(get_args(models.UserItemType)) == set(types.USER_NAMES)
+
+
+def test_mount_is_refused_on_create_patch_and_split(db_setup):
+    assert client.post("/todos", json={"title": "x", "type": "mount"}).status_code == 422
+    made = client.post("/todos", json={"title": "x"}).json()["todo_id"]
+    assert client.patch(f"/todos/{made}", json={"type": "mount"}).status_code == 422
+    assert client.post(f"/todos/{made}/split", json={"descriptions": ["a"], "type": "mount"}).status_code == 422
+
+
+def test_last_edited_by_round_trips_and_share_tags_are_never_stored():
+    t = models.Todo(title="x", last_edited_by="kid@example.com",
+                    share=models.ShareTag(id="s", mode="rw", owner="me@example.com"), share_root=True)
+    doc = todo_to_doc(t)
+    assert doc["last_edited_by"] == "kid@example.com"
+    assert "share" not in doc and "share_root" not in doc
+    assert doc_to_todo(doc).last_edited_by == "kid@example.com"

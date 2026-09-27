@@ -27,7 +27,7 @@ const TypeUI = (() => {
     node.className = "type-select";
     const select = document.createElement("select");
     select.setAttribute("aria-label", "Type");
-    for (const name of Types.names) {
+    for (const name of Types.userNames) {
       const option = document.createElement("option");
       option.value = name;
       option.textContent = labelOf(name);
@@ -56,7 +56,7 @@ const TypeUI = (() => {
   // The chosen type also lives in a hidden input inside the node, so an open sheet keeps it
   // across the re-render that snapshotSheet/restoreSheet (tree-view.js) carries fields over.
   function create({ value, onChange, layout } = {}) {
-    const mode = layout || (Types.names.length <= ROW_MAX ? "row" : "select");
+    const mode = layout || (Types.userNames.length <= ROW_MAX ? "row" : "select");
     if (mode === "select") return createSelect(value, onChange);
     const node = document.createElement("div");
     node.className = mode === "row" ? "chip-row type-picker" : "type-list";
@@ -66,7 +66,7 @@ const TypeUI = (() => {
     hidden.type = "hidden";
     hidden.value = Types.nameOf({ type: value });
     const buttons = new Map();
-    for (const name of Types.names) {
+    for (const name of Types.userNames) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.setAttribute("role", "radio");

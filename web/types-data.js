@@ -31,7 +31,9 @@
       "allowsUserChildren": true,
       "editable": true,
       "description": "Something to do, with a checkbox and an optional due date.",
-      "defaultChildType": "todo"
+      "defaultChildType": "todo",
+      "userCreatable": true,
+      "shareable": true
     },
     "list": {
       "label": "List",
@@ -52,7 +54,9 @@
       "allowsUserChildren": true,
       "editable": true,
       "description": "A plain group of items, with no checkbox or due date.",
-      "defaultChildType": "todo"
+      "defaultChildType": "todo",
+      "userCreatable": true,
+      "shareable": true
     },
     "project": {
       "label": "Project",
@@ -73,7 +77,9 @@
       "allowsUserChildren": true,
       "editable": true,
       "description": "A group that shows how many of its todos are done.",
-      "defaultChildType": "todo"
+      "defaultChildType": "todo",
+      "userCreatable": true,
+      "shareable": true
     },
     "note": {
       "label": "Note",
@@ -94,7 +100,9 @@
       "allowsUserChildren": true,
       "editable": true,
       "description": "A title and a long note, written in Markdown.",
-      "defaultChildType": "note"
+      "defaultChildType": "note",
+      "userCreatable": true,
+      "shareable": true
     },
     "calendar": {
       "label": "Calendar",
@@ -113,7 +121,9 @@
       "allowsUserChildren": false,
       "editable": true,
       "description": "A live calendar feed; its events sync in automatically.",
-      "defaultChildType": "calendar_event"
+      "defaultChildType": "calendar_event",
+      "userCreatable": true,
+      "shareable": false
     },
     "calendar_event": {
       "label": "Event",
@@ -138,7 +148,28 @@
       "allowsUserChildren": false,
       "editable": false,
       "description": "One event from a synced calendar. Read-only.",
-      "defaultChildType": "calendar_event"
+      "defaultChildType": "calendar_event",
+      "userCreatable": true,
+      "shareable": false
+    },
+    "mount": {
+      "label": "Shared item",
+      "icon": "share",
+      "fields": [
+        "title"
+      ],
+      "hasCheckbox": false,
+      "appearsInNextUp": false,
+      "triggersAutodone": false,
+      "countsInBadge": false,
+      "showsProgress": false,
+      "notifies": false,
+      "allowsUserChildren": false,
+      "editable": false,
+      "description": "Where a shared item sits in your list. Server-managed; never created by hand.",
+      "defaultChildType": "todo",
+      "userCreatable": false,
+      "shareable": false
     }
   };
 });
