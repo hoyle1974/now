@@ -91,6 +91,14 @@ function renderNextRow(item) {
     due.append(icon("calendar"), text);
     meta.appendChild(due);
   }
+  const node = model.todosById.get(item.todo_id);
+  if (node && node.share) {
+    const shared = document.createElement("span");
+    shared.className = "todo-chip share-chip--next";
+    shared.append(icon("share"), document.createTextNode(
+      node.share.owner === myEmail() ? "Shared" : `Shared · ${ShareUI.localPart(node.share.owner)}`));
+    meta.appendChild(shared);
+  }
   if (meta.childNodes.length) body.appendChild(meta);
   if (item.blocked_by && item.blocked_by.length) {
     const blocked = document.createElement("span");

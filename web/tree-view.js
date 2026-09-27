@@ -165,6 +165,8 @@ function placeOpenMenu() {
 // are re-applied on top so they stay visible. If an edit was queued or
 // finished while the fetch was in flight, the snapshot may predate it, so wait
 // for the outbox to settle and read again instead of painting stale state.
+let treeLoadedOnce = false;
+
 async function loadAndRender() {
   for (let attempt = 0; attempt < 3; attempt++) {
     const epoch = engine.epoch();
@@ -179,6 +181,8 @@ async function loadAndRender() {
     logEvent("tree", `fetched rev ${tree.rev}, ${tree.todosById.size} todos (${Math.round(performance.now() - startedAt)}ms)`);
     if (engine.epoch() === epoch) {
       engine.rebuild(tree);
+      if (!treeLoadedOnce) announceNewShares(tree.newShares);
+      treeLoadedOnce = true;
       // The ranking is computed from the same data, so keep it in step.
       if (activeTab === "next") reportedFailure(refreshNext());
       return;

@@ -20,6 +20,8 @@
   firebase.initializeApp(config);
   const auth = firebase.auth();
   const nativeFetch = window.fetch.bind(window);
+  // Who is signed in (lowercased, like the server's tenant): shared items ask it.
+  window.NowAuth = { email: () => ((auth.currentUser && auth.currentUser.email) || "").toLowerCase() || null };
 
   const overlay = document.getElementById("signin");
   const message = document.getElementById("signin-message");
@@ -72,7 +74,8 @@
   function isApiRequest(input) {
     const url = new URL(typeof input === "string" ? input : input.url, window.location.href);
     return url.origin === window.location.origin &&
-      (url.pathname === "/todos" || url.pathname.startsWith("/todos/") || url.pathname.startsWith("/push/") || url.pathname === "/calendar/link");
+      (url.pathname === "/todos" || url.pathname.startsWith("/todos/") || url.pathname.startsWith("/push/") ||
+       url.pathname === "/calendar/link" || url.pathname === "/shares");
   }
 
   async function withToken(input, init, forceRefresh) {
@@ -89,7 +92,12 @@
     let response = await withToken(input, init, false);
     if (response.status === 401) response = await withToken(input, init, true);
     if (response.status === 403) {
-      showSignIn("This account isn't allowed to use this app.", { canSignOut: true });
+      // Only the sign-in check's refusal means this account is out; a shared item's
+      // "read only" / "share revoked" / "owner only" is the sync engine's to handle.
+      const detail = await response.clone().json().then((b) => b && b.detail, () => null);
+      if (detail === "Not allowed" || detail === null) {
+        showSignIn("This account isn't allowed to use this app.", { canSignOut: true });
+      }
     }
     return response;
   };

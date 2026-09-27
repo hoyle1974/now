@@ -53,5 +53,8 @@
     return counts;
   }
 
-  return { get, can, hasField, nameOf, defaultChildType, descendantCounts, names: Object.keys(data) };
+  const names = Object.keys(data);
+  // What pickers offer: a mount (where a shared item sits) is server-managed.
+  const userNames = names.filter((n) => data[n].userCreatable !== false);
+  return { get, can, hasField, nameOf, defaultChildType, descendantCounts, names, userNames };
 });

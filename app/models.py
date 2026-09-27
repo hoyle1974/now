@@ -38,7 +38,9 @@ class Repeat(BaseModel):
 Color = Literal["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"]
 COLORS = get_args(Color)
 Priority = Literal["high", "normal", "low"]
-ItemType = Literal["todo", "list", "project", "note", "calendar", "calendar_event"]  # keep in step with app/types.json
+ItemType = Literal["todo", "list", "project", "note", "calendar", "calendar_event", "mount"]  # keep in step with app/types.json
+# What a request may set: every type except the server-managed mount (types.USER_NAMES).
+UserItemType = Literal["todo", "list", "project", "note", "calendar", "calendar_event"]
 MAX_LINKS = 20
 MAX_URL_LEN = 2048
 MAX_LABEL_LEN = 200
@@ -96,7 +98,7 @@ class TodoCreate(BaseModel):
     title: str = Field(max_length=MAX_TITLE_LEN)
     color: Color | None = Field(None)  # the client picks one so it can show it at once; omitted = server picks
     due_date: datetime.datetime | None = Field(None)
-    type: ItemType | None = Field(None)  # omitted = todo
+    type: UserItemType | None = Field(None)  # omitted = todo
 
 class TodoUpdate(BaseModel):
     # Omitted = leave alone. Explicit null clears ONLY due_date, repeat, color and calendar_url
@@ -108,7 +110,7 @@ class TodoUpdate(BaseModel):
     collapsed: bool | None = Field(None)
     repeat: Repeat | None = Field(None)  # explicit null clears the rule
     color: Color | None = Field(None)  # explicit null clears
-    type: ItemType | None = Field(None)        # only the label changes; due_date, repeat and done stay
+    type: UserItemType | None = Field(None)        # only the label changes; due_date, repeat and done stay
     calendar_url: str | None = Field(None, max_length=MAX_URL_LEN)  # explicit null clears
     links: list[Link] | None = Field(None)     # replaces the whole list
     blocked_by: list[TodoId] | None = Field(None)  # replaces the whole list
@@ -147,6 +149,8 @@ class TodoUpdate(BaseModel):
 class TodoReparent(BaseModel):
     parent_id: TodoId | None = Field(None)  # null moves to the top level
     index: int | None = Field(None)         # position among the new siblings; null = last
+    # Partition of the new parent: a share id, or null for your own list. Omitted = the todo's own.
+    parent_share: str | None = Field(None, pattern=r"^[A-Za-z0-9-]{1,64}$")
 
 class TodoRepeatRequest(BaseModel):
     today: datetime.date | None = Field(None)  # the client's local date; server date if omitted
@@ -157,9 +161,16 @@ class SyncNowBody(BaseModel):
 class TodoSplit(BaseModel):
     descriptions: list[Annotated[str, Field(max_length=MAX_TITLE_LEN)]] = Field([], max_length=MAX_SPLIT_ITEMS)
     due_date: datetime.datetime | None = Field(None)
-    type: ItemType | None = Field(None)  # applies to every child created; omitted = todo
+    type: UserItemType | None = Field(None)  # applies to every child created; omitted = todo
     # Applied only when one child is created and that type has a content field.
     content: str | None = Field(None, max_length=MAX_CONTENT_LEN)
+
+class ShareTag(BaseModel):
+    """Derived on a tree read for every node that comes from a share; never stored."""
+    id: str
+    mode: Literal["ro", "rw"]
+    owner: str
+
 
 class Todo(BaseModel):
     todo_id: TodoId = Field(default_factory=lambda: TodoId(uuid4()) )
@@ -199,8 +210,15 @@ class Todo(BaseModel):
     last_synced_at: datetime.datetime | None = Field(None)  # calendar type: server-managed
     last_sync_error: str | None = Field(None)  # calendar type: server-managed
     blocked: bool = Field(False)  # derived, never stored; only filled in by get_tree
+    last_edited_by: str | None = Field(None)  # email of the last writer; set only inside a share
+    share: ShareTag | None = Field(None)      # derived, never stored: this node comes from a share
+    share_root: bool = Field(False)           # derived, never stored: the share's root (merged with your mount)
 
     @field_serializer("create_date", "deleted_at", "last_synced_at", when_used="json")
     def _instants_as_utc(self, v: datetime.datetime | None) -> str | None:
         # due_date and end_date stay bare: they are the user's wall-clock time.
         return as_utc_instant(v)
+
+
+class ShareRequest(BaseModel):
+    mode: Literal["ro", "rw"]

@@ -4,7 +4,7 @@ title: Deploy
 description: Deploying to Cloud Run.
 resource: deploy.sh
 tags: [deploy]
-timestamp: 2026-09-22T00:15:00Z
+timestamp: 2026-09-27T10:00:00Z
 ---
 `./deploy.sh` ends with the read-only `scripts/cost-check.sh` ([principles](../principles.md)) and fails loudly if the deploy left anything billable. It runs `gcloud run deploy --source .` with `--cpu-throttling` (request-based billing). **Never `--no-cpu-throttling`**: an always-allocated instance is billed 24/7 (measured while the reminder tick still ran every 10 minutes: 2026-09-21: 60 of 60 minutes per hour, about $30/month on 1 vCPU / 512Mi; the free tier is 240k vCPU-s per month). The post-response archive sweep may crawl between requests, but the next request and the 15-minute lease cover it. **Max instances is 1** (`gcloud run services update now-app --max-instances 1`, set 2026-09-21): a personal app never needs more, and it hard-caps compute cost against abuse; terraform does not manage it. zilch pins the same (`cpu_idle = true`, [zilch-gcp](../architecture/zilch-gcp.md)). Check: `gcloud run services describe <service> --format="value(spec.template.metadata.annotations['run.googleapis.com/cpu-throttling'])"` must print `true`. `PROJECT`/`REGION`/`SERVICE` come from `scripts/lib/config.sh` ([forking](forking.md)).
 
@@ -19,3 +19,5 @@ timestamp: 2026-09-22T00:15:00Z
   - Reminders: `scripts/setup-push.sh` (APIs, FCM role, Scheduler job, `NOTIFY_AUDIENCE`/`NOTIFY_CALLER`) plus `firebase deploy --only firestore:indexes` for the due-window index, before the first scheduled run ([push reminders](../features/push-reminders.md)).
 
 **Old images (rule #1).** Every source deploy pushes a ~70 MB image and the Artifact Registry free tier is 512 MB; the cleanup policy above runs only about daily, so several deploys in a day passed the limit once (536 MB, the cost check failed). `deploy.sh` now runs `scripts/prune-images.sh` after every deploy: it deletes every image in `cloud-run-source-deploy` except the digest the service is running (no rollback images, as before; roll back by redeploying an older commit). If the cost check ever reports the registry over its limit, run `scripts/prune-images.sh`.
+
+**Sharing switch.** `SHARING_ENABLED=1 ./deploy.sh` turns [sharing](../features/sharing.md) on (also read from `.now.env`); `SHARING_ENABLED=0 ./deploy.sh` turns it off again without touching share data (share routes 404, mounts hidden, `X-Share` refused). Unset keeps what the service has. Once per project, `scripts/setup-sharing.sh` adds the Firestore TTL policy on `view_state.expires_at`.

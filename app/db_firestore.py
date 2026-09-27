@@ -32,34 +32,57 @@ class _State:
     A lock here would serialize unrelated users' reads for no correctness benefit."""
     def __init__(self) -> None:
         self.client: Any = None
-        # user email -> (rev, roots, todosById) of that user's last full tree read. A tree
+        # partition -> (rev, roots, todosById) of that partition's last full tree read. A tree
         # read costs one document read per todo, so it is reused for as long as the
         # revision counter hasn't moved (every write to a todo bumps it in run_atomic).
         self.tree_cache: dict[str, tuple] = {}
-        # user email -> time.monotonic() of that user's last archive attempt
+        # partition -> time.monotonic() of that partition's last archive attempt
         self.archive_checked: dict[str, float] = {}
+        # email -> (own rev, mounted share ids): app/shares.revs, valid while the rev holds
+        self.mount_cache: dict[str, tuple[int, list[str]]] = {}
+        # email -> shares_meta rev at which app/shares.ensure_mounts last checked them
+        self.ensure_checked: dict[str, int] = {}
 
     def reset(self) -> None:
         self.tree_cache = {}
         self.archive_checked = {}
+        self.mount_cache = {}
+        self.ensure_checked = {}
 
 
 _state = _State()
 
 USERS = "users"
+SHARES = "shares"
 
 
 def user_ref(email: str | None = None):
-    """users/{email}: every collection below belongs to that one person. Defaults to
-    the bound user (app/tenant.py) and raises when none is bound."""
+    """users/{email}: that one person's own partition. Defaults to the bound user
+    (app/tenant.py) and raises when none is bound. For per-person data (mounts,
+    view state, push devices) regardless of which partition is bound."""
     return get_conn().collection(USERS).document(email or tenant.current())
 
 
+def partition_ref(path: str | None = None):
+    """The partition db calls work in: users/{email} or shares/{id} (default: the
+    bound one, tenant.partition()). Every collection below belongs to it."""
+    kind, _, key = (path or tenant.partition()).partition("/")
+    if kind not in (USERS, SHARES) or not key:
+        raise ValueError(f"bad partition {path!r}")
+    return get_conn().collection(kind).document(key)
+
+
 def _todos():
-    return user_ref().collection("todos")
+    return partition_ref().collection("todos")
 
 
 def _sub(name: str):
+    return partition_ref().collection(name)
+
+
+def _person(name: str):
+    """A collection that belongs to the signed-in person whatever partition is bound
+    (push devices and sent-markers)."""
     return user_ref().collection(name)
 
 # Todos deleted for ARCHIVE_AFTER_DAYS move (subtree and all) out of "todos", so
@@ -87,6 +110,16 @@ REV_DOC = "rev"
 # why the functions below read everything first and hand back the updated
 # todo instead of re-reading it afterwards.
 _tx: contextvars.ContextVar = contextvars.ContextVar("firestore_tx", default=None)
+# True while app/migrate.py itself writes: a partition frozen for a migration refuses
+# every other write (see Frozen) but not the migration's own.
+migration_writes: contextvars.ContextVar[bool] = contextvars.ContextVar("migration_writes", default=False)
+
+
+class Frozen(Exception):
+    """This partition's data is being moved (app/migrate.py): the write must wait.
+    Answered as 503 "migrating", which clients retry."""
+
+
 # A one-element list set alongside _tx; flipped to True by the first todo write
 # so run_atomic knows whether the revision counter must move.
 _wrote: contextvars.ContextVar = contextvars.ContextVar("firestore_wrote", default=None)
@@ -188,14 +221,18 @@ def run_atomic(txn_id: str | None, fn: Callable[[], tuple[int, dict | None]],
                     return (logged["status"], (None if raw is None else json.loads(raw)),
                             logged.get("prev_rev", 0), logged.get("rev", 0))
             rev_snap = rev_ref.get(transaction=tx)
-            prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
+            rev_data = rev_snap.to_dict() if rev_snap.exists else {}
+            if rev_data.get("migrating") and not migration_writes.get():
+                raise Frozen()
+            prev = rev_data.get("value", 0)
             rev = prev
 
             status, body = fn()
 
             if _wrote.get()[0]:
                 rev += 1
-                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by})
+                # merge: the rev doc also carries a migration's freeze record
+                tx.set(rev_ref, {"value": rev, "triggered_by": triggered_by}, merge=True)
             if log_ref is not None:
                 tx.set(log_ref, {
                     "status": status,
@@ -220,10 +257,11 @@ def prune_txn_log(hours: int = 24 * 30) -> int:
     is far past any realistic offline stretch and the records are tiny."""
     cutoff = datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=hours)
     removed = 0
-    for user in get_conn().collection(USERS).list_documents():  # includes users with no user doc, only subcollections
-        for doc in user.collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
-            doc.reference.delete()
-            removed += 1
+    for kind in (USERS, SHARES):  # list_documents includes parents with only subcollections
+        for parent in get_conn().collection(kind).list_documents():
+            for doc in parent.collection(TXN_COLLECTION).where("created_at", "<", cutoff).stream():
+                doc.reference.delete()
+                removed += 1
     return removed
 
 
@@ -249,8 +287,15 @@ def _next_order_idx(parent_id: str | None) -> int:
     return max((d["order_idx"] if d.get("order_idx") is not None else -1 for d in docs), default=-1) + 1
 
 
+def _stamp_editor(todo: models.Todo) -> None:
+    """Inside a share, remember who wrote last (the "Alex checked off …" line)."""
+    if tenant.partition().startswith(f"{SHARES}/"):
+        todo.last_edited_by = tenant.current()
+
+
 def create_todo(todo: models.Todo):
     """Create a new todo in Firestore"""
+    _stamp_editor(todo)
 
     # Roots are ordered like any other sibling list, so a new todo goes last.
     if todo.order_idx is None:
@@ -515,7 +560,9 @@ def _trash_entries():
     children: dict[str | None, list[dict]] = {}
     for data in docs:
         children.setdefault(data.get("parent_id"), []).append(data)
-    roots = [db_firestore_helpers.doc_to_todo(d) for d in docs if d.get("deleted", False)]
+    # A removed mount ("Remove from my list") is not trash: it comes back via Shared with me.
+    roots = [db_firestore_helpers.doc_to_todo(d) for d in docs
+             if d.get("deleted", False) and d.get("type") != "mount"]
     roots.sort(key=lambda t: ((1, t.deleted_at.timestamp()) if t.deleted_at else (0, t.create_date.timestamp()),
                               str(t.todo_id)), reverse=True)
     seen = {str(t.todo_id) for t in roots}
@@ -531,6 +578,18 @@ def _trash_entries():
     for root in roots:
         yield root, None, root.deleted_at
         yield from inside(str(root.todo_id), root.title, root.deleted_at)
+
+
+def trash_entries(query: str = "") -> list[tuple]:
+    """Every trash entry of the bound partition (see _trash_entries), filtered like get_trash."""
+    words = _fold(query).split()
+
+    def wanted(entry: tuple) -> bool:
+        todo = entry[0]
+        text = _fold(" ".join([todo.title, todo.color or "", *(f"{link.url} {link.label}" for link in todo.links)]))
+        return all(w in text for w in words)
+
+    return [e for e in _trash_entries() if not words or wanted(e)]
 
 
 def get_trash(limit: int = 50, offset: int = 0, query: str = "") -> tuple[list[tuple], bool]:
@@ -555,6 +614,7 @@ def update_todo(todo: models.Todo, bump_version: bool = True):
 
     if bump_version:
         todo.version += 1
+        _stamp_editor(todo)
     if not todo.deleted:
         todo.deleted_at = None
     elif todo.deleted_at is None:
@@ -731,14 +791,14 @@ def get_tree(rev: int | None = None) -> tuple[list[models.Todo], dict[str, model
     its contents: a write in between costs one extra reload, never a stale hit.
     Callers get their own copy, so they may modify what they receive.
     """
-    user = tenant.current()
+    part = tenant.partition()
     if rev is None:
         rev = get_rev()
-    cached = _state.tree_cache.get(user)
+    cached = _state.tree_cache.get(part)
     if cached is not None and cached[0] == rev:
         return copy.deepcopy(cached[1:])
     roots, reachable = _read_tree()
-    _state.tree_cache[user] = (rev, roots, reachable)
+    _state.tree_cache[part] = (rev, roots, reachable)
     return copy.deepcopy((roots, reachable))
 
 def _read_tree() -> tuple[list[models.Todo], dict[str, models.Todo]]:
@@ -814,6 +874,7 @@ def split_into_children(todo: models.Todo, descriptions: list[str],
             type=type,
             content=content,
         )
+        _stamp_editor(child_todo)
         _set(_todos().document(str(child_todo.todo_id)),
              db_firestore_helpers.todo_to_doc(child_todo))
         new_ids.append(child_todo.todo_id)
@@ -1068,6 +1129,9 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
     together with the revision bump.
     """
     now = now or _now_utc()
+    rev_snap = _sub(REV_COLLECTION).document(REV_DOC).get()
+    if rev_snap.exists and (rev_snap.to_dict() or {}).get("migrating"):
+        raise Frozen()  # a migration is moving this partition's documents; next run
     cutoff = now - datetime.timedelta(days=days)
     moving: dict[str, dict] = {}
     for doc in _todos().where("deleted", "==", True).stream():
@@ -1105,7 +1169,7 @@ def archive_expired(now: datetime.datetime | None = None, days: int = ARCHIVE_AF
             tx.delete(_todos().document(data["todo_id"]))
         if going:
             prev = rev_snap.to_dict().get("value", 0) if rev_snap.exists else 0
-            tx.set(rev_ref, {"value": prev + 1})
+            tx.set(rev_ref, {"value": prev + 1}, merge=True)
         return going
 
     for start in range(0, len(docs), 200):
@@ -1126,7 +1190,7 @@ def sweep_orphan_blobs(min_age: datetime.timedelta = datetime.timedelta(hours=1)
     cutoff = _now_utc() - min_age
     known: dict[str, set[str]] = {}
     removed = 0
-    prefix = blobstore.user_todos_prefix()
+    prefix = blobstore.partition_todos_prefix()
     for key, created in store.list_blobs(prefix):
         parts = key[len(prefix):].split("/")
         if len(parts) != 2 or _aware(created) > cutoff:
@@ -1176,15 +1240,15 @@ def maybe_archive_expired() -> int:
     instances and one at a time per process. Meant to run off the request path
     (see _load_tree). A failure releases the claim so a later read retries; this
     process backs off for _ARCHIVE_RETRY_SECONDS first."""
-    user = tenant.current()
+    part = tenant.partition()
     now_m = time.monotonic()
-    checked = _state.archive_checked.get(user)
+    checked = _state.archive_checked.get(part)
     if checked is not None and now_m - checked < _ARCHIVE_CHECK_SECONDS:
         return 0
     if not _archive_lock.acquire(blocking=False):
         return 0
     try:
-        _state.archive_checked[user] = time.monotonic()
+        _state.archive_checked[part] = time.monotonic()
         started = _now_utc()
         if not _claim_archive_run(started):
             return 0
@@ -1193,7 +1257,7 @@ def maybe_archive_expired() -> int:
             moved = archive_expired(_now_utc())
             sweep_orphan_blobs()
         except Exception:
-            _state.archive_checked[user] = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
+            _state.archive_checked[part] = time.monotonic() - _ARCHIVE_CHECK_SECONDS + _ARCHIVE_RETRY_SECONDS
             with contextlib.suppress(Exception):  # the lease expires by itself
                 _finish_archive_run(started, ok=False)
             raise
@@ -1209,27 +1273,27 @@ PUSH_SENT = "push_sent"
 
 
 def upsert_push_device(dev_id: str, token: str, tz: str, platform: str) -> None:
-    _sub(PUSH_DEVICES).document(dev_id).set(
+    _person(PUSH_DEVICES).document(dev_id).set(
         {"token": token, "tz": tz, "platform": platform, "updated_at": _now_utc()})
 
 
 def delete_push_device(dev_id: str) -> None:
-    _sub(PUSH_DEVICES).document(dev_id).delete()
+    _person(PUSH_DEVICES).document(dev_id).delete()
 
 
 def list_push_devices() -> list[dict]:
-    return [{"id": d.id, **d.to_dict()} for d in _sub(PUSH_DEVICES).stream()]
+    return [{"id": d.id, **d.to_dict()} for d in _person(PUSH_DEVICES).stream()]
 
 
 def get_push_marker(key: str) -> list[str] | None:
     """The todo ids stored with a sent-marker, or None when nothing was sent."""
-    snap = _sub(PUSH_SENT).document(key).get()
+    snap = _person(PUSH_SENT).document(key).get()
     return list(snap.to_dict().get("todo_ids") or []) if snap.exists else None
 
 
 def put_push_marker(key: str, todo_ids: list[str], expires_at: datetime.datetime) -> None:
     # expires_at feeds a Firestore TTL policy on this collection.
-    _sub(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
+    _person(PUSH_SENT).document(key).set({"todo_ids": todo_ids, "expires_at": expires_at})
 
 
 def get_due_todos(before: datetime.datetime) -> list[models.Todo]:

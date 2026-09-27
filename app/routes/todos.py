@@ -9,8 +9,9 @@ import uuid
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Response
 from fastapi.encoders import jsonable_encoder
 
-from app import db, models, next_up, tasks, types
-from app.routes.common import affected_refs, apply, reply, saved
+from app import auth, db, models, next_up, shares, tasks, tenant, types
+from app import migrate
+from app.routes.common import affected_refs, apply, atomic, check_share_root, reply, saved
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -21,6 +22,13 @@ def _check_accepts_children(parent_id) -> None:
     parent = db.get_todo(models.TodoId(parent_id) if not isinstance(parent_id, models.TodoId) else parent_id)
     if parent is not None and not types.can(parent, "allowsUserChildren"):
         raise HTTPException(400, f"{types.caps(parent.type)['label']} does not accept added items")
+
+def _check_mount(todo: models.Todo) -> None:
+    """A mount moves, is removed and restored by its owner-person alone, and only while
+    its share is live for them."""
+    share = shares.get(str(todo.todo_id))
+    if share is None or share.state != "active" or not shares.is_member(share, tenant.current()):
+        raise HTTPException(403, "share revoked")
 
 def _check_editable(todo: models.Todo, allowed: bool) -> None:
     """Content edits and deletes are blocked for a type marked read-only in the
@@ -36,6 +44,10 @@ def _check_editable(todo: models.Todo, allowed: bool) -> None:
 @router.post("/todos", response_model=None)
 def create_todo(body: models.TodoCreate, background: BackgroundTasks,
                 x_txn_id: str | None = Header(None)) -> Response:
+    if shares.bound() is not None:
+        # A share has exactly one top-level item; add inside it with split instead.
+        raise HTTPException(400, "create inside a share with its parent")
+
     def create() -> tuple[int, dict | None]:
         # A new top-level project gets a random colour so projects are told apart at a glance.
         todo = models.Todo(title=body.title, color=body.color or random.choice(models.COLORS),
@@ -45,7 +57,7 @@ def create_todo(body: models.TodoCreate, background: BackgroundTasks,
         db.create_todo(todo)
         return 200, jsonable_encoder(todo)
 
-    return saved(db.run_atomic(x_txn_id, create), background)
+    return saved(atomic(x_txn_id, create), background)
 
 @router.get("/todos/root", response_model=list[models.Todo])
 def list_todos(background: BackgroundTasks) -> list[models.Todo]:
@@ -54,10 +66,34 @@ def list_todos(background: BackgroundTasks) -> list[models.Todo]:
     return todos
 
 def _housekeeping() -> None:
+    # Housekeeping must never fail a read. Shares the person has in their list get the
+    # same daily sweep (claimed per partition, so one member's visit does it for all),
+    # a stale migration is finished, and ended/unshared shares are cleaned up.
     try:
-        db.maybe_archive_expired()  # housekeeping must never fail a read
+        db.maybe_archive_expired()
     except Exception:
         log.exception("archiving old deleted todos failed")
+    if not auth.sharing_enabled():
+        return
+    # Each step on its own: one stuck share must not hold up the others or the sweep.
+    steps = [("own migration", lambda: migrate.resume_if_stale(tenant.partition()))]
+    try:
+        mounted = shares.visible_mounted(tenant.current())
+    except Exception:
+        log.exception("listing shares for housekeeping failed")
+        mounted = []
+    for share in mounted:
+        def step(part=share.partition()):
+            with tenant.as_partition(part):
+                migrate.resume_if_stale(part)
+                db.maybe_archive_expired()
+        steps.append((share.partition(), step))
+    steps.append(("share sweep", shares.sweep_daily))
+    for name, run in steps:
+        try:
+            run()
+        except Exception:
+            log.exception("share housekeeping failed: %s", name)
 
 def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: BackgroundTasks) -> None:
     """For each live `calendar` in a just-loaded tree/root list, enqueue a sync if stale.
@@ -69,6 +105,17 @@ def _nudge_stale_calendars(todos: list[models.Todo] | dict, background: Backgrou
     for t in values:
         if t.type == "calendar":
             background.add_task(tasks.enqueue_calendar_sync, str(t.todo_id), t.last_synced_at, now)
+
+def _member_tree(background: BackgroundTasks) -> tuple[int, dict[str, int], list[models.Todo], dict[str, models.Todo]]:
+    """The caller's own tree with every share they can see spliced in at their mounts:
+    (own rev, revs, roots, todosById)."""
+    me = tenant.current()
+    rev = db.get_rev()
+    roots, todos_by_id = _load_tree(rev, background)
+    seen = shares.splice_tree(me, roots, todos_by_id)
+    all_revs = shares.revs(me, rev)
+    all_revs.update(seen)  # the revs the spliced trees were actually read at
+    return rev, all_revs, roots, todos_by_id
 
 def _load_tree(rev: int, background: BackgroundTasks) -> tuple[list[models.Todo], dict[str, models.Todo]]:
     # The sweep runs after the response is sent, so no read pays for it. Tradeoff:
@@ -87,23 +134,24 @@ def get_next_up(background: BackgroundTasks, limit: int = Query(next_up.DEFAULT_
     Calendar events do not consume `limit`; events due then or earlier are added on top.
     High-priority items are included ahead of that list; low-priority items only fill
     slots still short of `limit`."""
-    rev = db.get_rev()
-    roots, todosById = _load_tree(rev, background)
+    rev, _, roots, todosById = _member_tree(background)
     return {"rev": rev, "items": jsonable_encoder(next_up.rank_next_up(roots, todosById, limit, today))}
 
 @router.get("/todos/tree", response_model=dict)
 def get_tree(background: BackgroundTasks) -> dict:
     """Get the full todo tree in one request: { roots: [...], todosById: {...} }"""
-    # Read the revision first, so it can only be older than the tree we return:
-    # the worst case is one redundant refresh, never a missed change.
-    rev = db.get_rev()
-    roots, todosById = _load_tree(rev, background)
+    # Mounts first (a write), then each revision before its tree: a rev can only be
+    # older than the tree we return, so the worst case is one redundant refresh.
+    new_shares = shares.ensure_mounts(tenant.current())
+    rev, all_revs, roots, todosById = _member_tree(background)
     _nudge_stale_calendars(todosById, background)
 
     return {
         "rev": rev,
+        "revs": all_revs,
         "roots": roots,
-        "todosById": todosById
+        "todosById": todosById,
+        "new_shares": new_shares,
     }
 
 TRASH_PAGE_MAX = 100  # a hard cap on one page, whatever the client asks for
@@ -116,7 +164,18 @@ def get_trash(limit: int = Query(50, ge=1, le=TRASH_PAGE_MAX), offset: int = Que
     null; `trashed_at` is when it went to the trash (an item inside a parent has no delete date
     of its own). `q` filters by title, colour and links. `has_more` says whether a next page
     (offset + len(items)) exists."""
-    entries, has_more = db.get_trash(limit, offset, q)
+    entries = db.trash_entries(q)
+    for share in shares.trash_sources(tenant.current()):
+        tag = models.ShareTag(id=share.id, mode=share.mode, owner=share.owner)
+        with tenant.as_partition(share.partition()):
+            for entry in db.trash_entries(q):
+                entry[0].share = tag
+                entries.append(entry)
+    # Newest first, undated last (like db._trash_entries); stable, so an item stays right
+    # after the parent it went to the trash with.
+    entries.sort(key=lambda e: (e[2] is not None, e[2].timestamp() if e[2] else 0), reverse=True)
+    page = entries[offset:offset + limit + 1]
+    entries, has_more = page[:limit], len(page) > limit
     return {"items": [{**jsonable_encoder(todo), "deleted_with": deleted_with,
                        "trashed_at": models.as_utc_instant(trashed_at)}
                       for todo, deleted_with, trashed_at in entries],
@@ -171,6 +230,12 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
     readonly_ok = bool(body.model_fields_set) and body.model_fields_set <= {"collapsed", "priority"}
     if view_only:
         if_match = None
+    share = shares.bound()
+    if share is not None:
+        if view_only:
+            return _collapse_shared(share, todo_id, bool(body.collapsed))
+        if not shares.can_write(share, tenant.current()):
+            raise HTTPException(403, "read only")
 
     def action(todo: models.Todo) -> dict:
         _check_editable(todo, readonly_ok)
@@ -212,8 +277,18 @@ def update_todo(todo_id: uuid.UUID, body: models.TodoUpdate, background: Backgro
         db.update_todo(todo, bump_version=not view_only)
         return jsonable_encoder(todo)
 
-    return saved(db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)), background,
+    return saved(atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=view_only)), background,
                   schedule=not view_only)
+
+def _collapse_shared(share: shares.Share, todo_id: uuid.UUID, collapsed: bool) -> Response:
+    """Collapsing a shared node is the member's own view state, never a write to the share
+    (so a read-only member may do it, and one member's collapse is not everyone's)."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        raise HTTPException(404, "todo not found")
+    shares.set_collapsed(tenant.current(), share.id, str(todo_id), collapsed)
+    todo.collapsed = collapsed
+    return reply(200, jsonable_encoder(todo))
 
 @router.post("/todos/{todo_id}/repeat", response_model=None)
 def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
@@ -231,15 +306,30 @@ def repeat_todo(todo_id: uuid.UUID, background: BackgroundTasks,
         copy = db.spawn_next_occurrence(todo, today)
         return {"created": True, "spawned_id": str(copy.todo_id), "todo": jsonable_encoder(copy)}
 
-    return saved(db.run_atomic(x_txn_id, lambda: apply(todo_id, None, action)),
+    return saved(atomic(x_txn_id, lambda: apply(todo_id, None, action)),
                   background, lambda body: body.get("todo"))
 
 @router.patch("/todos/{todo_id}/reparent", response_model=None)
 def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
                   x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
-    """Move a todo under another parent (or to the top level) at an index."""
+    """Move a todo under another parent (or to the top level) at an index.
+
+    `parent_share` names the partition the new parent is in (a share id, or null for the
+    caller's own list); omitted means "same partition as the todo". When it differs from
+    where the todo is, the todo and its subtree migrate there (app/migrate.py)."""
+    here = tenant.partition()
+    target = here
+    if "parent_share" in body.model_fields_set and auth.sharing_enabled():
+        target = f"users/{tenant.current()}" if body.parent_share is None else f"shares/{body.parent_share}"
+    if target != here:
+        return _reparent_across(todo_id, body, here, target)
+
     def action(todo: models.Todo) -> dict:
-        _check_editable(todo, False)
+        if todo.type == "mount":
+            _check_mount(todo)
+        else:
+            _check_editable(todo, False)
+        check_share_root(todo, "move")
         _check_accepts_children(body.parent_id)
         try:
             moved = db.reparent_todo(todo, body.parent_id, body.index)
@@ -249,7 +339,36 @@ def reparent_todo(todo_id: uuid.UUID, body: models.TodoReparent,
             raise HTTPException(404, "parent not found") from e
         return jsonable_encoder(moved)
 
-    return reply(*db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)))
+    return reply(*atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=True)))
+
+def _reparent_across(todo_id: uuid.UUID, body: models.TodoReparent, here: str, target: str) -> Response:
+    """Drag an item into or out of a share: its whole subtree changes partition. Needs edit
+    rights on both sides (bind_partition already checked the source's)."""
+    todo = db.get_todo(models.TodoId(todo_id))
+    if todo is None:
+        # A retry of a move that already happened (its answer was lost): it is there now.
+        if shares.locate(str(todo_id)) == target:
+            shares.bind_partition(target, shares.check_partition_write(target))
+            return reply(200, jsonable_encoder(db.get_todo(models.TodoId(todo_id))))
+        raise HTTPException(404, "todo not found")
+    if todo.type == "mount" or (shares.bound() is not None and str(todo_id) == shares.bound().id):
+        raise HTTPException(409, "crosses share boundary")
+    target_share = shares.check_partition_write(target)
+    parent = None if body.parent_id is None else str(body.parent_id)
+    if parent is not None:
+        with tenant.as_partition(target):
+            parent_todo = db.get_todo(body.parent_id)
+        if parent_todo is None:
+            raise HTTPException(404, "parent not found")
+        if not types.can(parent_todo, "allowsUserChildren"):
+            raise HTTPException(400, f"{types.caps(parent_todo.type)['label']} does not accept added items")
+    try:
+        migrate.migrate_subtree(here, str(todo_id), target, kind="move", dst_parent=parent, index=body.index)
+    except migrate.MigrationError as e:
+        raise HTTPException(migrate.HTTP_STATUS.get(e.detail, 400), e.detail) from e
+    shares.bind_partition(target, target_share)
+    moved = db.get_todo(models.TodoId(todo_id))
+    return reply(200, jsonable_encoder(moved))
 
 @router.delete("/todos/{todo_id}", status_code=204, response_model=None)
 def delete_todo(todo_id: uuid.UUID,
@@ -258,26 +377,34 @@ def delete_todo(todo_id: uuid.UUID,
     # (also those of a calendar inside the deleted item) are hard-deleted instead:
     # the feed brings them back if the calendar is restored.
     def action(todo: models.Todo) -> None:
+        if todo.type == "mount":  # "Remove from my list": only this person's mount goes
+            todo.deleted = True
+            db.update_todo(todo)
+            return None
         _check_editable(todo, False)
+        check_share_root(todo, "delete")
         purge = db.calendar_purge_plan(todo)
         todo.deleted = True
         db.apply_calendar_purge(purge, todo)
         db.update_todo(todo)
         return None
 
-    return reply(*db.run_atomic(
-        x_txn_id, lambda: apply(todo_id, if_match, action, missing_ok=True)))
+    return reply(*atomic(
+        x_txn_id, lambda: apply(todo_id, if_match, action, missing_ok=True, mount_ok=True)))
 
 @router.patch("/todos/{todo_id}/undelete", response_model=None)
 def undelete_todo_endpoint(todo_id: uuid.UUID, background: BackgroundTasks,
                            x_txn_id: str | None = Header(None), if_match: str | None = Header(None)) -> Response:
     """Restore a soft-deleted todo and its entire subtree (undo)"""
     def action(todo: models.Todo) -> dict:
+        if todo.type == "mount":
+            _check_mount(todo)
+        check_share_root(todo, "undelete")
         restored, affected = db.undelete_todo(models.TodoId(todo_id))
         return {**jsonable_encoder(restored), "affected": affected_refs(affected)}
 
-    return saved(db.run_atomic(
-        x_txn_id, lambda: apply(todo_id, if_match, action, include_deleted=True)), background)
+    return saved(atomic(
+        x_txn_id, lambda: apply(todo_id, if_match, action, include_deleted=True, mount_ok=True)), background)
 
 @router.post("/todos/{todo_id}/split", response_model=None)
 def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: BackgroundTasks,
@@ -298,7 +425,7 @@ def split_todo(todo_id: uuid.UUID, body: models.TodoSplit, background: Backgroun
             todo, body.descriptions, due_date, body.type or types.DEFAULT, content)
         return {**jsonable_encoder(parent), "affected": affected_refs(affected)}
 
-    result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+    result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     if result[0] == 200 and due_date:
         # The new children (affected[1:]) all carry the split's due date; the parent is unchanged.
         for child in result[1]["affected"][1:]:  # type: ignore[index]
@@ -327,7 +454,11 @@ def move_todo(todo_id: uuid.UUID, direction: str,
         raise HTTPException(400, "direction must be 'up' or 'down'")
 
     def action(todo: models.Todo) -> dict:
-        _check_editable(todo, False)
+        if todo.type == "mount":
+            _check_mount(todo)
+        else:
+            _check_editable(todo, False)
+        check_share_root(todo, "move")
         try:
             moved = db.reorder_todo(models.TodoId(todo_id), direction)
         except db.MoveError as e:  # only the deliberate refusals; real failures propagate
@@ -335,4 +466,4 @@ def move_todo(todo_id: uuid.UUID, direction: str,
             raise HTTPException(404 if e.kind == "missing" else 400, detail) from e
         return jsonable_encoder(moved)
 
-    return reply(*db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action)))
+    return reply(*atomic(x_txn_id, lambda: apply(todo_id, if_match, action, mount_ok=True)))

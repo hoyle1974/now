@@ -439,3 +439,18 @@ test("a debounced check does not cancel a pending reconnect retry", async () => 
   await s.fireRetry();
   assert.equal(s.phases[s.phases.length - 1], "idle");
 });
+
+test("a revs map from fetchRev is handed to noteRemoteRevs", async () => {
+  const seen = [];
+  const f = Freshness.create({
+    engine: { pending: () => 0, isStale: () => false, knownRev: () => 1,
+      noteRemoteRev: () => { throw new Error("should use the map"); },
+      noteRemoteRevs: (revs) => seen.push(revs) },
+    fetchRev: async () => ({ rev: 1, revs: { "users/me": 1, "shares/S": 2 }, version: "13" }),
+    appVersion: "13", reload() {}, reloadGuard: { get: () => null, set() {} },
+    refresh: async () => {}, editorOpen: () => false, now: () => 0, minGapMs: 0, isActive: () => true,
+    timers: { setTimeout: () => 0, clearTimeout() {} },
+  });
+  await f.check();
+  assert.deepEqual(seen, [{ "users/me": 1, "shares/S": 2 }]);
+});

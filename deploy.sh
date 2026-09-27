@@ -24,6 +24,10 @@ fi
 env_vars=""
 [ -n "${ALLOWED_EMAILS:-}" ] && env_vars+="ALLOWED_EMAILS=${ALLOWED_EMAILS},"
 [ -n "${ATTACHMENTS_BUCKET:-}" ] && env_vars+="ATTACHMENTS_BUCKET=${ATTACHMENTS_BUCKET},"
+# Sharing between users (docs/okf/features/sharing.md): SHARING_ENABLED=1 ./deploy.sh turns it
+# on, SHARING_ENABLED=0 off (kill switch; share data stays). Unset keeps what the service has.
+SHARING_ENABLED="${SHARING_ENABLED:-$(_cfg .now.env SHARING_ENABLED)}"
+[ -n "${SHARING_ENABLED:-}" ] && env_vars+="SHARING_ENABLED=${SHARING_ENABLED},"
 [ -n "$env_vars" ] && args+=(--update-env-vars "${env_vars%,}")
 
 if [ ! -f web/config.js ]; then

@@ -4,14 +4,15 @@ title: Firestore collections
 description: Collections and documents used in Firestore.
 resource: app/db_firestore.py
 tags: [data, firestore]
-timestamp: 2026-09-22T05:37:00Z
+timestamp: 2026-09-27T03:00:00Z
 ---
-Every collection below lives under `users/{email}/...` (`db.user_ref(email)` builds the
-parent `users/{email}` document reference; it defaults to the signed-in user bound by
-`app/tenant.py`). The `users/{email}` parent documents never exist themselves — only
+Every collection below lives under a *partition*: `users/{email}/...` for a person's own
+data, or `shares/{id}/...` for a shared subtree (same layout). `db.partition_ref()` builds
+the parent document reference from `tenant.partition()` (`app/tenant.py`); `db.user_ref(email)`
+always builds `users/{email}` (defaults to the signed-in user) and is used for per-person
+data such as push devices and sent-markers, whatever partition is bound. The `users/{email}` parent documents never exist themselves — only
 their subcollections — so listing them is done with `list_documents()`, not `stream()`.
-Firestore paths and blob keys (`app/blobstore.py`) are both partitioned this way; nothing
-is shared across users.
+Firestore paths and blob keys (`app/blobstore.py`, `{partition}/todos/{id}/{attachment}`) are both partitioned this way.
 
 - `todos` — live and soft-deleted [todos](todo.md). Every tree read scans it, so it is kept small.
 - `todos_archive` — todos deleted 30+ days ago with their subtrees ([archive](../features/trash-archive.md)).
@@ -23,5 +24,10 @@ is shared across users.
   TTL policy survives the `users/{email}/...` nesting because it is set with
   `--collection-group=push_sent` (`scripts/setup-push.sh`), which matches `push_sent` at any
   path depth, not just at the top level.
+
+Sharing ([sharing](../features/sharing.md)):
+- `shares/{id}` — the share record (`owner`, `members` ("all" or emails), `mode` `ro`/`rw`, `state` `active`/`migrating`/`unshared`, `returned_to`, dates); its subcollections are a partition like a user's. `id` is the shared root's todo id.
+- `shares_meta/rev` — `value`, bumped on share, unshare and mode change (the `shares` key of `revs`).
+- `users/{email}/view_state/{share_id}` — `collapsed` (node ids) and `expires_at` (now + 90 days on every write; Firestore TTL, collection group `view_state`).
 
 Index: `todos` composite `done, deleted, due_date` (`firestore.indexes.json`) for the reminders' due-window query. A per-collection-ID index applies to every `todos` subcollection regardless of path, so no change was needed for the `users/{email}/todos` nesting.

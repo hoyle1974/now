@@ -66,14 +66,29 @@ function commitDrop(target) {
   const state = dragState;
   dragState = null;
   clearDropHint();
-  if (!state || !target || !target.plan || !engine.enqueue({
-    kind: "reparent", target_id: state.todoId, payload: target.plan,
-  })) {
+  if (!state || !target || !target.plan) {
     renderTree();
     return;
   }
-  // Show what was just dropped into.
-  if (target.plan.parent_id) setCollapsed(target.plan.parent_id, false);
+  const parentId = target.plan.parent_id ?? null;
+  if (!ShareUI.dropAllowed(model, state.todoId, parentId, myEmail())) {
+    renderTree();
+    toast.show({ message: "That move isn't allowed for shared items." });
+    return;
+  }
+  const go = () => {
+    if (!engine.enqueue({ kind: "reparent", target_id: state.todoId, payload: target.plan })) {
+      renderTree();
+      return;
+    }
+    // Show what was just dropped into.
+    if (parentId) setCollapsed(parentId, false);
+  };
+  // Crossing a share's edge moves the item for everyone: say so first.
+  const crossing = ShareUI.crossingMessage(model, state.todoId, parentId);
+  if (!crossing) return go();
+  renderTree();
+  ConfirmDialog.open({ message: crossing, confirmLabel: "Move", onConfirm: go });
 }
 
 // #1 & #5: Swipe gestures and title tap-to-rename
@@ -137,14 +152,14 @@ function attachRowInteractions(row, todo) {
     // Swipe right: mark done
     if (deltaX > 60) {
       const checkbox = row.querySelector('input[type="checkbox"]');
-      if (checkbox && !checkbox.checked) {
+      if (checkbox && !checkbox.checked && !checkbox.disabled) {
         checkbox.checked = true;
         celebrate(todo.todo_id);
         reportedFailure(toggleDone(todo.todo_id, true));
       }
     }
-    // Swipe left: delete
-    else if (deltaX < -60) {
+    // Swipe left: delete (never in a read-only share, whose rows can't be changed)
+    else if (deltaX < -60 && (ShareUI.editable(todo, myEmail()) || todo.share_root)) {
       setActivePanel(null);
       reportedFailure(deleteTodo(todo.todo_id));
     }
@@ -154,7 +169,7 @@ function attachRowInteractions(row, todo) {
 
   // #5: Tap title to rename
   const titleEl = row.querySelector('.todo-title');
-  if (titleEl && !todo.done) {
+  if (titleEl && !todo.done && ShareUI.editable(todo, myEmail())) {
     titleEl.style.cursor = 'text';
     titleEl.addEventListener('click', (e) => {
       if (e.detail === 2) { // Double-click

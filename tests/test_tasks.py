@@ -145,7 +145,11 @@ def test_task_body_names_the_user(monkeypatch):
     monkeypatch.setenv("NOTIFY_CALLER", "sa@x.iam")
     with tenant.as_user("kid@example.com"):
         assert tasks.create_task("tid", "2026-09-21T10:00:00", dt.datetime.now(dt.UTC)) is True
-    assert captured["body"] == {"todo_id": "tid", "due": "2026-09-21T10:00:00", "user": "kid@example.com"}
+    assert captured["body"] == {"todo_id": "tid", "due": "2026-09-21T10:00:00", "user": "kid@example.com",
+                                "partition": "users/kid@example.com"}
+    with tenant.as_user("kid@example.com"), tenant.as_partition("shares/s1"):
+        tasks.create_task("tid", "2026-09-21T10:00:00", dt.datetime.now(dt.UTC))
+    assert captured["body"]["partition"] == "shares/s1"
 
 
 # ---- the daily run schedules ----

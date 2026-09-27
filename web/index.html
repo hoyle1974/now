@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Todos</title>
   <meta name="description" content="A personal todo list: nested, offline-first, with reminders.">
-  <link rel="stylesheet" href="/style.css?v=104">
-  <link rel="stylesheet" href="/fields.css?v=104">
-  <link rel="stylesheet" href="/vendor/easymde.min.css?v=104">
+  <link rel="stylesheet" href="/style.css?v=107">
+  <link rel="stylesheet" href="/fields.css?v=107">
+  <link rel="stylesheet" href="/vendor/easymde.min.css?v=107">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="manifest" href="/manifest.json">
@@ -78,6 +78,10 @@
           <button type="button" id="calendar-copy" class="log-toggle"
                   title="Copy the private feed link. Anyone with it can read your due todos">Copy link</button>
         </span>
+      </div>
+      <div class="more-row" id="shares-row" hidden>
+        <span class="more-label">Shared</span>
+        <span class="more-items shares-list" id="shares-list"></span>
       </div>
       <div class="more-row">
         <span class="more-label">Support</span>
@@ -153,50 +157,51 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
 <script defer src="https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js"></script>
-<script defer src="/config.js?v=104"></script>
-<script defer src="/types-data.js?v=104"></script>
-<script defer src="/types.js?v=104"></script>
-<script defer src="/dom.js?v=104"></script>
-<script defer src="/confirm-dialog.js?v=104"></script>
-<script defer src="/date-picker.js?v=104"></script>
-<script defer src="/auth.js?v=104"></script>
-<script defer src="/eventlog.js?v=104"></script>
-  <script defer src="/sync.js?v=104"></script>
-  <script defer src="/fields.js?v=104"></script>
-  <script defer src="/attachments.js?v=104"></script>
-  <script defer src="/fields-ui.js?v=104"></script>
-  <script defer src="/attachments-ui.js?v=104"></script>
-  <script defer src="/idb-store.js?v=104"></script>
-  <script defer src="/remote-diff.js?v=104"></script>
-  <script defer src="/freshness.js?v=104"></script>
-  <script defer src="/badge.js?v=104"></script>
-  <script defer src="/push.js?v=104"></script>
-  <script defer src="/due.js?v=104"></script>
-  <script defer src="/autodone.js?v=104"></script>
-<script defer src="/outline.js?v=104"></script>
-  <script defer src="/reorder.js?v=104"></script>
-  <script defer src="/search.js?v=104"></script>
-  <script defer src="/themes.js?v=104"></script>
-<script defer src="/mascot.js?v=104"></script>
-<script defer src="/sparkle.js?v=104"></script>
-<script defer src="/toast.js?v=104"></script>
-<script defer src="/app.js?v=104"></script>
-<script defer src="/ui-helpers.js?v=104"></script>
-<script defer src="/row-interactions.js?v=104"></script>
-<script defer src="/render-node.js?v=104"></script>
-<script defer src="/vendor/markdown-it.min.js?v=104"></script>
-<script defer src="/markdown.js?v=104"></script>
-<script defer src="/vendor/easymde.min.js?v=104"></script>
-<script defer src="/markdown-editor.js?v=104"></script>
-<script defer src="/editors.js?v=104"></script>
-<script defer src="/types-ui.js?v=104"></script>
-<script defer src="/item-form.js?v=104"></script>
-<script defer src="/tree-view.js?v=104"></script>
-<script defer src="/composer.js?v=104"></script>
-<script defer src="/next-up-ui.js?v=104"></script>
-<script defer src="/pull-refresh.js?v=104"></script>
-<script defer src="/more-panel.js?v=104"></script>
-  <script defer src="/trash.js?v=104"></script>
-  <script defer src="/search-ui.js?v=104"></script>
+<script defer src="/config.js?v=107"></script>
+<script defer src="/types-data.js?v=107"></script>
+<script defer src="/types.js?v=107"></script>
+<script defer src="/share-ui.js?v=107"></script>
+<script defer src="/dom.js?v=107"></script>
+<script defer src="/confirm-dialog.js?v=107"></script>
+<script defer src="/date-picker.js?v=107"></script>
+<script defer src="/auth.js?v=107"></script>
+<script defer src="/eventlog.js?v=107"></script>
+  <script defer src="/sync.js?v=107"></script>
+  <script defer src="/fields.js?v=107"></script>
+  <script defer src="/attachments.js?v=107"></script>
+  <script defer src="/fields-ui.js?v=107"></script>
+  <script defer src="/attachments-ui.js?v=107"></script>
+  <script defer src="/idb-store.js?v=107"></script>
+  <script defer src="/remote-diff.js?v=107"></script>
+  <script defer src="/freshness.js?v=107"></script>
+  <script defer src="/badge.js?v=107"></script>
+  <script defer src="/push.js?v=107"></script>
+  <script defer src="/due.js?v=107"></script>
+  <script defer src="/autodone.js?v=107"></script>
+<script defer src="/outline.js?v=107"></script>
+  <script defer src="/reorder.js?v=107"></script>
+  <script defer src="/search.js?v=107"></script>
+  <script defer src="/themes.js?v=107"></script>
+<script defer src="/mascot.js?v=107"></script>
+<script defer src="/sparkle.js?v=107"></script>
+<script defer src="/toast.js?v=107"></script>
+<script defer src="/app.js?v=107"></script>
+<script defer src="/ui-helpers.js?v=107"></script>
+<script defer src="/row-interactions.js?v=107"></script>
+<script defer src="/render-node.js?v=107"></script>
+<script defer src="/vendor/markdown-it.min.js?v=107"></script>
+<script defer src="/markdown.js?v=107"></script>
+<script defer src="/vendor/easymde.min.js?v=107"></script>
+<script defer src="/markdown-editor.js?v=107"></script>
+<script defer src="/editors.js?v=107"></script>
+<script defer src="/types-ui.js?v=107"></script>
+<script defer src="/item-form.js?v=107"></script>
+<script defer src="/tree-view.js?v=107"></script>
+<script defer src="/composer.js?v=107"></script>
+<script defer src="/next-up-ui.js?v=107"></script>
+<script defer src="/pull-refresh.js?v=107"></script>
+<script defer src="/more-panel.js?v=107"></script>
+  <script defer src="/trash.js?v=107"></script>
+  <script defer src="/search-ui.js?v=107"></script>
 </body>
 </html>

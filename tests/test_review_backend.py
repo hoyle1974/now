@@ -78,8 +78,8 @@ def test_upload_blob_kept_when_commit_actually_succeeded(monkeypatch):
     t = mk()
     real = db.run_atomic
 
-    def commit_then_lose_connection(txn_id, fn):
-        real(txn_id, fn)
+    def commit_then_lose_connection(txn_id, fn, *args, **kwargs):
+        real(txn_id, fn, *args, **kwargs)
         raise RuntimeError("response lost after commit")
     monkeypatch.setattr(db, "run_atomic", commit_then_lose_connection)
     c500.post(f"/todos/{t['todo_id']}/attachments", files={"file": ("p.png", PNG, "image/png")})
@@ -155,7 +155,7 @@ def test_archive_bumps_rev_when_it_moves_something():
 
 
 def _reset_archive_state():
-    db_firestore._state.archive_checked.pop(TEST_USER, None)
+    db_firestore._state.archive_checked.pop(f"users/{TEST_USER}", None)
     db.user_ref(TEST_USER).collection("meta").document("archive").delete()
 
 
@@ -195,11 +195,11 @@ def test_maybe_archive_expired_failure_retries_and_success_sticks(monkeypatch):
     with pytest.raises(RuntimeError):
         db_firestore.maybe_archive_expired()
     # the lease was released, so another attempt may run (in-process backoff aside)
-    db_firestore._state.archive_checked.pop(TEST_USER, None)
+    db_firestore._state.archive_checked.pop(f"users/{TEST_USER}", None)
     monkeypatch.setattr(db_firestore, "archive_expired", lambda now=None: calls.append(2) or 0)
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
-    db_firestore._state.archive_checked.pop(TEST_USER, None)
+    db_firestore._state.archive_checked.pop(f"users/{TEST_USER}", None)
     db_firestore.maybe_archive_expired()
     assert calls == [1, 2]
 

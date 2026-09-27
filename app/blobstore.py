@@ -24,6 +24,16 @@ class MemoryStore:
     def get(self, key: str) -> tuple[bytes, str] | None:
         return self._objects.get(key)
 
+    def exists(self, key: str) -> bool:
+        return key in self._objects
+
+    def copy(self, src: str, dst: str) -> bool:
+        """Copy one object; False when src is missing (already moved)."""
+        if src not in self._objects:
+            return False
+        self.put(dst, *self._objects[src])
+        return True
+
     def delete(self, key: str) -> None:
         self._objects.pop(key, None)
         self._times.pop(key, None)
@@ -55,6 +65,18 @@ class GcsStore:
         except NotFound:
             return None
         return data, blob.content_type or "application/octet-stream"
+
+    def exists(self, key: str) -> bool:
+        """Metadata only: never downloads the bytes."""
+        return self._bucket.get_blob(key) is not None
+
+    def copy(self, src: str, dst: str) -> bool:
+        """Server-side copy of one object; False when src is missing (already moved)."""
+        blob = self._bucket.get_blob(src)
+        if blob is None:
+            return False
+        self._bucket.copy_blob(blob, self._bucket, dst)
+        return True
 
     def delete(self, key: str) -> None:
         from google.cloud.exceptions import NotFound
@@ -91,13 +113,17 @@ def use_memory() -> MemoryStore:
     return _store
 
 
-def user_todos_prefix() -> str:
-    return f"users/{tenant.current()}/todos/"
+def partition_todos_prefix() -> str:
+    """Blob keys mirror Firestore paths: users/{email}/todos/ or shares/{id}/todos/."""
+    return f"{tenant.partition()}/todos/"
+
+
+user_todos_prefix = partition_todos_prefix  # older name
 
 
 def key_for(todo_id: str, attachment_id: str) -> str:
-    return f"{user_todos_prefix()}{todo_id}/{attachment_id}"
+    return f"{partition_todos_prefix()}{todo_id}/{attachment_id}"
 
 
 def todo_prefix(todo_id: str) -> str:
-    return f"{user_todos_prefix()}{todo_id}/"
+    return f"{partition_todos_prefix()}{todo_id}/"

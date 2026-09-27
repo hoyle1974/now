@@ -4,20 +4,20 @@ title: HTTP routes
 description: Routes live in app/routes/*.py, mounted by app/main.py.
 resource: app/routes
 tags: [api]
-timestamp: 2026-09-25T05:20:00Z
+timestamp: 2026-09-27T05:00:00Z
 ---
 | Route | Purpose |
 |---|---|
 | `GET /health` | Liveness. `?deep=1` also pings Firestore (503 if it cannot). |
 | `POST /todos` | Create; optional `type` ([item types](../features/item-types.md)). |
 | `GET /todos/tree` | Full tree; adds derived `blocked`. Triggers the [archive](../features/trash-archive.md) sweep and, in the background, a [calendar sync](../features/calendar-sync.md) nudge for every stale `calendar` item in the tree. |
-| `GET /todos/rev` | Current revision + app `version` + `triggered_by` (the `client_session_id` behind the last rev-bumping write, or null); the cheap freshness check ([sync](../features/sync-model.md)). |
+| `GET /todos/rev` | Current revision (`rev`, own partition) and `revs` (one per partition, [sync](../features/sync-model.md)) + app `version` + `triggered_by` (the `client_session_id` behind the last rev-bumping write, or null); the cheap freshness check ([sync](../features/sync-model.md)). |
 | `GET /todos/next` | [Next up](../features/next-up.md). |
 | `GET /todos/trash?limit&offset&q` (paged, cap 100; one entry per trashed item, with `deleted_with`, `trashed_at`; returns `has_more`), `POST /todos/clear-completed`, `PATCH /todos/{id}/undelete` (also restores deleted ancestors) | [Trash](../features/trash-archive.md). |
 | `GET /todos/root` | Reads; also nudges stale `calendar` roots (same as `/todos/tree`, see [calendar sync](../features/calendar-sync.md)). |
 | `GET /todos/{id}` | Read. |
 | `PATCH /todos/{id}` | Content edits, `If-Match: <version>`, 409 + current todo on stale ([fields](../features/fields.md)). |
-| `PATCH /todos/{id}/reparent` | `{parent_id, index}` move ([ordering](../features/ordering-nesting.md)). |
+| `PATCH /todos/{id}/reparent` | `{parent_id, index, parent_share?}` move ([ordering](../features/ordering-nesting.md)). `parent_share` names the new parent's partition (a share id, or null for your own list); when it differs from the todo's, the subtree migrates there ([sharing](../features/sharing.md)). A mount's moves skip `If-Match` (last write wins). |
 | `PATCH /todos/{id}/move/{direction}` | Swap with a neighbour. 400 at the top/bottom or with no siblings, 404 if missing; any other failure is a 5xx (the client retries those, it drops 4xx). |
 | `POST /todos/{id}/repeat` | Spawn next occurrence ([repeating](../features/repeating-todos.md)). |
 | `POST /todos/{id}/split` | Add several children; optional `type` for all of them. Optional `content` is stored only when exactly one child is created and that type has a `content` field. |
@@ -29,9 +29,16 @@ timestamp: 2026-09-25T05:20:00Z
 | `POST /internal/notify` | Cloud Scheduler only (OIDC), once a day; one job loops every `auth.allowed_emails()` entry, binding each as the current user in turn (one user's failure doesn't block the rest), sums `{devices, sent, scheduled}` over all of them. |
 | `POST /internal/notify-todo` `{todo_id, due, user}` | Cloud Tasks only (same OIDC check); `user` names whose todo it is (absent on a task queued before this change → falls back to the owner; 400 if it names anyone outside `ALLOWED_EMAILS`); sends one 1-hour heads-up unless the todo changed, returns `{sent}` ([push reminders](../features/push-reminders.md)). |
 | `POST /internal/sync-calendar/{id}` `{calendar_id, user, client_session_id?}` | Cloud Tasks only (same OIDC check); fetches/parses/reconciles one `calendar` item's events ([calendar sync](../features/calendar-sync.md)). |
-| `DELETE /todos/{id}` | Soft delete (204). |
+| `DELETE /todos/{id}` | Soft delete (204). On a `mount` it removes that shared item from your list only. |
+| `PUT /todos/{id}/share` `{mode: ro\|rw}` | Share an item and its subtree with everyone (migration into `shares/{id}`; 409 `crosses share boundary` with a calendar inside, 400 `not eligible`, 413 `too large`), or, on your mount of a share you own, change its mode (403 `owner only` otherwise). Send without `X-Share`. ([sharing](../features/sharing.md)) |
+| `DELETE /todos/{id}/share` | Owner: stop sharing; the items return to where your mount was. |
+| `GET /shares` | "Shared with me": `{items: [{id, title, owner, mode, mounted, removed}]}` for every live share you can see. |
 
-Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev`.
+**`X-Share: <share id>`** (any route, [sharing](../features/sharing.md)): run the request inside that share's partition (`auth.bind_partition`). Refusals, told apart by `detail`: 403 `share revoked` (no such share, not a member, or unshared and you aren't the owner it went back to — the owner is sent to their own partition instead), 403 `read only` (a write by a read-only member; a `collapsed`-only `PATCH` is allowed and goes to the member's own view state, not the share), 403 `owner only` (deleting or restoring the share root as a non-owner), 409 `crosses share boundary` (moving the share root inside the share), 503 `migrating`, 400 `invalid X-Share`, 404 `sharing disabled` while `SHARING_ENABLED` is off. Writes inside a share stamp `last_edited_by`. A `GET` may pass `?share=<id>` instead of the header (an `<img>` can't send headers). Every reply names the partition it used in `X-Partition`.
+
+**Old homes.** A write whose todo isn't in the partition it addressed is followed to where the caller can reach it now (their own list, then each mounted share, `shares.locate`) and runs there once (`common.atomic`), with `X-Partition` naming it; the `txn_log` of the addressed partition is checked first, so a write committed before a move is replayed, not redone. A content edit sent to a mount lands on the share's root.
+
+Writes carry `X-Txn-Id` for idempotency (a safe token, `[A-Za-z0-9_-]{1,100}` and not `__x__`, else 400 on any route); write responses reveal remote changes via `X-Rev-Prev` / `X-Rev`, for the partition named in `X-Partition`.
 
 404 bodies carry a `detail` the client relies on: `todo not found` (the item is gone, drop it locally), `attachment not found`, `parent not found` (reparent target). A bare `Not Found` means the route itself is missing. `DELETE` of a missing todo is an idempotent 204.
 

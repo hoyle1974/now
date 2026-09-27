@@ -4,7 +4,7 @@ title: Trash, clear completed and archive
 description: Soft delete, undo, and 30-day archive to todos_archive.
 resource: app/db_firestore.py
 tags: [delete, archive]
-timestamp: 2026-09-25T05:20:00Z
+timestamp: 2026-09-27T06:00:00Z
 ---
 - **Clear completed:** `POST /todos/clear-completed` soft-deletes every done todo whose whole subtree is done (only the topmost of each subtree is flagged, so undo restores the subtree). A plan of 200 writes or fewer is one transaction (`X-Txn-Id` replayed); above that it commits in batches of 200, like calendar sync, so it stays under Firestore's 500-write cap. Toast Undo queues an `undelete` per item.
 - **Trash** (`web/trash.js`): its own screen (the List / Next up control is hidden, accent-colored Back button); `GET /todos/trash` (one entry per item, most recently deleted first, by `deleted_at`; see below); restore with `undelete`. If an ancestor is also deleted the todo restores at top level.
@@ -20,3 +20,5 @@ timestamp: 2026-09-25T05:20:00Z
 **Restore brings the parent chain.** `undelete_todo` restores the todo and every *deleted* ancestor above it, so an inner item is visible again where it was (`affected` lists every restored todo, the todo first). It does not resurrect the rest of the parent's contents: the other children of each restored ancestor, down from the highest deleted one, are flagged deleted (with that ancestor's delete date) and stay in the trash as their own entries. Restoring the flagged top of a subtree itself brings everything beneath it back, as before. If an ancestor is gone (archived), the highest surviving one goes to the top level. Restoring a child whose parent chain was deleted therefore changes several documents.
 
 **Search and Trash.** Search asks the server for trash matches (debounced 250 ms, first 10) instead of matching a downloaded list. A trashed hit says what it is and what it went with ("Todo · deleted with Work · open in Trash"); tapping it closes search, opens the Trash page and that item's viewer (`Trash.open(item)`, which needs no paging because the search already has the item), where Undelete restores it.
+
+**Shared items** ([sharing](sharing.md)): a share has its own trash and archive (it is its own partition). `GET /todos/trash` merges your trash with the trash of each share in your list that you may edit, newest first, each shared entry tagged `share` (restore it with `X-Share`). Removing a shared item from your list (deleting its mount) is not trash. The archive sweep runs per share partition, triggered by any member's visit.

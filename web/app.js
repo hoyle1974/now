@@ -4,7 +4,7 @@
 // scope, so a part may use anything declared in an earlier part at load time and
 // anything declared in any part at run time. APP_VERSION below is read by the server.
 const API_BASE = "/todos";
-const APP_VERSION = "104";
+const APP_VERSION = "107";
 
 // On-device diagnostics (see the "log" link under the title). Kept in
 // localStorage so it survives the phone killing the page while locked.
@@ -109,7 +109,8 @@ async function sendRequest(req) {
       const value = response.headers.get(name);
       return value === null ? undefined : Number(value);
     };
-    return { status: response.status, body, prev: header("X-Rev-Prev"), rev: header("X-Rev") };
+    return { status: response.status, body, prev: header("X-Rev-Prev"), rev: header("X-Rev"),
+      partition: response.headers.get("X-Partition") || undefined };
   } finally {
     clearTimeout(timer);
   }
@@ -202,7 +203,7 @@ function setPhase(next) {
 async function refreshFromRemote(triggeredBy) {
   const before = RemoteDiff.snapshot(model.todosById);
   await loadAndRender();
-  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)));
+  const said = RemoteDiff.describe(RemoteDiff.diff(before, RemoteDiff.snapshot(model.todosById)), myEmail());
   logEvent("remote", said || "refreshed, nothing visible changed");
   const ownSync = Boolean(triggeredBy) && triggeredBy === clientSessionId();
   if (said && !ownSync && window.Mascot) window.Mascot.react(said, { key: "remote", force: true, delay: 400 });
@@ -210,8 +211,12 @@ async function refreshFromRemote(triggeredBy) {
 
 const model = Sync.createModel();
 FieldsUI.init({ model, focusTodo: (id, y) => focusTodo(id, y) });
+// The signed-in email (web/auth.js); local test servers without sign-in set NOW_CONFIG.devEmail.
+const myEmail = () => (window.NowAuth && window.NowAuth.email()) || (window.NOW_CONFIG && window.NOW_CONFIG.devEmail) || null;
+
 const engine = Sync.createEngine({
   model,
+  me: myEmail,
   store: IdbStore.create(),
   send: sendRequest,
   refetch: () => fetchTree(),
@@ -232,8 +237,9 @@ const engine = Sync.createEngine({
 
 AttachmentsUI.init({
   model,
+  me: () => myEmail(),
   notify: (message) => showNotice({ level: "error", message }),
-  observeRev: (prev, rev) => engine.observeRev(prev, rev),
+  observeRev: (prev, rev, partition) => engine.observeRev(prev, rev, partition),
 });
 
 // Is the user in the middle of typing into the list (an inline editor, or the
@@ -255,7 +261,7 @@ const freshness = Freshness.create({
   fetchRev: async () => {
     const response = await fetch(`${API_BASE}/rev`, { cache: "no-store" });
     if (!response.ok) throw new Error(`rev check failed: ${response.status}`);
-    return response.json(); // { rev, version, triggered_by }
+    return response.json(); // { rev, revs, version, triggered_by }
   },
   appVersion: APP_VERSION,
   reload: () => location.reload(),
@@ -340,14 +346,17 @@ function setPriority(todoId, priority) {
 }
 
 async function deleteTodo(todoId) {
+  const node = model.todosById.get(todoId);
+  // Someone else's shared item only leaves your list (docs/okf/features/sharing.md).
+  const removing = node && node.share_root && node.share.owner !== myEmail();
   if (engine.enqueue({ kind: "delete", target_id: todoId })) {
-    showUndo(todoId);
+    showUndo(todoId, removing ? "Removed from your list" : "Deleted");
   }
 }
 
 // Soft-delete undo: restore a deleted todo within 5 seconds.
-function showUndo(todoId) {
-  toast.show({ message: "Deleted", action: { label: "Undo", run: () =>
+function showUndo(todoId, message = "Deleted") {
+  toast.show({ message, action: { label: "Undo", run: () =>
     engine.enqueue({ kind: "undelete", target_id: todoId }) } });
 }
 
@@ -385,6 +394,62 @@ async function saveSplit(todoId, descriptions, dueDate = null, type = null, cont
   engine.enqueue({ kind: "split", target_id: todoId, payload });
 }
 
+// Share / change / stop sharing an item (the viewer's Sharing control). Online only: the
+// server moves the item's data between partitions, then the list is reloaded.
+const SHARE_ERRORS = {
+  "crosses share boundary": "It holds a calendar, so it can't be shared.",
+  "not eligible": "This item can't be shared.",
+  "too large": "It's too big to share (over 2,000 items).",
+  "owner only": "Only the owner can change its sharing.",
+};
+
+async function changeSharing(todoId, value) {
+  const node = model.todosById.get(todoId);
+  if (!node) return;
+  const was = node.share_root ? node.share.mode : "private";
+  if (value === was) return;
+  const title = node.title;
+  const run = async () => {
+    toast.show({ message: value === "private" ? "Stopping sharing…" : "Sharing…", ttl: 3000 });
+    await engine.flush(); // queued edits go first, to where the item is now
+    let response;
+    try {
+      response = await fetch(`${API_BASE}/${todoId}/share`, value === "private"
+        ? { method: "DELETE" }
+        : { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ mode: value }) });
+    } catch (e) {
+      showNotice({ level: "error", message: "Couldn't change sharing: you seem to be offline." });
+      return;
+    }
+    if (!response.ok) {
+      const detail = await response.json().then((b) => b && b.detail, () => null);
+      showNotice({ level: "error", message: SHARE_ERRORS[detail] || `Couldn't change sharing (${response.status}).` });
+      return;
+    }
+    logEvent("share", `${todoId.slice(0, 8)} -> ${value}`);
+    await loadAndRender();
+    renderTree();
+    showNotice({ level: "info", message: value === "private" ? `“${title}” is private again`
+      : value === "ro" ? `Everyone can view “${title}”` : `Everyone can edit “${title}”` });
+  };
+  if (value === "private") {
+    ConfirmDialog.open({ message: `Stop sharing “${title}”? It disappears for everyone else.`,
+      confirmLabel: "Stop sharing", cancelLabel: "Keep sharing", onConfirm: () => reportedFailure(run()) });
+    return;
+  }
+  await run();
+}
+
+// Shares that just appeared in this list (the server made their places): say so once.
+function announceNewShares(newShares) {
+  if (!newShares || !newShares.length || !window.Mascot) return;
+  const s = newShares[0];
+  const line = newShares.length === 1
+    ? `${ShareUI.localPart(s.owner)} shared “${s.title}” with everyone`
+    : `${newShares.length} lists were shared with you`;
+  window.Mascot.react(line, { key: "share", force: true, delay: 600 });
+}
+
 async function moveTodo(todoId, direction) {
   engine.enqueue({ kind: "move", target_id: todoId, payload: { direction } });
 }
@@ -415,7 +480,8 @@ async function fetchTree() {
     todosById.set(id, todo);
   }
 
-  return { roots: response.roots, todosById, rev: response.rev };
+  return { roots: response.roots, todosById, rev: response.rev, revs: response.revs,
+    newShares: response.new_shares || [] };
 }
 
 // One-shot visual states keyed by todo id. Every edit re-renders the whole

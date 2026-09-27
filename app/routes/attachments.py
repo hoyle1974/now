@@ -6,10 +6,23 @@ import uuid
 from fastapi import APIRouter, File, Header, HTTPException, Response, UploadFile
 from fastapi.encoders import jsonable_encoder
 
-from app import attachments, blobstore, db, models
-from app.routes.common import apply, reply
+from app import attachments, auth, blobstore, db, models, shares
+from app.routes.common import apply, atomic, reply
 
 router = APIRouter()
+
+
+def _follow(todo_id: uuid.UUID, write: bool = True) -> bool:
+    """The todo isn't in the partition addressed: rebind to where the caller can reach it
+    now (a share / unshare / move since the client learned where it was). True if found."""
+    if not auth.sharing_enabled():
+        return False
+    where = shares.locate(str(todo_id))
+    if where is None:
+        return False
+    check = shares.check_partition_write if write else shares.check_partition_read
+    shares.bind_partition(where, check(where))
+    return True
 
 @router.post("/todos/{todo_id}/attachments", response_model=None)
 def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
@@ -21,7 +34,7 @@ def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
     content_type = attachments.sniff_image_type(data)
     if content_type is None:
         raise HTTPException(400, "only JPEG, PNG, GIF and WebP images are allowed")
-    if db.get_todo(models.TodoId(todo_id)) is None:
+    if db.get_todo(models.TodoId(todo_id)) is None and not _follow(todo_id):
         raise HTTPException(404, "todo not found")
 
     meta = models.Attachment(id=uuid.uuid4().hex, name=attachments.clean_name(file.filename),
@@ -40,7 +53,7 @@ def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
         return body is not None and any(a["id"] == meta.id for a in body.get("attachments", []))
 
     try:
-        result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+        result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     except BaseException:
         # A failed attempt may have set the todo up in a transaction that never
         # committed: keep the blob only if the stored todo really lists it.
@@ -51,11 +64,18 @@ def add_attachment(todo_id: uuid.UUID, file: UploadFile = File(...),
     if not (result[0] == 200 and referenced(result[1])):
         # A 409, or an idempotent replay of another response, leaves the blob unreferenced.
         blobstore.get_store().delete(key)
+    elif blobstore.key_for(str(todo_id), meta.id) != key:
+        # The write followed the todo to another partition (atomic): its image goes there too.
+        store = blobstore.get_store()
+        store.copy(key, blobstore.key_for(str(todo_id), meta.id))
+        store.delete(key)
     return reply(*result)
 
 @router.get("/todos/{todo_id}/attachments/{attachment_id}", response_model=None)
 def get_attachment(todo_id: uuid.UUID, attachment_id: str) -> Response:
     todo = db.get_deleted_todo(models.TodoId(todo_id))  # trashed todos keep their images
+    if todo is None and _follow(todo_id, write=False):
+        todo = db.get_deleted_todo(models.TodoId(todo_id))
     if todo is None:
         raise HTTPException(404, "todo not found")
     if not any(a.id == attachment_id for a in todo.attachments):
@@ -81,7 +101,7 @@ def delete_attachment(todo_id: uuid.UUID, attachment_id: str,
         db.update_todo(todo)
         return jsonable_encoder(todo)
 
-    result = db.run_atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
+    result = atomic(x_txn_id, lambda: apply(todo_id, if_match, action))
     if result[0] == 200:
         blobstore.get_store().delete(blobstore.key_for(str(todo_id), attachment_id))
     return reply(*result)

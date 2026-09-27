@@ -21,7 +21,10 @@ def _fake_require_user(request: Request) -> None:
     # Sets request.state.user directly, exactly as the real require_user does,
     # so bind_user still binds a tenant (app/tenant.py) for data access.
     # Normalized the same way (.strip().lower()) so this harness matches production.
-    request.state.user = os.environ["ALLOWED_EMAILS"].split(";")[0].strip().lower()
+    # X-Test-User picks another allowed email (the two-user sharing scenario).
+    allowed = [e.strip().lower() for e in os.environ["ALLOWED_EMAILS"].split(";") if e.strip()]
+    wanted = (request.headers.get("x-test-user") or "").strip().lower()
+    request.state.user = wanted if wanted in allowed else allowed[0]
 
 
 app.dependency_overrides[require_user] = _fake_require_user

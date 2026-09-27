@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app import blobstore, db, tenant
+from app import blobstore, db, models, tenant
 from app.main import app
 from tests.helpers import OTHER_USER, TEST_USER, act_as, wipe_users
 
@@ -152,3 +152,37 @@ def test_another_users_tree_next_and_trash_are_empty_while_yours_has_data():
     assert client.get("/todos/next").json()["items"]
     assert client.get("/todos/trash").json()["items"]
     assert due_soon["todo_id"]  # sanity: fixture actually created both todos
+
+
+def test_share_partition_paths_and_blob_keys():
+    with tenant.as_user(TEST_USER), tenant.as_partition("shares/s1"):
+        assert blobstore.key_for("t1", "a1") == "shares/s1/todos/t1/a1"
+        assert db.partition_ref().path == "shares/s1"
+        assert db.user_ref().path == f"users/{TEST_USER}"
+
+
+def test_share_partition_has_its_own_todos_and_rev():
+    with tenant.as_user(TEST_USER), tenant.as_partition("shares/s1"):
+        todo = models.Todo(title="shared")
+        db.run_atomic(None, lambda: (db.create_todo(todo), (200, None))[1])
+        assert db.get_rev() == 1
+        roots, _ = db.get_tree()
+        assert [t.title for t in roots] == ["shared"]
+    with tenant.as_user(TEST_USER):
+        assert db.get_rev() == 0
+        assert db.get_tree()[0] == []
+
+
+def test_rev_returns_revs_map_with_own_partition():
+    act_as(app, TEST_USER)
+    client.post("/todos", json={"title": "a"})
+    body = client.get("/todos/rev").json()
+    assert body["revs"] == {f"users/{TEST_USER}": body["rev"]}
+    tree = client.get("/todos/tree").json()
+    assert tree["revs"] == {f"users/{TEST_USER}": tree["rev"]}
+
+
+def test_write_reply_carries_x_partition():
+    act_as(app, TEST_USER)
+    r = client.post("/todos", json={"title": "a"})
+    assert r.headers["X-Partition"] == f"users/{TEST_USER}"

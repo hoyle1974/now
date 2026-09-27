@@ -10,8 +10,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app import auth, db, models
-from app.auth import bind_user, require_user
-from app.routes import attachments, calendar, notifications, system, todos
+from app.auth import bind_partition, bind_user, require_user
+from app.routes import attachments, calendar, notifications, shares, system, todos
 from app.routes.common import check_txn_id
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
@@ -32,7 +32,21 @@ async def lifespan(_app: FastAPI):
     yield
     db.teardown()
 
-app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(bind_user), Depends(check_txn_id)])
+app = FastAPI(lifespan=lifespan, dependencies=[Depends(require_user), Depends(bind_user), Depends(bind_partition), Depends(check_txn_id)])
+
+@app.exception_handler(db.Frozen)
+async def _frozen(request, exc):
+    """A write hit a partition whose data is being moved (app/migrate.py). If that move's
+    run died, finish it now; either way the client retries (a 5xx)."""
+    from starlette.concurrency import run_in_threadpool
+
+    from app import migrate, tenant
+    try:
+        await run_in_threadpool(migrate.resume_if_stale, tenant.partition())
+    except Exception:
+        log.exception("resuming a stale migration failed")
+    return JSONResponse({"detail": "migrating"}, status_code=503)
+
 
 _UPLOAD_PATH_RE = re.compile(r"^/todos/[^/]+/attachments$")
 
@@ -54,10 +68,11 @@ async def _limit_upload_size(request, call_next):
     return await call_next(request)
 
 # Order matters: system's /todos/rev must be matched before todos' /todos/{todo_id}.
-for _router in (system.router, notifications.router, calendar.router, todos.router, attachments.router):
+for _router in (system.router, notifications.router, calendar.router, shares.router, todos.router,
+                attachments.router):
     app.include_router(_router)
 
-_API_PREFIXES = ("/todos", "/push", "/calendar")
+_API_PREFIXES = ("/todos", "/push", "/calendar", "/shares")
 
 
 @app.middleware("http")

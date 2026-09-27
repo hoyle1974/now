@@ -1,0 +1,44 @@
+---
+type: Feature
+title: Sharing between users
+description: How an item and its subtree are shared read-only or read/write with every user of the deployment — share partitions, mounts, migration, routing, and what each role may do.
+resource: app/shares.py
+tags: [sharing, multi-user, data, sync]
+timestamp: 2026-09-27T14:00:00Z
+---
+Design spec: `docs/superpowers/specs/2026-09-26-sharing-design.md`; plan: `docs/superpowers/plans/2026-09-26-sharing.md`. Everything is behind `SHARING_ENABLED` (off by default, `auth.sharing_enabled()`; `SHARING_ENABLED=1 ./deploy.sh`, [deploy](../ops/deploy.md)). Client side: `web/share-ui.js` (permissions mirror, badges, edge crossing, the viewer's Sharing control), routing in `web/sync.js` ([sync](sync-model.md)), controls listed in the [UI inventory](ui-inventory.md).
+
+**Model.** Sharing an item moves it and its whole subtree out of the owner's partition into its own partition `shares/{id}` ([Firestore](../data/firestore.md)), where `id` is the root's todo id. No request ever reads another user's partition. Every member (the owner too) has a `mount` todo with the same id in their own partition ([item types](item-types.md)): it holds only where that person placed it. Audience is everyone on the deployment (`members: "all"`; a list of emails later). Mode is `ro` (strictly view-only) or `rw`. Only `shareable` types (`todo`, `list`, `project`, `note`) may be in a share: never a calendar, an event or a mount.
+
+**Who may do what** is the fixture `tests/fixtures/share_rules.json` (owner / rw / ro / stranger / revoked × read, collapse, edit, check, add, delete, root delete, mode, unshare, move mount, drag across), checked against the routes by `tests/test_share_rules.py`.
+
+**Migration** (`app/migrate.py`, `migrate_subtree(src, root_id, dst, kind=share|unshare|move)`). One routine moves a subtree between partitions for share, unshare and dragging an item into or out of a share. Ids, versions and every field are kept. Steps, recorded in the source's `meta/rev` under `migrating` with a 2-minute lease:
+1. **frozen** — the subtree is read again after the lock is taken (so an item or image added just before it moves too), then every other write to the source partition gets `db.Frozen` → 503 `migrating` (clients retry); the archive sweep skips it too.
+2. **blobs** — attachment bytes copied to `{dst}/todos/...`.
+3. **copied** — documents copied in batches of 200; the root is placed at its destination (share: top of the share; unshare: where the owner's mount was; move: `dst_parent`/`index`).
+4. **switched** — source documents deleted (share: the root's own doc becomes the owner's mount, same place); destination siblings renumbered for a move; both revisions bumped; share state set (`active`, or `unshared` with `returned_to`); `shares_meta/rev` bumped for share/unshare.
+5. **done** — source blobs deleted, freeze cleared.
+
+Each step is safe to repeat. A run that dies leaves the freeze; when its lease has expired, `migrate.resume_if_stale(partition)` finishes it (called when a write hits the freeze, and on tree loads). Refusals (`MigrationError.detail`): `crosses share boundary` (a calendar item or mount would enter a share), `not eligible` (already shared, a mount, or not in a user's partition), `too large` (over 2,000 nodes), `parent not found`.
+
+**Requests** on shared items carry `X-Share: <id>` ([routes](../api/routes.md)); `auth.bind_partition` checks membership and mode, then binds `shares/{id}`. A read-only member's `collapsed` patch goes to their own view state (`users/{email}/view_state/{id}`, 90-day TTL). Only the owner deletes or restores the root, and the root never moves inside the share (its place is each member's mount). Writes in a share stamp `last_edited_by`.
+
+**Share, unshare, mode** (`app/routes/shares.py`): `PUT /todos/{id}/share {mode}` shares an item from your own list (or changes the mode of a share you own, via its mount); `DELETE /todos/{id}/share` unshares; `GET /shares` lists what you can see. Mounts are ordinary todos in your partition for move / remove / restore (last write wins, no `If-Match`), refused with 403 `share revoked` once the share is gone for you.
+
+**Edits sent to an item's old home.** Share, unshare and cross-edge moves keep ids and versions, so an edit a device queued earlier still applies: `common.apply` raises `Moved` when the todo isn't where the request addressed it but `shares.locate` finds it (own list, then mounted shares) or when a content edit hits a mount (its content is the share root), and `common.atomic` checks the caller may write there, rebinds and runs the write once more. The addressed partition's `txn_log` is read first, so a write committed before the move replays its stored answer. An owner's `X-Share` request to an unshared share runs in their own partition, where the items went back. A member whose access ended gets 403 `share revoked`; an item dragged out of the share by someone else is 404 `todo not found` for the rest.
+
+**Moving across the edge.** `PATCH /todos/{id}/reparent` with `parent_share` different from the item's partition runs `migrate_subtree(kind="move")` after checking edit rights on both sides; mounts and a share's root never cross (409 `crosses share boundary`).
+
+**What a member sees** (`GET /todos/tree`, `shares.splice_tree`). The server first gives the caller a mount at the end of their top level for every live share they can see and have none for (`shares.ensure_mounts`; a removed mount counts as having one, so removing sticks), and returns the new ones that aren't theirs as `new_shares: [{id, title, owner}]` for the client to announce. Then each live mount is replaced in place by the share's tree (read at the share's rev, cached per partition): the root takes the mount's `parent_id`/`order_idx`, every node carries `share: {id, mode, owner}`, the root `share_root: true`, and `collapsed` comes from the caller's view state. A mount is left out when sharing is off, the share is unshared, the caller isn't a member or the root is in the trash (restoring it brings the mounts back); a mount whose share no longer exists is deleted. `revs` gains `shares` (`shares_meta/rev`) and `shares/<id>` for each visible mounted share; `/todos/rev` returns the same map (the mount list is cached per own rev).
+
+**Next up** ranks the spliced tree, so a shared item due today shows for every member who has it in their list. **Trash** lists the caller's own trash plus the trash of each mounted share they may edit, entries tagged `share`; a removed mount is not trash.
+
+**Cleanup** (on tree loads, after the response): each visible mounted share gets the daily archive sweep (claimed per partition) and a stale migration is finished; once a day per process `shares.sweep` deletes unshared tombstones older than 30 days (with their `txn_log`) and ends a share whose root is gone (archived). `prune_txn_log` covers share partitions too.
+
+**Cost.** Per member, `/todos/rev` reads 2 docs plus 2 per mounted share (share record + its rev) instead of 1; a tree load adds one query over the share records and, when a share changed, one read of that share's (small) tree. At family scale this stays far inside the free tier, but it multiplies with the number of shares.
+
+`POST /todos` with `X-Share`, and a cross-edge move to a share's top level, are refused: a share has exactly one top-level item. An image uploaded or read by a device that addressed the item's old home follows it to its new partition (`routes/attachments._follow`). `GET /shares` first gives the caller a place for every share, like a tree load, so Add to my list always works. `ensure_mounts` only scans share records when `shares_meta/rev` moved since that person was last checked. Housekeeping runs each share's steps on its own, so one stuck share can't block the others. `POST /todos` with `X-Share` is refused (400): a share has exactly one top-level item. A retried cross-edge move whose first answer was lost returns the item where it now is. A write that followed its item to a new partition schedules its heads-up there.
+
+**Clear completed** works on your own list only: shared items are never cleared by it (the server's plan sees only your partition, and the client's `clearableIds` skips shared nodes to match).
+
+**Deviations from the design spec** (decided while building): the migration freeze covers the whole source partition for its few seconds, not only the moving ids; heads-up tasks stay one per todo and fan out to members in the handler; the Sharing control lives in the item's viewer (it applies at once, online only) rather than the Edit sheet.

@@ -76,6 +76,14 @@
   let request = 0;
   let viewer = null;
 
+  // "Todo · in Groceries", and for an item from a share, which share it came from.
+  function trashNote(item, kind) {
+    const note = item.deleted_with ? `${kind} \u00b7 in ${item.deleted_with}` : kind;
+    if (!item.share) return note;
+    const root = model.todosById.get(item.share.id);
+    return `${note} \u00b7 from ${root && root.todo_id !== item.todo_id ? `“${root.title}” ` : ""}(shared)`;
+  }
+
   function renderTrash() {
     list.innerHTML = "";
     if (items === null) {
@@ -97,7 +105,7 @@
       open.firstChild.appendChild(icon(Types.get(item).icon));
       open.lastChild.append(
         DOM.el("span", "trash-title" + (done ? " is-done" : ""), item.title),
-        DOM.el("span", "trash-note", item.deleted_with ? `${kind} \u00b7 in ${item.deleted_with}` : kind)
+        DOM.el("span", "trash-note", trashNote(item, kind))
       );
       const li = DOM.el("li", "trash-row");
       li.append(open, DOM.button("Undelete", "trash-restore", () => undelete(item)));
@@ -171,7 +179,7 @@
   }
 
   function undelete(item) {
-    if (!engine.enqueue({ kind: "undelete", target_id: item.todo_id })) return;
+    if (!engine.enqueue({ kind: "undelete", target_id: item.todo_id, share: item.share ? item.share.id : undefined })) return;
     if (items) items = items.filter((i) => i.todo_id !== item.todo_id);
     renderTrash();
     showNotice({ level: "info", message: "Restored" });
